@@ -1,0 +1,259 @@
+{# Widget de seleção de destino para o bloco "Redirecionar" (seção 10.2 do
+   BLUEPRINT) - dois modos de seleção com estado compartilhado. Incluído por
+   painel_fila.html e painel_local.html - único lugar onde esse HTML/CSS/JS
+   existe, para não duplicar um componente interativo inteiro em duas telas.
+
+   `filas_destino` (lista de Fila, já filtrada por empresa/unidade/local pelo
+   helper atendimento/helpers.py::filas_destino - isolamento multi-tenant
+   inalterado) é o universo completo de destinos válidos, usado pela busca livre.
+
+   `filas_rapidas` (subconjunto de `filas_destino` - helper
+   atendimento/helpers.py::filas_rapidas_redirecionar) são as filas do turno
+   ativo do operador (seção 10.19) para este Local, na ordem em que ele mesmo as
+   organizou - vazia sem turno ativo, degradando pra só a busca livre.
+
+   `Fila.aberta_em()` (seção 10.1/10.5) já existe no model e é chamado aqui só
+   para render (server-side, fuso da clínica) - nenhuma lógica de horário nova. #}
+<div class="bloco-selecao-redirecionar">
+  {% if filas_rapidas %}
+    <div class="secao-filas-rapidas">
+      <span class="rotulo-secao-redirecionar">Minhas filas</span>
+      <div class="grade-filas-rapidas" id="grade-filas-rapidas">
+        {% for f in filas_rapidas %}
+          <button
+            type="button"
+            class="botao-fila-rapida"
+            data-fila-id="{{ f.id }}"
+            data-fila-nome-exibicao="[{{ f.unidade.sigla_exibicao }}] {{ f.nome }}"
+          >
+            <span class="ponto-fila-rapida {{ 'ativa' if f.aberta_em() else 'inativa' }}" title="{{ 'Atendendo agora' if f.aberta_em() else 'Fora do horário' }}">●</span>
+            [{{ f.unidade.sigla_exibicao }}] {{ f.nome }}
+          </button>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="divisor-secoes-redirecionar"><span>Buscar outra fila</span></div>
+  {% endif %}
+
+  <div class="campo-busca-redirecionar">
+    <input
+      type="text"
+      id="busca-redirecionar"
+      class="busca-redirecionar"
+      placeholder="Buscar fila de destino por nome..."
+      autocomplete="off"
+      role="combobox"
+      aria-expanded="false"
+      aria-autocomplete="list"
+      aria-controls="dropdown-redirecionar"
+      onkeydown="if (event.key === 'Enter') event.preventDefault();"
+    >
+    <input type="hidden" name="fila_destino_id" id="fila-destino-id" value="">
+    <div class="selecionado-redirecionar" id="selecionado-redirecionar" hidden>
+      → Redirecionando para: <strong id="selecionado-redirecionar-nome"></strong>
+      <button type="button" class="link" id="limpar-redirecionar">Trocar</button>
+    </div>
+    <ul class="dropdown-redirecionar" id="dropdown-redirecionar" role="listbox" hidden></ul>
+  </div>
+</div>
+<script type="application/json" id="dados-filas-destino">
+  [{% for destino in filas_destino %}{"id": {{ destino.id }}, "nome": {{ destino.nome | tojson }}, "nome_exibicao": {{ ("[" + destino.unidade.sigla_exibicao + "] " + destino.nome) | tojson }}, "aberta": {{ destino.aberta_em() | tojson }}}{% if not loop.last %},{% endif %}{% endfor %}]
+</script>
+
+<style>
+  .bloco-selecao-redirecionar { margin-top: .5rem; }
+  .rotulo-secao-redirecionar { display: block; font-size: .8rem; color: #666; margin-bottom: .45rem; }
+
+  .grade-filas-rapidas { display: flex; flex-wrap: wrap; gap: .5rem; }
+  .botao-fila-rapida {
+    display: inline-flex; align-items: center; gap: .4rem;
+    min-height: 44px; padding: .5rem .9rem; font-size: .95rem;
+    border: 1px solid #d0d4dc; border-radius: 999px; background: #fff;
+    color: var(--gf-cinza-escuro); cursor: pointer; white-space: nowrap; flex: 0 0 auto;
+  }
+  .botao-fila-rapida:focus-visible { outline: 2px solid var(--gf-primaria); outline-offset: 1px; }
+  .botao-fila-rapida.selecionado { border-color: var(--gf-primaria); background: var(--gf-primaria-clara); font-weight: 600; }
+  .ponto-fila-rapida { font-size: .7rem; line-height: 1; }
+  .ponto-fila-rapida.ativa { color: #1d7a3a; }
+  .ponto-fila-rapida.inativa { color: #bbb; }
+
+  .divisor-secoes-redirecionar {
+    display: flex; align-items: center; gap: .6rem; margin: 1rem 0 .6rem;
+    color: #999; font-size: .78rem; text-transform: uppercase; letter-spacing: .03em;
+  }
+  .divisor-secoes-redirecionar::before, .divisor-secoes-redirecionar::after {
+    content: ""; flex: 1; border-top: 1px solid #eceef2;
+  }
+
+  .campo-busca-redirecionar { position: relative; max-width: 420px; }
+  .busca-redirecionar {
+    width: 100%; padding: .8rem .9rem; font-size: 1.05rem; min-height: 44px;
+    border: 1px solid #d0d4dc; border-radius: 8px; box-sizing: border-box;
+  }
+  .busca-redirecionar:focus { outline: 2px solid var(--gf-primaria); outline-offset: 1px; }
+  .selecionado-redirecionar {
+    display: flex; align-items: center; gap: .6rem; margin-top: .5rem;
+    padding: .7rem .9rem; min-height: 44px; box-sizing: border-box;
+    background: var(--gf-primaria-clara); border-radius: 8px; font-size: .95rem;
+  }
+  .dropdown-redirecionar {
+    list-style: none; margin: .3rem 0 0; padding: .3rem 0; position: absolute; z-index: 20;
+    left: 0; right: 0; max-height: 320px; overflow-y: auto;
+    background: #fff; border: 1px solid #d0d4dc; border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(0,0,0,.12);
+  }
+  .item-dropdown-redirecionar {
+    display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+    min-height: 44px; padding: .55rem 1rem; font-size: 1rem; cursor: pointer;
+  }
+  .item-dropdown-redirecionar:hover, .item-dropdown-redirecionar.destacado { background: #f1f3f6; }
+  .item-dropdown-redirecionar .marcador-aberta { color: #1d7a3a; font-size: .8rem; white-space: nowrap; }
+  .item-dropdown-redirecionar .marcador-fechada { color: #999; font-size: .8rem; white-space: nowrap; }
+  .divisor-dropdown-redirecionar { border-top: 1px solid #eceef2; margin: .3rem 0; list-style: none; }
+  .dropdown-vazio { padding: .7rem 1rem; color: #999; font-size: .9rem; min-height: 44px; box-sizing: border-box; display: flex; align-items: center; }
+</style>
+
+<script>
+  (function () {
+    const elBusca = document.getElementById("busca-redirecionar");
+    if (!elBusca || elBusca.dataset.inicializado) return;
+    elBusca.dataset.inicializado = "1";
+
+    const FILAS_DESTINO = JSON.parse(document.getElementById("dados-filas-destino").textContent);
+    const elCampo = elBusca.closest(".campo-busca-redirecionar");
+    const elHiddenId = document.getElementById("fila-destino-id");
+    const elDropdown = document.getElementById("dropdown-redirecionar");
+    const elSelecionado = document.getElementById("selecionado-redirecionar");
+    const elSelecionadoNome = document.getElementById("selecionado-redirecionar-nome");
+    const elLimpar = document.getElementById("limpar-redirecionar");
+    const elGradeRapidas = document.getElementById("grade-filas-rapidas");
+
+    function escapeHtml(texto) {
+      return (texto || "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
+    }
+
+    function fecharDropdown() {
+      elDropdown.hidden = true;
+      elDropdown.innerHTML = "";
+      elBusca.setAttribute("aria-expanded", "false");
+    }
+
+    // Reflete no grid de acesso rápido qual fila (se alguma) está selecionada
+    // agora - a mesma seleção pode ter vindo de lá (clique direto) ou da busca
+    // livre, então este é o único ponto que decide o destaque visual.
+    function sincronizarBotoesRapidos(filaIdSelecionado) {
+      if (!elGradeRapidas) return;
+      elGradeRapidas.querySelectorAll(".botao-fila-rapida").forEach((botao) => {
+        botao.classList.toggle("selecionado", botao.dataset.filaId === String(filaIdSelecionado || ""));
+      });
+    }
+
+    function limparSelecao() {
+      elHiddenId.value = "";
+      elSelecionado.hidden = true;
+      elBusca.value = "";
+      elBusca.hidden = false;
+      sincronizarBotoesRapidos(null);
+      elBusca.focus();
+    }
+
+    function selecionar(fila) {
+      elHiddenId.value = fila.id;
+      elSelecionadoNome.textContent = fila.nome_exibicao || fila.nome;
+      elSelecionado.hidden = false;
+      elBusca.value = "";
+      elBusca.hidden = true;
+      fecharDropdown();
+      sincronizarBotoesRapidos(fila.id);
+    }
+
+    function itemHtml(fila) {
+      const marcador = fila.aberta
+        ? '<span class="marcador-aberta">● Atendendo agora</span>'
+        : '<span class="marcador-fechada">· Fora do horário</span>';
+      return `<li class="item-dropdown-redirecionar" role="option" data-fila-id="${fila.id}">
+        <span class="item-dropdown-redirecionar-nome">${escapeHtml(fila.nome_exibicao || fila.nome)}</span>${marcador}
+      </li>`;
+    }
+
+    // Filtro 100% local (JS puro, sem requisição ao servidor): a lista completa já
+    // veio embutida no HTML em #dados-filas-destino - só grep no array em memória.
+    // Termo vazio (clique/foco no campo, antes de digitar qualquer coisa) lista
+    // TODAS as filas - o campo funciona como uma caixa de seleção normal, que só
+    // vai se estreitando conforme o operador digita.
+    function renderizarDropdown(termo) {
+      const termoNormalizado = termo.trim().toLocaleLowerCase("pt-BR");
+      const encontrados = FILAS_DESTINO.filter((f) => f.nome.toLocaleLowerCase("pt-BR").includes(termoNormalizado));
+      if (!encontrados.length) {
+        elDropdown.innerHTML = '<li class="dropdown-vazio">Nenhuma fila encontrada.</li>';
+        elDropdown.hidden = false;
+        elBusca.setAttribute("aria-expanded", "true");
+        return;
+      }
+
+      // Agrupamento (item 3): filas atendendo agora primeiro, depois as demais,
+      // com um divisor visual sutil só quando os dois grupos coexistem.
+      const ativas = encontrados.filter((f) => f.aberta);
+      const inativas = encontrados.filter((f) => !f.aberta);
+
+      let html = ativas.map(itemHtml).join("");
+      if (ativas.length && inativas.length) {
+        html += '<li class="divisor-dropdown-redirecionar" role="separator"></li>';
+      }
+      html += inativas.map(itemHtml).join("");
+
+      elDropdown.innerHTML = html;
+      elDropdown.hidden = false;
+      elBusca.setAttribute("aria-expanded", "true");
+    }
+
+    elBusca.addEventListener("input", () => renderizarDropdown(elBusca.value));
+    // Clicar/focar no campo já abre a caixa de seleção com todas as opções -
+    // "click" cobre o caso do campo já estar focado (segundo clique não geraria
+    // um novo evento "focus"), e ambos convergem pra mesma renderização.
+    elBusca.addEventListener("focus", () => renderizarDropdown(elBusca.value));
+    elBusca.addEventListener("click", () => renderizarDropdown(elBusca.value));
+
+    elDropdown.addEventListener("click", (ev) => {
+      const item = ev.target.closest(".item-dropdown-redirecionar");
+      if (!item) return;
+      const fila = FILAS_DESTINO.find((f) => String(f.id) === item.dataset.filaId);
+      if (fila) selecionar(fila);
+    });
+
+    elLimpar.addEventListener("click", limparSelecao);
+
+    document.addEventListener("click", (ev) => {
+      if (!ev.target.closest(".campo-busca-redirecionar")) fecharDropdown();
+    });
+
+    elBusca.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") {
+        fecharDropdown();
+        return;
+      }
+      if (ev.key !== "Enter") return;
+      // Enter nunca deve submeter o form (mesmo padrão dos campos #codigo/#nome -
+      // ver tests/test_regressao_enter_submissao_implicita.py); com exatamente 1
+      // resultado visível, Enter seleciona esse resultado como atalho.
+      const itens = elDropdown.querySelectorAll(".item-dropdown-redirecionar");
+      if (itens.length === 1) {
+        const fila = FILAS_DESTINO.find((f) => String(f.id) === itens[0].dataset.filaId);
+        if (fila) selecionar(fila);
+      }
+    });
+
+    // Acesso rápido às filas do turno (seção 10.19): clique já seleciona - mesmo
+    // estado compartilhado da busca livre (mesmo #fila-destino-id, mesmo
+    // indicador "→ Redirecionando para"), substitui a seleção atual se houver.
+    if (elGradeRapidas) {
+      elGradeRapidas.addEventListener("click", (ev) => {
+        const botao = ev.target.closest(".botao-fila-rapida");
+        if (!botao) return;
+        selecionar({ id: Number(botao.dataset.filaId), nome_exibicao: botao.dataset.filaNomeExibicao });
+      });
+    }
+  })();
+</script>

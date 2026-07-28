@@ -1,0 +1,32 @@
+{% extends "relatorios/_layout.html" %}
+{% from "relatorios/_macros.html" import form_filtros with context %}
+
+{% block titulo %}Tempo de atendimento{% endblock %}
+
+{% block conteudo %}
+  <h1>Tempo de atendimento</h1>
+  <p class="subtitulo">Tempo entre a chamada (senha/nome) e o fim do atendimento, por operador/setor/fila.</p>
+  <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
+
+  {{ form_filtros(filtros, opcoes, 'relatorios.tempo_atendimento_view', querystring, mostrar_operador=True) }}
+
+  {% if not linhas %}
+    <p>Nenhum dado para os filtros selecionados.</p>
+  {% else %}
+    <table>
+      <thead><tr><th>Operador</th><th>Setor</th><th>Fila</th><th>Local</th><th>Quantidade</th><th>Tempo médio</th></tr></thead>
+      <tbody>
+        {% for linha in linhas %}
+          <tr>
+            <td>{{ linha.operador }}</td>
+            <td>{{ linha.setor or '—' }}</td>
+            <td>{{ linha.fila }}</td>
+            <td>{{ linha.local }}</td>
+            <td>{{ linha.quantidade }}</td>
+            <td>{{ (linha.tempo_medio_segundos / 60) | round(1) }} min</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}

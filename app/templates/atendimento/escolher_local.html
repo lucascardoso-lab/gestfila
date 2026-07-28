@@ -1,0 +1,34 @@
+{% extends "atendimento/_layout.html" %}
+
+{% block titulo %}Escolher local{% endblock %}
+
+{% block conteudo %}
+  <h1>Escolha o seu local de atendimento</h1>
+  <p class="subtitulo">Essa escolha vale para todo o seu turno - você pode trocar a qualquer momento, sem precisar deslogar.</p>
+
+  <div class="card">
+    {% if not locais %}
+      <p class="vazio">Nenhum local cadastrado para as unidades que você tem acesso. Peça ao administrador para cadastrar um em Admin &gt; Locais.</p>
+    {% else %}
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ next }}">
+
+        {% for local in locais %}
+          <label class="opcao-radio">
+            <input type="radio" name="local_id" value="{{ local.id }}" required>
+            {{ local.nome }}
+            <span class="subtitulo" style="margin:0;">({{ local.unidade.nome }})</span>
+          </label>
+        {% endfor %}
+
+        <p><button class="botao" type="submit" style="margin-top:1.5rem;">Confirmar local</button></p>
+      </form>
+    {% endif %}
+  </div>
+
+  <style>
+    .opcao-radio { display: flex; align-items: center; gap: .5rem; font-size: .95rem; margin-top: .75rem; color: var(--gf-cinza-escuro); font-weight: normal; }
+    .vazio { color: #999; }
+  </style>
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends "painel/_layout.html" %}
+
+{% block titulo %}{{ tv.nome }} - Painel indisponível{% endblock %}
+
+{% block conteudo %}
+  <div class="painel">
+    <header><h1>{{ tv.nome }}</h1></header>
+    <div class="centro">
+      <p>Esta TV está desativada. Contate o administrador da empresa.</p>
+    </div>
+  </div>
+{% endblock %}

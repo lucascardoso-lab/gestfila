@@ -1,0 +1,36 @@
+{% extends "relatorios/_layout.html" %}
+{% from "relatorios/_macros.html" import form_filtros with context %}
+
+{% block titulo %}Ranking de operadores{% endblock %}
+
+{% block conteudo %}
+  <h1>Ranking de operadores</h1>
+  <p class="subtitulo">Volume de chamadas (senha + nome) e tempo médio de atendimento.</p>
+  <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
+
+  <p class="aviso">
+    O tempo médio é calculado a partir do botão "Finalizar" da tela de Atendimento -
+    aparecerá como "—" apenas para operadores sem nenhum atendimento finalizado no
+    período filtrado. O volume (quantidade de chamadas) já é real.
+  </p>
+
+  {{ form_filtros(filtros, opcoes, 'relatorios.ranking', querystring) }}
+
+  {% if not linhas %}
+    <p>Nenhum dado para os filtros selecionados.</p>
+  {% else %}
+    <table>
+      <thead><tr><th>#</th><th>Operador</th><th>Volume</th><th>Tempo médio</th></tr></thead>
+      <tbody>
+        {% for linha in linhas %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td>{{ linha.operador }}</td>
+            <td>{{ linha.volume }}</td>
+            <td>{{ (linha.tempo_medio_segundos / 60) | round(1) ~ ' min' if linha.tempo_medio_segundos is not none else '—' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}

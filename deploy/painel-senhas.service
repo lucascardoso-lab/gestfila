@@ -1,0 +1,38 @@
+# Unit systemd para o Gunicorn do Painel de Senhas (seção 10 do BLUEPRINT:
+# "Deploy alvo: Linux (Ubuntu/Debian), systemd service para o Gunicorn").
+#
+# Instalação:
+#   1. Ajuste os caminhos/usuário abaixo para o ambiente real do servidor.
+#   2. sudo cp deploy/painel-senhas.service /etc/systemd/system/
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable --now painel-senhas
+#   5. sudo systemctl status painel-senhas / journalctl -u painel-senhas -f
+#
+# Pressupõe um virtualenv já criado em /opt/painel-senhas/.venv e o código-fonte
+# (com .env preenchido, NUNCA o .env.example) em /opt/painel-senhas/app-fonte -
+# ajuste os caminhos conforme a convenção real de deploy da clínica.
+
+[Unit]
+Description=Painel de Senhas - Gunicorn (eventlet)
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=painelsenhas
+Group=painelsenhas
+WorkingDirectory=/opt/painel-senhas/app-fonte
+EnvironmentFile=/opt/painel-senhas/app-fonte/.env
+ExecStart=/opt/painel-senhas/.venv/bin/gunicorn -c deploy/gunicorn.conf.py wsgi:app
+
+Restart=on-failure
+RestartSec=5
+
+# Hardening básico - remova/ajuste se a aplicação precisar gravar fora do projeto
+# (ex.: diretório de exportação de relatórios, se algum dia passar a salvar em disco)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

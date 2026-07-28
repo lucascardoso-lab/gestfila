@@ -1,0 +1,45 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}Configurar rodízio — {{ local.nome }}{% endblock %}
+
+{% block conteudo %}
+  <h1>Configurar rodízio — {{ local.nome }}</h1>
+  {% set nome_tela = self.titulo() %}
+  {% include "admin/_breadcrumb.html" %}
+
+  <p class="aviso">
+    Marcar 1 ou mais filas abaixo faz este Local passar a usar a tela unificada de
+    Atendimento por Local (rotação automática entre as filas marcadas, respeitando
+    "Ordem" e "Chamadas seguidas" de cada uma), em vez da escolha manual de fila usada
+    hoje. Desmarcar todas as filas volta o Local ao fluxo atual, sem nenhuma mudança.
+  </p>
+
+  <div class="card" style="max-width:none;">
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      {% if not filas %}
+        <p class="subtitulo">Nenhuma fila ativa cadastrada nesta unidade ainda.</p>
+      {% else %}
+        <table>
+          <thead>
+            <tr><th>Participa</th><th>Fila</th><th>Ordem</th><th>Chamadas seguidas</th></tr>
+          </thead>
+          <tbody>
+            {% for fila in filas %}
+              {% set cfg = valores_por_fila.get(fila.id, {}) %}
+              <tr>
+                <td><input type="checkbox" name="rodizio_filas" value="{{ fila.id }}" {{ 'checked' if fila.id in fila_ids_selecionadas else '' }}></td>
+                <td>{{ fila.nome }}</td>
+                <td><input type="number" name="ordem_{{ fila.id }}" min="0" style="width:5rem;" value="{{ cfg.get('ordem', 0) }}"></td>
+                <td><input type="number" name="chamadas_seguidas_{{ fila.id }}" min="1" style="width:5rem;" value="{{ cfg.get('chamadas_seguidas', 1) }}"></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+
+      <p><button class="botao" type="submit" style="margin-top:1.5rem;">Salvar</button></p>
+    </form>
+  </div>
+{% endblock %}

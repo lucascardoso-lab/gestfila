@@ -1,0 +1,54 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}{{ 'Editar botão' if botao else 'Novo botão' }}{% endblock %}
+
+{% block conteudo %}
+  <h1>{{ 'Editar botão' if botao else 'Novo botão' }}</h1>
+  {% set nome_tela = self.titulo() %}
+  {% include "admin/_breadcrumb.html" %}
+  <div class="card">
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <label for="label">Texto do botão</label>
+      <input type="text" id="label" name="label"
+             value="{{ valores.label if valores else (botao.label if botao else '') }}" required autofocus>
+
+      <label for="unidade_id">Unidade</label>
+      {% set unidade_sel = valores.unidade_id if valores else (botao.unidade_id if botao else none) %}
+      <select id="unidade_id" name="unidade_id" required>
+        {% for unidade in unidades %}
+          <option value="{{ unidade.id }}" {{ 'selected' if unidade.id == unidade_sel else '' }}>{{ unidade.nome }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="parent_id">Botão pai (deixe em branco para botão raiz)</label>
+      {% set parent_sel = valores.parent_id if valores else (botao.parent_id if botao else none) %}
+      <select id="parent_id" name="parent_id">
+        <option value="">Nenhum (botão raiz)</option>
+        {% for candidato in candidatos_pai %}
+          <option value="{{ candidato.id }}" {{ 'selected' if candidato.id == parent_sel else '' }}>{{ candidato.label }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="fila_id">Fila (deixe em branco para botão apenas de navegação/submenu)</label>
+      {% set fila_sel = valores.fila_id if valores else (botao.fila_id if botao else none) %}
+      <select id="fila_id" name="fila_id">
+        <option value="">Nenhuma (apenas navegação)</option>
+        {% for unidade_nome, itens_unidade in filas|groupby('unidade.nome') %}
+          <optgroup label="{{ unidade_nome|upper }}">
+            {% for fila in itens_unidade %}
+              <option value="{{ fila.id }}" {{ 'selected' if fila.id == fila_sel else '' }}>[{{ fila.unidade.sigla_exibicao }}] {{ fila.nome }}</option>
+            {% endfor %}
+          </optgroup>
+        {% endfor %}
+      </select>
+
+      <label for="ordem">Ordem de exibição</label>
+      <input type="text" id="ordem" name="ordem"
+             value="{{ valores.ordem if valores else (botao.ordem if botao else 0) }}">
+
+      <p><button class="botao" type="submit" style="margin-top:1.5rem;">Salvar</button></p>
+    </form>
+  </div>
+{% endblock %}

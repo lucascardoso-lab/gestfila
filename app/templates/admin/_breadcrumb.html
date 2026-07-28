@@ -1,0 +1,19 @@
+{# Breadcrumb de contexto (item 4 da UX de contexto multi-unidade) - "Empresa >
+   Unidade > Nome da tela", sempre no mesmo formato em toda tela admin que tenha
+   `empresa` no contexto (telas empresa-agnósticas, como a listagem de Empresas
+   ou o seletor de empresa, não incluem este partial).
+
+   `nome_tela` é setado pelo template que inclui este partial, geralmente
+   reaproveitando `self.titulo()` (mesmo texto já declarado em `{% block titulo %}`,
+   usado na tag <title>) - precisa ser calculado ANTES do {% include %}, porque
+   `self` dentro de um partial incluído referencia o próprio partial, não quem o
+   incluiu (self.titulo() aqui dentro sempre falharia). #}
+{% if empresa %}
+  <p class="breadcrumb-contexto">
+    {{ empresa.nome }}
+    <span class="separador-breadcrumb">›</span>
+    {{ unidade.nome if unidade else 'Todas as unidades' }}
+    <span class="separador-breadcrumb">›</span>
+    {{ nome_tela }}
+  </p>
+{% endif %}

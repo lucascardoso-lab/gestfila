@@ -1,0 +1,24 @@
+{% extends "atendimento/_layout.html" %}
+
+{% block titulo %}Alocar fila - {{ fila.nome }}{% endblock %}
+
+{% block conteudo %}
+  <h1>Alocar fila</h1>
+  <p class="subtitulo">{{ fila.unidade.nome }} — {{ fila.nome }}</p>
+
+  <div class="card">
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <label for="prioridade_rodizio">Quantidade de chamadas prioritárias seguidas (0 = sem rodízio, fila estritamente FIFO)</label>
+      <input type="number" id="prioridade_rodizio" name="prioridade_rodizio" min="0" max="20"
+             value="{{ fila.prioridade_rodizio }}" required>
+      <p style="color:#666; font-size:.85rem; margin-top:.5rem;">
+        Senhas marcadas como prioritárias (definido no serviço) são chamadas até esta
+        quantidade de vezes seguidas antes do sistema voltar a chamar uma senha normal.
+      </p>
+
+      <p><button class="botao" type="submit" style="margin-top:1.5rem;">Alocar</button></p>
+    </form>
+  </div>
+{% endblock %}

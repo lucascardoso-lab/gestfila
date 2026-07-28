@@ -1,0 +1,31 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}Ocupação de locais{% endblock %}
+
+{% block conteudo %}
+  <h1>Ocupação de locais</h1>
+  {% set nome_tela = self.titulo() %}
+  {% include "admin/_breadcrumb.html" %}
+  <p class="subtitulo">Usuários com um local de atendimento escolhido agora, em qualquer unidade. Um local só pode ser ocupado por um usuário por vez.</p>
+  <table>
+    <thead><tr><th>Usuário</th><th>Local</th><th>Unidade</th><th>Desde</th><th>Ações</th></tr></thead>
+    <tbody>
+      {% for item in ativos %}
+        <tr>
+          <td>{{ item.usuario.nome }}</td>
+          <td>{{ item.local.nome }}</td>
+          <td>{{ item.local.unidade.nome }}</td>
+          <td>{{ item.desde.strftime('%d/%m/%Y %H:%M') if item.desde else '—' }}</td>
+          <td class="acoes">
+            <form class="inline" method="post" action="{{ url_for('admin.desconectar_usuario_local', usuario_id=item.usuario.id) }}" onsubmit="return confirm('Desconectar {{ item.usuario.nome }} do local \'{{ item.local.nome }}\'? Isso libera o local e encerra a sessão de login dele(a) imediatamente.');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="link-perigo" type="submit">Desconectar</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5">Nenhum usuário com local escolhido no momento.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}{{ 'Editar TV' if tv else 'Nova TV' }}{% endblock %}
+
+{% block conteudo %}
+  <h1>{{ 'Editar TV' if tv else 'Nova TV' }}</h1>
+  {% set nome_tela = self.titulo() %}
+  {% include "admin/_breadcrumb.html" %}
+
+  {% if tv %}
+    {% set link_publico = url_for('painel.exibir_tv', slug=tv.slug, _external=True) %}
+    <div class="card" style="margin-bottom:1rem;">
+      <label>Link público (fixo desde a criação)</label>
+      <a href="{{ link_publico }}" target="_blank" rel="noopener" style="word-break:break-all;">{{ link_publico }}</a>
+      <button type="button" class="botao-copiar" data-link="{{ link_publico }}">Copiar link</button>
+      <p class="subtitulo" style="margin:.35rem 0 0;">Renomear esta TV não altera este link - ele já pode estar configurado no equipamento físico.</p>
+    </div>
+  {% endif %}
+
+  <div class="card">
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <label for="nome">Nome</label>
+      <input type="text" id="nome" name="nome"
+             value="{{ valores.nome if valores else (tv.nome if tv else '') }}" required autofocus>
+
+      <label for="unidade_id">Unidade</label>
+      {% set unidade_sel = valores.unidade_id if valores else (tv.unidade_id if tv else none) %}
+      <select id="unidade_id" name="unidade_id" required>
+        {% for unidade in unidades %}
+          <option value="{{ unidade.id }}" {{ 'selected' if unidade.id == unidade_sel else '' }}>{{ unidade.nome }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="layout">Layout (opcional, referência de template visual)</label>
+      <input type="text" id="layout" name="layout"
+             value="{{ valores.layout if valores else (tv.layout if tv else '') or '' }}">
+
+      {% set som_ativo_sel = valores.som_ativo if valores else (tv.som_ativo if tv else True) %}
+      <label>
+        <input type="checkbox" name="som_ativo" {{ 'checked' if som_ativo_sel else '' }}>
+        Som ativo (fala a chamada via TTS nesta TV)
+      </label>
+
+      <label for="volume">Volume (0-100)</label>
+      <input type="number" id="volume" name="volume" min="0" max="100"
+             value="{{ valores.volume if valores is not none and valores.volume is not none else (tv.volume if tv else 100) }}">
+
+      <label>Filas exibidas nesta TV</label>
+      <div class="checkboxes">
+        {% for fila in filas %}
+          <label>
+            <input type="checkbox" name="filas" value="{{ fila.id }}" {{ 'checked' if fila.id in filas_selecionadas else '' }}>
+            {{ fila.nome }} ({{ fila.unidade.nome }})
+          </label>
+        {% else %}
+          <span class="subtitulo">Nenhuma fila cadastrada nesta empresa ainda.</span>
+        {% endfor %}
+      </div>
+
+      <p><button class="botao" type="submit" style="margin-top:1.5rem;">Salvar</button></p>
+    </form>
+  </div>
+{% endblock %}

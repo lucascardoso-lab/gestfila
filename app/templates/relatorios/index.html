@@ -1,0 +1,23 @@
+{% extends "relatorios/_layout.html" %}
+
+{% block titulo %}Relatórios{% endblock %}
+
+{% block conteudo %}
+  <h1>Relatórios</h1>
+  <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
+
+  <div class="menu-relatorios">
+    <a href="{{ url_for('relatorios.tempo_espera', empresa_id=empresa.id if current_user.is_super_admin else none) }}">
+      Tempo médio de espera<br><small>gerada → chamada da senha, por fila/unidade</small>
+    </a>
+    <a href="{{ url_for('relatorios.tempo_atendimento_view', empresa_id=empresa.id if current_user.is_super_admin else none) }}">
+      Tempo de atendimento<br><small>chamada → fim, por operador/setor/fila</small>
+    </a>
+    <a href="{{ url_for('relatorios.volume', empresa_id=empresa.id if current_user.is_super_admin else none) }}">
+      Volume de senhas<br><small>por fila/unidade, prioridade vs. normal</small>
+    </a>
+    <a href="{{ url_for('relatorios.ranking', empresa_id=empresa.id if current_user.is_super_admin else none) }}">
+      Ranking de operadores<br><small>por volume e tempo médio</small>
+    </a>
+  </div>
+{% endblock %}

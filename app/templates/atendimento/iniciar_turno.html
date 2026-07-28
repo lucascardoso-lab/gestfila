@@ -1,0 +1,142 @@
+{% extends "atendimento/_layout.html" %}
+
+{% block titulo %}Iniciar turno{% endblock %}
+
+{% block conteudo %}
+  <h1>Iniciar turno</h1>
+  <p class="subtitulo">Escolha as filas (e o peso de cada uma no rodízio) e o local do seu turno. Você pode reconfigurar isso a qualquer momento, sem precisar deslogar.</p>
+
+  <form id="form-turno" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div id="entradas-filas"></div>
+
+    <div class="card grade-turno">
+      <div>
+        <label for="select-fila">Fila</label>
+        <select id="select-fila">
+          <option value="">Selecione</option>
+          {% for unidade_nome, itens_unidade in filas_json|groupby('unidade') %}
+            <optgroup label="{{ unidade_nome|upper }}">
+              {% for fila in itens_unidade %}
+                <option value="{{ fila.id }}">[{{ fila.unidade_sigla }}] {{ fila.nome }}</option>
+              {% endfor %}
+            </optgroup>
+          {% endfor %}
+        </select>
+
+        <label for="input-chamadas-seguidas">Quantidade de chamadas seguidas</label>
+        <input type="number" id="input-chamadas-seguidas" min="0" value="0">
+
+        <p><button type="button" id="botao-adicionar-fila" class="botao" style="margin-top:1rem;">Adicionar fila</button></p>
+
+        <label for="select-local">Local</label>
+        <select id="select-local" name="local_id" required>
+          <option value="">Selecione</option>
+          {% for unidade_nome, itens_unidade in locais_json|groupby('unidade') %}
+            <optgroup label="{{ unidade_nome|upper }}">
+              {% for local in itens_unidade %}
+                <option value="{{ local.id }}" {{ 'selected' if local.id == local_selecionado_id else '' }}>[{{ local.unidade_sigla }}] {{ local.nome }}</option>
+              {% endfor %}
+            </optgroup>
+          {% endfor %}
+        </select>
+
+        <p><button type="submit" id="botao-iniciar" class="botao" style="margin-top:1.5rem;">Iniciar atendimento</button></p>
+        <p id="erro-turno" class="flash error" hidden>Adicione ao menos uma fila antes de iniciar o turno.</p>
+      </div>
+
+      <div>
+        <label style="margin-top:0;">Filas do turno</label>
+        <table id="tabela-filas-turno">
+          <thead>
+            <tr><th>#</th><th>Fila</th><th>Chamadas seguidas</th><th></th></tr>
+          </thead>
+          <tbody id="corpo-filas-turno"></tbody>
+        </table>
+        <p id="vazio-filas-turno" class="vazio">Nenhuma fila adicionada ainda.</p>
+      </div>
+    </div>
+  </form>
+
+  <style>
+    .grade-turno { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; max-width: none; }
+    #tabela-filas-turno th, #tabela-filas-turno td { font-size: .85rem; }
+    #tabela-filas-turno .botao-remover { background: none; border: none; color: var(--gf-primaria-escura); cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 0; }
+    .vazio { color: #999; font-size: .9rem; }
+  </style>
+
+  <script>
+    (function () {
+      const FILAS_DISPONIVEIS = {{ filas_json | tojson }};
+      const FILAS_POR_ID = {};
+      FILAS_DISPONIVEIS.forEach((f) => { FILAS_POR_ID[f.id] = f; });
+
+      let filasSelecionadas = ({{ filas_selecionadas_iniciais | tojson }}).filter((f) => FILAS_POR_ID[f.fila_id]);
+
+      const corpo = document.getElementById("corpo-filas-turno");
+      const vazio = document.getElementById("vazio-filas-turno");
+      const entradas = document.getElementById("entradas-filas");
+      const erro = document.getElementById("erro-turno");
+
+      function escapeHtml(texto) {
+        return (texto || "").replace(/[&<>"']/g, (c) => ({
+          "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+        }[c]));
+      }
+
+      function renderizar() {
+        vazio.hidden = filasSelecionadas.length > 0;
+        corpo.innerHTML = filasSelecionadas.map((item, indice) => {
+          const fila = FILAS_POR_ID[item.fila_id];
+          return `<tr>
+            <td>${indice + 1}</td>
+            <td>[${escapeHtml(fila.unidade_sigla)}] ${escapeHtml(fila.nome)} <span class="subtitulo" style="margin:0;">(${escapeHtml(fila.unidade)})</span></td>
+            <td>${item.chamadas_seguidas}</td>
+            <td><button type="button" class="botao-remover" data-indice="${indice}" title="Remover">&times;</button></td>
+          </tr>`;
+        }).join("");
+
+        // campos ocultos que de fato viajam no POST - reconstruídos a cada
+        // mudança da lista, sempre em sincronia com o que é exibido.
+        entradas.innerHTML = filasSelecionadas.map((item) =>
+          `<input type="hidden" name="fila_id" value="${item.fila_id}">` +
+          `<input type="hidden" name="chamadas_seguidas" value="${item.chamadas_seguidas}">`
+        ).join("");
+
+        corpo.querySelectorAll(".botao-remover").forEach((botao) => {
+          botao.addEventListener("click", () => {
+            filasSelecionadas.splice(Number(botao.dataset.indice), 1);
+            renderizar();
+          });
+        });
+      }
+
+      document.getElementById("botao-adicionar-fila").addEventListener("click", () => {
+        const selectFila = document.getElementById("select-fila");
+        const inputSeguidas = document.getElementById("input-chamadas-seguidas");
+        const filaId = Number(selectFila.value);
+        if (!filaId) return;
+
+        // Mesma fila pode ser adicionada mais de uma vez (o operador ajusta o peso
+        // dela no rodízio assim) - o servidor mescla em uma única entrada ao salvar.
+        filasSelecionadas.push({
+          fila_id: filaId,
+          chamadas_seguidas: Math.max(0, Number(inputSeguidas.value) || 0),
+        });
+        erro.hidden = true;
+        selectFila.value = "";
+        inputSeguidas.value = "0";
+        renderizar();
+      });
+
+      document.getElementById("form-turno").addEventListener("submit", (evento) => {
+        if (filasSelecionadas.length === 0) {
+          evento.preventDefault();
+          erro.hidden = false;
+        }
+      });
+
+      renderizar();
+    })();
+  </script>
+{% endblock %}

@@ -1,0 +1,41 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}TVs{% endblock %}
+
+{% block conteudo %}
+  <h1>TVs</h1>
+  {% set nome_tela = self.titulo() %}
+  {% include "admin/_breadcrumb.html" %}
+  <p class="subtitulo"><a class="botao" href="{{ url_for('admin.nova_tv', empresa_id=empresa.id) }}">+ Nova TV</a></p>
+  <table>
+    <thead><tr><th>Nome</th><th>Unidade</th><th>Filas exibidas</th><th>Status</th><th>Link público</th><th>Ações</th></tr></thead>
+    <tbody>
+      {% for tv in tvs %}
+        {% set link_publico = url_for('painel.exibir_tv', slug=tv.slug, _external=True) %}
+        <tr>
+          <td>{{ tv.nome }}</td>
+          <td>{{ tv.unidade.nome }}</td>
+          <td>{{ tv.filas | map(attribute='nome') | join(', ') or '-' }}</td>
+          <td><span class="badge {{ 'ativo' if tv.ativo else 'inativo' }}">{{ 'Ativa' if tv.ativo else 'Inativa' }}</span></td>
+          <td>
+            <a class="link-publico" href="{{ link_publico }}" target="_blank" rel="noopener" title="{{ link_publico }}">Abrir painel</a>
+            <button type="button" class="botao-copiar" data-link="{{ link_publico }}">Copiar link</button>
+          </td>
+          <td class="acoes">
+            <a href="{{ url_for('admin.editar_tv', tv_id=tv.id) }}">Editar</a>
+            <form class="inline" method="post" action="{{ url_for('admin.alternar_tv', tv_id=tv.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="link" type="submit">{{ 'Desativar' if tv.ativo else 'Ativar' }}</button>
+            </form>
+            <form class="inline" method="post" action="{{ url_for('admin.excluir_tv', tv_id=tv.id) }}" onsubmit="return confirm('Excluir definitivamente a TV \'{{ tv.nome }}\'? Esta ação não pode ser desfeita.');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="link-perigo" type="submit">Excluir</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6">Nenhuma TV cadastrada.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

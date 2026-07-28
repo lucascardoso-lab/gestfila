@@ -1,0 +1,42 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}Tipos de senha{% endblock %}
+
+{% block conteudo %}
+  <h1>Tipos de senha</h1>
+  {% set nome_tela = self.titulo() %}
+  {% include "admin/_breadcrumb.html" %}
+  <p class="subtitulo"><a class="botao" href="{{ url_for('admin.novo_tipo_senha', empresa_id=empresa.id) }}">+ Novo tipo de senha</a></p>
+  <table>
+    <thead><tr><th>Nome</th><th>Prefixo</th><th>Cor</th><th>Peso prioridade</th><th>Tempo máx. (min)</th><th>Status</th><th>Ações</th></tr></thead>
+    <tbody>
+      {% for tipo in tipos %}
+        <tr>
+          <td>{{ tipo.nome }}</td>
+          <td>{{ tipo.prefixo or '—' }}</td>
+          <td>
+            {% if tipo.cor %}
+              <span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:{{ tipo.cor }};vertical-align:middle;margin-right:.4rem;border:1px solid #d0d4dc;"></span>{{ tipo.cor }}
+            {% else %}—{% endif %}
+          </td>
+          <td>{{ tipo.peso_prioridade }}</td>
+          <td>{{ tipo.tempo_maximo_min or '—' }}</td>
+          <td><span class="badge {{ 'ativo' if tipo.ativo else 'inativo' }}">{{ 'Ativo' if tipo.ativo else 'Inativo' }}</span></td>
+          <td class="acoes">
+            <a href="{{ url_for('admin.editar_tipo_senha', tipo_id=tipo.id) }}">Editar</a>
+            <form class="inline" method="post" action="{{ url_for('admin.alternar_tipo_senha', tipo_id=tipo.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="link" type="submit">{{ 'Desativar' if tipo.ativo else 'Ativar' }}</button>
+            </form>
+            <form class="inline" method="post" action="{{ url_for('admin.excluir_tipo_senha', tipo_id=tipo.id) }}" onsubmit="return confirm('Excluir definitivamente o tipo de senha \'{{ tipo.nome }}\'? Esta ação não pode ser desfeita.');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="link-perigo" type="submit">Excluir</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7">Nenhum tipo de senha cadastrado.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

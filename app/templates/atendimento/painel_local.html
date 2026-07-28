@@ -1,0 +1,283 @@
+{% extends "atendimento/_layout.html" %}
+
+{% block titulo %}{{ local.nome }} - {{ 'Recepção' if setor == 'recepcao' else 'Coleta' }}{% endblock %}
+
+{% block conteudo %}
+  <h1>Atendimento por Local — {{ local.nome }}</h1>
+  <p class="subtitulo">{{ local.unidade.nome }} ({{ 'Recepção' if setor == 'recepcao' else 'Coleta' }}) · rodízio automático entre múltiplas filas (adendo 10.8)</p>
+
+  <form id="form-acoes" method="post" action="{{ url_for('atendimento.chamar_local', setor=setor, local_id=local.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="card" style="max-width:none;">
+      <div class="grade-topo">
+        <div>
+          <label>Local</label>
+          <div class="senha-chamada">
+            <strong>{{ local.nome }}</strong>
+            <span class="links-turno">
+              <a href="{{ url_for('atendimento.iniciar_turno') }}" class="link-trocar-local">Reconfigurar turno</a>
+            </span>
+          </div>
+        </div>
+        <div>
+          <label>Senha chamada</label>
+          <div id="senha-chamada-display" class="senha-chamada{{ ' em-atendimento' if senha_atual else '' }}">
+            {% if senha_atual %}
+              <span><strong>{{ senha_atual.codigo }}</strong>{% if senha_atual.nome_paciente %} — {{ senha_atual.nome_paciente }}{% endif %}</span>
+              <span id="senha-chamada-fila" class="subtitulo" style="margin:0;">{{ senha_atual.fila.nome }}</span>
+              <span class="badge em-atendimento">Em atendimento</span>
+            {% else %}
+              <span class="vazio">—</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="grade-topo" style="grid-template-columns: repeat(2, 1fr);">
+        <div>
+          <label for="codigo">Código (busca manual / contingência)</label>
+          <input type="text" id="codigo" name="codigo" placeholder="ex.: LAB001" onkeydown="if (event.key === 'Enter') event.preventDefault();">
+        </div>
+        <div>
+          <label for="nome">Nome (texto livre, sem cadastro)</label>
+          <input type="text" id="nome" name="nome" value="{{ (senha_atual.nome_paciente if senha_atual else '') or '' }}" placeholder="Nome do paciente" maxlength="120" onkeydown="if (event.key === 'Enter') event.preventDefault();">
+        </div>
+      </div>
+
+      <div class="bloco-redirecionar" id="bloco-redirecionar">
+        <label for="busca-redirecionar" style="margin-top:0;">Redirecionar</label>
+        {% if not filas_destino %}
+          <p class="vazio">Nenhuma outra fila ativa nesta unidade.</p>
+        {% else %}
+          {% include "atendimento/_redirecionar_busca.html" %}
+        {% endif %}
+      </div>
+
+      <p id="aviso-bloqueio" class="flash aviso" {{ '' if senha_atual else 'hidden' }}>Finalize o atendimento atual antes de chamar o próximo.</p>
+
+      <div class="botoes-acao">
+        {% if current_user.is_super_admin or current_user.tem_perfil('admin') %}
+          <button id="botao-chamar" class="botao" type="submit" formaction="{{ url_for('atendimento.chamar_local', setor=setor, local_id=local.id) }}" {{ 'disabled' if senha_atual else '' }} title="{{ 'Finalize o atendimento atual antes de chamar o próximo.' if senha_atual else '' }}">Chamar</button>
+        {% endif %}
+        <button class="botao secundario" type="submit" formaction="{{ url_for('atendimento.tocar_local', setor=setor, local_id=local.id) }}">Tocar</button>
+        <button class="botao secundario" type="submit" formaction="{{ url_for('atendimento.realocar_local', setor=setor, local_id=local.id) }}">Realocar</button>
+        <button class="botao secundario" type="submit" formaction="{{ url_for('atendimento.finalizar_local', setor=setor, local_id=local.id) }}">Finalizar</button>
+        <button class="botao secundario" type="submit" formaction="{{ url_for('atendimento.aguardar_local', setor=setor, local_id=local.id) }}">Aguardar</button>
+      </div>
+    </div>
+  </form>
+
+  <div class="card" style="max-width:none;">
+    <h2 style="margin-top:0;">Senhas em espera (<span id="contagem-espera">{{ espera|length }}</span>)</h2>
+    <table id="tabela-espera">
+      <thead>
+        <tr><th>Senha</th><th>Fila</th><th>T. Espera</th><th>Nome</th><th>Observações</th><th>Ações</th></tr>
+      </thead>
+      <tbody id="corpo-espera">
+        {% for s in espera %}
+          <tr data-senha-id="{{ s.id }}">
+            <td>{{ s.codigo }}{% if s.prioridade %} <span class="badge prioridade">P</span>{% endif %}</td>
+            <td>{{ s.fila.nome }}</td>
+            <td>
+              <span class="t-espera" data-criada-em="{{ s.criada_em.isoformat() }}">00:00:00</span>
+              <span class="hora-relogio" data-hora-de="{{ s.criada_em.isoformat() }}" title="Horário em que a senha foi gerada"></span>
+            </td>
+            <td>{{ s.nome_paciente or '' }}</td>
+            <td>{{ s.observacoes or '' }}</td>
+            <td class="acoes">
+              <form class="inline" method="post" action="{{ url_for('atendimento.chamar_local', setor=setor, local_id=local.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="codigo" value="{{ s.codigo }}">
+                <button class="botao secundario" type="submit" {{ 'disabled' if senha_atual else '' }} title="{{ 'Finalize o atendimento atual antes de chamar o próximo.' if senha_atual else '' }}">Chamar</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6">Nenhuma senha aguardando neste Local.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="max-width:none;">
+    <h2 style="margin-top:0;">Senhas atendidas</h2>
+    <table id="tabela-atendidas">
+      <thead><tr><th>Senha</th><th>Fila</th><th>Tempo de espera</th></tr></thead>
+      <tbody id="corpo-atendidas">
+        {% for s in atendidas %}
+          <tr data-senha-id="{{ s.id }}">
+            <td>{{ s.codigo }}</td>
+            <td>{{ s.fila.nome }}</td>
+            <td>
+              {{ "%02d:%02d:%02d"|format(((s.chamada_em - s.criada_em).total_seconds())//3600, (((s.chamada_em - s.criada_em).total_seconds())%3600)//60, ((s.chamada_em - s.criada_em).total_seconds())%60) }}
+              <span class="hora-relogio" data-hora-de="{{ s.chamada_em.isoformat() }}" title="Horário em que a senha foi chamada"></span>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="3">Nenhuma senha atendida neste Local ainda.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <style>
+    .grade-topo { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+    .senha-chamada { padding: .6rem .75rem; border: 1px solid #d0d4dc; border-radius: 8px; font-size: 1.1rem; margin-top: .35rem; background: #f7f8fa; display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; }
+    .senha-chamada.em-atendimento { border: 2px solid var(--gf-primaria-escura); background: var(--gf-primaria-clara); }
+    .senha-chamada .vazio, .vazio { color: #999; }
+    .link-trocar-local { font-size: .8rem; font-weight: normal; color: var(--gf-primaria); text-decoration: underline; white-space: nowrap; }
+    .links-turno { display: flex; gap: .9rem; align-items: center; }
+    .bloco-redirecionar { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #eceef2; }
+    .botoes-acao { margin-top: 1.5rem; display: flex; gap: .6rem; flex-wrap: wrap; }
+    .hora-relogio { display: block; font-size: .78rem; color: #888; white-space: nowrap; }
+  </style>
+
+  <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
+  <script>
+    (function () {
+      const FILA_IDS = {{ fila_ids | tojson }};
+      const URL_DADOS = {{ url_for('atendimento.dados_local', setor=setor, local_id=local.id)|tojson }};
+      const URL_CHAMAR = {{ url_for('atendimento.chamar_local', setor=setor, local_id=local.id)|tojson }};
+      const CSRF = {{ csrf_token()|tojson }};
+
+      function formatarHHMMSS(segundosTotais) {
+        const s = Math.max(0, Math.floor(segundosTotais));
+        const hh = String(Math.floor(s / 3600)).padStart(2, "0");
+        const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+        const ss = String(s % 60).padStart(2, "0");
+        return `${hh}:${mm}:${ss}`;
+      }
+
+      // Timestamps do servidor são UTC "naive" (datetime.utcnow()) - o "Z" força o
+      // navegador a interpretar como UTC e converter pro fuso local dele mesmo (mesmo
+      // truque já usado no cálculo de T. Espera acima), em vez de formatar no servidor
+      // (que não sabe o fuso da clínica, só do relógio do próprio navegador/totem).
+      function formatarHoraLocal(isoUtc) {
+        return new Date(isoUtc + "Z").toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      }
+
+      function atualizarRelogios() {
+        document.querySelectorAll(".t-espera").forEach((el) => {
+          const criadaEm = new Date(el.dataset.criadaEm + "Z").getTime();
+          el.textContent = formatarHHMMSS((Date.now() - criadaEm) / 1000);
+        });
+        document.querySelectorAll(".hora-relogio[data-hora-de]").forEach((el) => {
+          el.textContent = "· " + formatarHoraLocal(el.dataset.horaDe);
+        });
+      }
+      setInterval(atualizarRelogios, 1000);
+      atualizarRelogios();
+
+      function escapeHtml(texto) {
+        return (texto || "").replace(/[&<>"']/g, (c) => ({
+          "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+        }[c]));
+      }
+
+      // Controle de atendimento: enquanto este operador tiver uma senha em
+      // andamento (chamada/em_atendimento), "Chamar" fica bloqueado - mesma regra
+      // já aplicada no servidor (app/atendimento/chamada.py::chamar_local),
+      // replicada aqui só pra refletir visualmente sem esperar um round-trip.
+      let bloqueado = {{ 'true' if senha_atual else 'false' }};
+      const MENSAGEM_BLOQUEIO = "Finalize o atendimento atual antes de chamar o próximo.";
+
+      function aplicarBloqueio(estaBloqueado) {
+        bloqueado = estaBloqueado;
+        const elBotaoChamar = document.getElementById("botao-chamar");
+        if (elBotaoChamar) {
+          elBotaoChamar.disabled = bloqueado;
+          elBotaoChamar.title = bloqueado ? MENSAGEM_BLOQUEIO : "";
+        }
+        const elAviso = document.getElementById("aviso-bloqueio");
+        if (elAviso) elAviso.hidden = !bloqueado;
+      }
+
+      function renderizarSenhaAtual(senha) {
+        const elDisplay = document.getElementById("senha-chamada-display");
+        const elNome = document.getElementById("nome");
+        aplicarBloqueio(!!senha);
+        if (!senha) {
+          elDisplay.classList.remove("em-atendimento");
+          elDisplay.innerHTML = '<span class="vazio">—</span>';
+          return;
+        }
+        elDisplay.classList.add("em-atendimento");
+        elDisplay.innerHTML = `<span><strong>${escapeHtml(senha.codigo)}</strong>` +
+          (senha.nome_paciente ? ` — ${escapeHtml(senha.nome_paciente)}` : "") +
+          `</span><span id="senha-chamada-fila" class="subtitulo" style="margin:0;">${escapeHtml(senha.fila)}</span>` +
+          '<span class="badge em-atendimento">Em atendimento</span>';
+        if (!elNome.matches(":focus")) elNome.value = senha.nome_paciente || "";
+      }
+
+      function linhaEspera(s) {
+        const atributosBloqueio = bloqueado ? `disabled title="${MENSAGEM_BLOQUEIO}"` : "";
+        return `<tr data-senha-id="${s.id}">
+          <td>${escapeHtml(s.codigo)}${s.prioridade ? ' <span class="badge prioridade">P</span>' : ""}</td>
+          <td>${escapeHtml(s.fila)}</td>
+          <td>
+            <span class="t-espera" data-criada-em="${s.criada_em}">00:00:00</span>
+            <span class="hora-relogio" data-hora-de="${s.criada_em}" title="Horário em que a senha foi gerada"></span>
+          </td>
+          <td>${escapeHtml(s.nome_paciente || "")}</td>
+          <td>${escapeHtml(s.observacoes || "")}</td>
+          <td class="acoes">
+            <form class="inline" method="post" action="${URL_CHAMAR}">
+              <input type="hidden" name="csrf_token" value="${CSRF}">
+              <input type="hidden" name="codigo" value="${escapeHtml(s.codigo)}">
+              <button class="botao secundario" type="submit" ${atributosBloqueio}>Chamar</button>
+            </form>
+          </td>
+        </tr>`;
+      }
+
+      function linhaAtendida(s) {
+        const tempo = s.tempo_espera_segundos != null ? formatarHHMMSS(s.tempo_espera_segundos) : "—";
+        const hora = s.chamada_em
+          ? `<span class="hora-relogio" data-hora-de="${s.chamada_em}" title="Horário em que a senha foi chamada"></span>`
+          : "";
+        return `<tr data-senha-id="${s.id}">
+          <td>${escapeHtml(s.codigo)}</td>
+          <td>${escapeHtml(s.fila)}</td>
+          <td>${tempo}${hora}</td>
+        </tr>`;
+      }
+
+      function renderizarDados(dados) {
+        renderizarSenhaAtual(dados.senha_atual);
+
+        const corpoEspera = document.getElementById("corpo-espera");
+        corpoEspera.innerHTML = dados.espera.length
+          ? dados.espera.map(linhaEspera).join("")
+          : '<tr><td colspan="6">Nenhuma senha aguardando neste Local.</td></tr>';
+        document.getElementById("contagem-espera").textContent = dados.espera.length;
+
+        const corpoAtendidas = document.getElementById("corpo-atendidas");
+        corpoAtendidas.innerHTML = dados.atendidas.length
+          ? dados.atendidas.map(linhaAtendida).join("")
+          : '<tr><td colspan="3">Nenhuma senha atendida neste Local ainda.</td></tr>';
+
+        atualizarRelogios();
+      }
+
+      function atualizarDados() {
+        fetch(URL_DADOS)
+          .then((r) => r.json())
+          .then(renderizarDados)
+          .catch(() => {});
+      }
+
+      const socket = io("/painel", { reconnection: true, reconnectionDelay: 1000, reconnectionDelayMax: 10000 });
+      window.__socketAtendimento = socket;
+
+      // Entra em UMA sala por fila do rodízio (mesmo handler entrar_fila da tela
+      // por-fila, chamado várias vezes na mesma conexão) - cada sala é distinta, então
+      // eventos de filas diferentes nunca se duplicam; mesmo duas chegando quase juntas
+      // só disparam dois refetches idempotentes do mesmo JSON agregado (Fase 10.8-E).
+      socket.on("connect", () => {
+        FILA_IDS.forEach((filaId) => socket.emit("entrar_fila", { fila_id: filaId }));
+      });
+      socket.on("fila_atualizada", () => atualizarDados());
+    })();
+  </script>
+{% endblock %}

@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}Administração{% endblock %} - GESTFILA</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%23FFFFFF'/%3E%3Ctext x='50' y='72' font-family='Arial,sans-serif' font-size='68' font-weight='700' text-anchor='middle' fill='%23C0392B'%3EG%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/gestfila.css') }}">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--gf-cinza-claro);
+      color: var(--gf-cinza-escuro);
+    }
+    nav {
+      background: var(--gf-cinza-escuro);
+      color: #fff;
+      padding: .9rem 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1.5rem;
+    }
+    .grupo-nav-esquerda { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem 0; }
+    nav .gf-logo { margin-right: 1.25rem; flex-shrink: 0; }
+    nav .links-nav { display: flex; flex-wrap: wrap; align-items: center; }
+    nav a { color: #cfd6e4; text-decoration: none; margin-right: 1.1rem; font-size: .88rem; padding-bottom: .2rem; border-bottom: 2px solid transparent; }
+    nav a:hover { color: #fff; border-bottom-color: var(--gf-primaria); }
+    .barra-contexto {
+      background: var(--gf-branco); border-bottom: 1px solid var(--gf-cinza-medio);
+      padding: .55rem 1.5rem; display: flex; justify-content: center;
+    }
+    .form-contexto { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; max-width: 960px; width: 100%; }
+    .form-contexto label { margin: 0; font-size: .8rem; color: #555; white-space: nowrap; }
+    .form-contexto select {
+      padding: .35rem .5rem; border: 1px solid var(--gf-cinza-medio); border-radius: 6px;
+      font-size: .85rem; background: #fff; max-width: 260px;
+    }
+    .form-contexto button { padding: .35rem .75rem; font-size: .8rem; }
+    main { max-width: 960px; margin: 2rem auto; padding: 0 1.5rem; }
+    h1 { font-size: 1.4rem; margin-bottom: .25rem; }
+    .subtitulo { color: #666; margin-bottom: 1.5rem; font-size: .9rem; }
+    .breadcrumb-contexto { font-size: .85rem; color: #666; margin-bottom: 1rem; }
+    .separador-breadcrumb { margin: 0 .35rem; color: #aaa; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,.05); }
+    th, td { text-align: left; padding: .65rem .9rem; border-bottom: 1px solid #eceef2; font-size: .9rem; }
+    th { background: var(--gf-cinza-claro); color: #555; }
+    tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: var(--gf-primaria-clara); }
+    .badge { display: inline-block; padding: .15rem .55rem; border-radius: 999px; font-size: .75rem; }
+    .badge.ativo { background: #e3f6e8; color: var(--gf-sucesso); }
+    .badge.inativo { background: #eceef0; color: var(--gf-cinza-medio); }
+    .badge.aguardando { background: #eaf2f8; color: var(--gf-info); }
+    .badge.finalizado { background: #e5e8ea; color: var(--gf-cinza-escuro); }
+    .badge.super-admin { background: #ede4fb; color: #6b21a8; }
+    .acoes a { margin-right: .75rem; font-size: .85rem; }
+    .botao {
+      display: inline-block; padding: .55rem 1rem; background: var(--gf-primaria); color: #fff;
+      border: none; border-radius: 8px; font-size: .9rem; text-decoration: none; cursor: pointer;
+    }
+    .botao:hover { background: var(--gf-primaria-escura); }
+    .botao.secundario { background: #fff; color: var(--gf-cinza-escuro); border: 1px solid var(--gf-cinza-medio); }
+    .botao.secundario:hover { background: var(--gf-cinza-claro); }
+    form.inline { display: inline; }
+    button.link { background: none; border: none; color: var(--gf-info); padding: 0; font-size: .85rem; text-decoration: underline; cursor: pointer; }
+    button.link-perigo { background: none; border: none; color: var(--gf-alerta); padding: 0; font-size: .85rem; font-weight: 700; text-decoration: underline; cursor: pointer; }
+    .card { background: #fff; padding: 2rem; border-radius: 12px; border: 1px solid var(--gf-cinza-claro); box-shadow: 0 2px 10px rgba(0,0,0,.05); max-width: 560px; }
+    label { display: block; margin-bottom: .35rem; margin-top: 1rem; font-size: .9rem; color: #555; }
+    input[type="text"], input[type="password"] {
+      width: 100%; padding: .6rem .75rem; border: 1px solid var(--gf-cinza-medio); border-radius: 8px; font-size: 1rem;
+    }
+    input[type="text"]:focus, input[type="password"]:focus, select:focus {
+      outline: none; border-color: var(--gf-primaria); box-shadow: 0 0 0 3px var(--gf-primaria-clara);
+    }
+    .checkboxes { display: flex; flex-wrap: wrap; gap: .5rem; }
+    .checkboxes label {
+      display: flex; align-items: center; gap: .4rem; font-size: .85rem;
+      background: var(--gf-cinza-claro); padding: .4rem .7rem; border-radius: 8px; margin-top: 0;
+    }
+    .flash { padding: .6rem .8rem; border-radius: 8px; margin-bottom: 1rem; font-size: .9rem; }
+    .flash.error { background: var(--gf-primaria-clara); color: var(--gf-primaria-escura); }
+    .flash.info { background: #eaf2f8; color: var(--gf-info); }
+    .link-publico { display: block; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .botao-copiar { background: none; border: none; color: var(--gf-info); padding: 0; font-size: .8rem; text-decoration: underline; cursor: pointer; margin-top: .2rem; }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="grupo-nav-esquerda">
+    <span class="gf-logo gf-logo--navbar gf-logo--claro"><span class="gf-logo-gest">GEST</span><span class="gf-logo-fila">FILA</span></span>
+    <div class="links-nav">
+      <a href="{{ url_for('core.index') }}">🏠 Painel de Senhas</a>
+      <a href="{{ url_for('core.dashboard') }}{% if current_user.is_super_admin and empresa %}?empresa_id={{ empresa.id }}{% endif %}">📊 Dashboard</a>
+      {% if current_user.is_super_admin %}
+        <a href="{{ url_for('admin.listar_empresas') }}">⚙ Empresas</a>
+        <a href="{{ url_for('admin.listar_perfis') }}">⚙ Perfis</a>
+      {% endif %}
+      <a href="{{ url_for('admin.listar_unidades') }}{% if current_user.is_super_admin and empresa %}?empresa_id={{ empresa.id }}{% endif %}">⚙ Unidades</a>
+      <a href="{{ url_for('admin.listar_usuarios') }}{% if current_user.is_super_admin and empresa %}?empresa_id={{ empresa.id }}{% endif %}">👨‍💼 Usuários</a>
+      <a href="{{ url_for('admin.listar_filas') }}{% if current_user.is_super_admin and empresa %}?empresa_id={{ empresa.id }}{% endif %}">🎫 Filas</a>
+      <a href="{{ url_for('admin.listar_tipos_senha') }}{% if current_user.is_super_admin and empresa %}?empresa_id={{ empresa.id }}{% endif %}">🎫 Tipos de senha</a>
+      <a href="{{ url_for('admin.listar_totem_botoes') }}{% if current_user.is_super_admin and empresa %}?empresa_id={{ empresa.id }}{% endif %}">🎯 Botões do totem</a>
+      <a href="{{ url_for('admin.listar_totens') }}{% if current_user.is_super_admin and empresa %}?empresa_id={{ empresa.id }}{% endif %}">🎯 Totens</a>
+      <a href="{{ url_for('admin.listar_locais') }}{% if current_user.is_super_admin and empresa %}?empresa_id={{ empresa.id }}{% endif %}">🖥 Locais</a>
+      <a href="{{ url_for('admin.listar_tvs') }}{% if current_user.is_super_admin and empresa %}?empresa_id={{ empresa.id }}{% endif %}">🔔 Painel de Chamadas</a>
+    </div>
+    </div>
+    <a href="{{ url_for('auth.logout') }}">Sair ({{ current_user.nome }})</a>
+  </nav>
+  {% if empresa %}
+    {# Barra de contexto (item 1 da UX de contexto multi-unidade): Empresa (só
+       super admin - admin de empresa já está implicitamente restrito à própria)
+       + Unidade (opcional, "Todas as unidades" = sem filtro), sempre visíveis
+       logo abaixo do menu principal. Muda a seleção -> reenvia a MESMA página
+       atual (`request.path`) com o novo `empresa_id`/`unidade_id` na querystring
+       (reload leve, sem JS de filtragem em cada listagem) - resolver_empresa_
+       contexto()/resolver_unidade_contexto() (app/admin/helpers.py) persistem a
+       escolha na sessão, então navegar por outros links do menu principal
+       continua respeitando o mesmo contexto sem precisar reselecionar. #}
+    <div class="barra-contexto">
+      <form method="get" action="{{ request.path }}" class="form-contexto">
+        {% if current_user.is_super_admin %}
+          <label for="contexto-empresa">Empresa</label>
+          <select id="contexto-empresa" name="empresa_id" onchange="var u = document.getElementById('contexto-unidade'); if (u) { u.value = ''; } this.form.submit();">
+            {% for emp in empresas_para_contexto() %}
+              <option value="{{ emp.id }}" {{ 'selected' if emp.id == empresa.id else '' }}>{{ emp.nome }}</option>
+            {% endfor %}
+          </select>
+        {% endif %}
+
+        <label for="contexto-unidade">Unidade</label>
+        <select id="contexto-unidade" name="unidade_id" onchange="this.form.submit()">
+          <option value="">Todas as unidades</option>
+          {% for u in unidades_do_contexto(empresa) %}
+            <option value="{{ u.id }}" {{ 'selected' if unidade and u.id == unidade.id else '' }}>[{{ u.sigla_exibicao }}] {{ u.nome }}</option>
+          {% endfor %}
+        </select>
+
+        <button class="botao secundario" type="submit">Aplicar</button>
+      </form>
+    </div>
+  {% endif %}
+  <main>
+    {% with mensagens = get_flashed_messages(with_categories=true) %}
+      {% for categoria, mensagem in mensagens %}
+        <div class="flash {{ categoria }}">{{ mensagem }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block conteudo %}{% endblock %}
+  </main>
+  <script>
+    // Padrão geral (seção 10.7 do BLUEPRINT): qualquer botão com a classe
+    // "botao-copiar" e um atributo "data-link" copia esse link para a área de
+    // transferência - usado nas listagens de Totens e TVs, e em qualquer tela
+    // futura que precise expor uma URL pública de acesso sem login.
+    document.addEventListener("click", function (ev) {
+      var botao = ev.target.closest(".botao-copiar");
+      if (!botao) return;
+      var link = botao.getAttribute("data-link");
+      if (!link) return;
+
+      var mostrarCopiado = function () {
+        var textoOriginal = botao.textContent;
+        botao.textContent = "Copiado!";
+        setTimeout(function () { botao.textContent = textoOriginal; }, 1500);
+      };
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link).then(mostrarCopiado);
+      } else {
+        var campoTemporario = document.createElement("textarea");
+        campoTemporario.value = link;
+        campoTemporario.style.position = "fixed";
+        campoTemporario.style.opacity = "0";
+        document.body.appendChild(campoTemporario);
+        campoTemporario.select();
+        document.execCommand("copy");
+        document.body.removeChild(campoTemporario);
+        mostrarCopiado();
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}Perfis{% endblock %}
+
+{% block conteudo %}
+  <h1>Perfis (catálogo do sistema)</h1>
+  <p class="subtitulo">Perfis são fixos pelo sistema; a atribuição a cada usuário é feita na tela de edição do usuário.</p>
+  <table>
+    <thead><tr><th>Nome</th><th>Descrição</th></tr></thead>
+    <tbody>
+      {% for perfil in perfis %}
+        <tr><td>{{ perfil.nome }}</td><td>{{ perfil.descricao or '-' }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

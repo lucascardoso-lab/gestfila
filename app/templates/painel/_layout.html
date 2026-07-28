@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}Painel{% endblock %} - GESTFILA</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%23FFFFFF'/%3E%3Ctext x='50' y='72' font-family='Arial,sans-serif' font-size='68' font-weight='700' text-anchor='middle' fill='%23C0392B'%3EG%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/gestfila.css') }}">
+  <style>
+    :root {
+      /* Tons próprios do painel de TV (fundo escuro) - nunca fizeram parte da
+         paleta oficial de gestfila.css (essa é do sistema administrativo);
+         só formalizados aqui como variável nomeada (adendo do redesign do
+         painel de TV) - os valores em si não mudaram. */
+      --painel-fundo: #0d1b2a;
+      --painel-fundo-header: #13263b;
+      --painel-fundo-elemento: #1b2e42;
+      --painel-texto-secundario: #9fb3c8;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--painel-fundo); color: #fff;
+    }
+    .painel { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+    /* Regra genérica de <header>/.centro - também usada por painel/indisponivel.html
+       (TV desativada), que não faz parte deste redesign - mantida intocada para
+       essa tela continuar com a mesma aparência de sempre. */
+    header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 1rem 2.5rem; background: var(--painel-fundo-header); flex-shrink: 0;
+    }
+    header h1 { font-size: 1.5rem; margin: 0; }
+
+    /* .cabecalho (não o <header> genérico) para não alterar painel/indisponivel.html,
+       que usa <header> puro e deve continuar com a aparência de sempre. */
+    .cabecalho { border-bottom: 3px solid var(--gf-primaria); }
+    .cabecalho-marca { display: flex; align-items: center; gap: 1rem; }
+    .cabecalho-unidade {
+      font-size: 1.15rem; font-weight: 600; color: #fff;
+      padding-left: 1rem; border-left: 1px solid var(--painel-fundo-elemento);
+    }
+    .cabecalho-info { display: flex; align-items: center; gap: 1.25rem; font-variant-numeric: tabular-nums; }
+    #relogio { font-size: 1.3rem; font-weight: 700; }
+    #data {
+      color: var(--painel-texto-secundario); font-size: .95rem; text-transform: capitalize;
+    }
+
+    #status-conexao {
+      font-size: .85rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+      padding: .4rem 1rem; border-radius: 999px; background: #2a3b4d; transition: background-color .3s ease;
+    }
+    #status-conexao.conectado { background: var(--gf-sucesso); }
+    #status-conexao.reconectando { background: var(--gf-alerta); }
+    #status-conexao.desconectado { background: var(--gf-primaria-escura); }
+
+    #mensagem-vazio { font-size: 1.6rem; color: var(--painel-texto-secundario); text-align: center; margin-top: 3rem; }
+
+    footer {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: .75rem 2.5rem; background: var(--painel-fundo-header); font-size: 1rem;
+      color: var(--painel-texto-secundario); flex-shrink: 0; border-top: 1px solid var(--painel-fundo-elemento);
+    }
+    .rodape-mensagem { font-style: italic; }
+
+    .centro {
+      flex: 1; display: flex; align-items: center; justify-content: center; text-align: center;
+    }
+    .centro p { font-size: 1.8rem; color: var(--painel-texto-secundario); max-width: 700px; }
+
+    /* --- Painel de chamada (Sessão B - Parte 2: identidade visual completa).
+       Paleta 100% reaproveitada de gestfila.css (nenhuma cor nova introduzida) -
+       --gf-primaria (vermelho da marca) é o destaque da chamada em andamento
+       (borda/selo do card, nunca o texto do número em si: número gigante em
+       branco puro é o que garante leitura à distância numa TV; o vermelho
+       sinaliza "isto é o card ativo" sem competir com a legibilidade). */
+    .conteudo-principal {
+      flex: 1; display: grid; grid-template-columns: 2fr 1fr; grid-template-rows: 1fr;
+      align-items: stretch; gap: 2rem;
+      padding: 1.5rem 2.5rem; overflow: hidden; min-height: 0;
+    }
+
+    /* Correção do Bloco 1.1: sobrava espaço vazio entre o conteúdo e a borda
+       inferior do card - `grid-template-rows: 1fr` acima garante que a linha
+       do grid (e portanto o card) ocupe exatamente 100% da altura
+       disponível, sem depender do comportamento implícito de
+       `align-content: normal` do grid (que varia conforme o conteúdo);
+       `height: 100%` aqui remove qualquer dúvida remanescente. Com a altura
+       do card garantida, `justify-content`/`align-items: center` (já
+       existentes) centralizam o bloco selo+senha+local de verdade, em vez
+       de ficar ancorado perto do topo com sobra embaixo. */
+    .chamada-atual {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      height: 100%;
+      text-align: center; background: var(--painel-fundo-elemento); border-radius: 20px;
+      padding: 1.5rem; min-height: 0; border: 2px solid var(--gf-primaria);
+      box-shadow: 0 0 40px -12px rgba(192, 57, 43, .55);
+    }
+
+    /* Animação de nova chamada (Sessão B - Parte 3): fade + leve zoom na
+       entrada, com o glow/borda mais intensos relaxando ao longo de ~3s até
+       o estado de repouso já definido acima (nunca looping/piscando - roda
+       uma vez só por chamada, ver JS). Disparada só em evento 'chamada' AO
+       VIVO (nova chamada ou 'Tocar') - nunca na reconstrução de histórico
+       via reconexão/reload (mesmo princípio já usado no áudio, seção 10.13:
+       não repetir efeito nenhum só porque a TV recarregou). */
+    @keyframes chamada-entrada {
+      from { opacity: 0; transform: scale(.94); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    @keyframes chamada-destaque {
+      from { box-shadow: 0 0 70px -4px rgba(192, 57, 43, .95); border-color: #fff; }
+      to { box-shadow: 0 0 40px -12px rgba(192, 57, 43, .55); border-color: var(--gf-primaria); }
+    }
+    .chamada-atual.animar {
+      animation: chamada-entrada .45s ease-out, chamada-destaque 3s ease-out;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .chamada-atual.animar { animation: none; }
+    }
+    /* Bloco 2 (acessibilidade): prioridade não pode depender só da cor de
+       fundo do card (público de clínica - idosos, baixa visão, daltonismo).
+       Fundo branco + texto/ícone escuros de propósito - a cor de fundo do
+       card já usa `dados.cor` (dinâmica, cadastrada por tipo de senha), então
+       um selo com fundo fixo e alto contraste continua legível não importa
+       qual `dados.cor` vier. `[hidden]` explícito por baixo do `display:
+       inline-flex` acima - mesma correção já documentada em
+       atendimento/_layout.html (a especificidade empatada faria o
+       `display: inline-flex` vencer o `[hidden]` nativo do navegador, sem
+       essa regra própria). */
+    .chamada-badge-prioritario {
+      display: inline-flex; align-items: center; gap: .4rem;
+      font-size: clamp(.9rem, 1.4vw, 1.2rem); font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+      color: var(--gf-primaria-escura); background: #fff; border: 2px solid var(--gf-primaria-escura);
+      border-radius: 999px; padding: .3rem 1rem; margin: 0 0 1rem;
+    }
+    .chamada-badge-prioritario[hidden] { display: none; }
+    .chamada-badge-prioritario svg { width: 1.1em; height: 1.1em; flex-shrink: 0; }
+
+    .chamada-atual-rotulo {
+      font-size: clamp(1rem, 1.6vw, 1.4rem); font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+      color: #fff; background: var(--gf-primaria); border-radius: 999px;
+      padding: .4rem 1.4rem; margin: 0 0 1rem;
+    }
+    .chamada-atual-valor {
+      /* limitado também por vh (não só vw) para não estourar a altura em
+         telas mais baixas/largas (1366x768) - item 9 do pedido. */
+      font-size: clamp(120px, min(14vw, 24vh), 260px);
+      font-weight: 800; line-height: 1; margin: 0; color: #fff;
+    }
+    /* Correção do Problema 2 (chamada por nome): nome de paciente é texto de
+       comprimento IMPREVISÍVEL (1 palavra a um nome composto inteiro) -
+       diferente do código da senha (poucos caracteres, tamanho previsível),
+       então não pode usar o mesmo clamp() gigante da senha (estourava a tela
+       com 2+ palavras). O font-size final vem de tamanhoFonteNome() no JS
+       (escalado pelo nº de caracteres) - esta classe só ajusta o
+       comportamento de quebra de linha, que o modo "senha" não precisa. */
+    .chamada-atual-valor--nome {
+      line-height: 1.15; white-space: normal; word-break: break-word; hyphens: auto;
+    }
+    .chamada-atual-dirija {
+      font-size: clamp(1rem, 1.6vw, 1.4rem); letter-spacing: .08em; text-transform: uppercase;
+      color: var(--gf-info); margin: 1.5rem 0 .5rem; font-weight: 600;
+    }
+    .chamada-atual-local {
+      font-size: clamp(60px, min(6vw, 11vh), 130px); font-weight: 700; line-height: 1.1; margin: 0; color: #fff;
+    }
+
+    /* Correção do Bloco 1.2: com poucos itens, a lista ficava ancorada no
+       topo da coluna (default do flex, `justify-content: flex-start`),
+       sobrando uma área vazia grande até o fim - `justify-content: center`
+       centraliza o bloco (título + lista) como um todo dentro da coluna,
+       mesma técnica aplicada ao card em 1.1, em vez de deixar a sobra
+       acumulada só embaixo. Não adiciona conteúdo novo (isso é o Bloco 3,
+       opcional) - só redistribui o espaço que já existe. */
+    .ultimas-chamadas { display: flex; flex-direction: column; justify-content: center; height: 100%; min-height: 0; }
+    .ultimas-chamadas h2 {
+      font-size: 1.2rem; color: var(--painel-texto-secundario); text-transform: uppercase;
+      letter-spacing: .05em; margin: 0 0 1rem; font-weight: 600;
+    }
+    #lista-ultimas { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+    #lista-ultimas li {
+      display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+      padding: .9rem 1rem; margin-bottom: .6rem; border-radius: 8px;
+      background: var(--painel-fundo-elemento); font-size: 1.3rem;
+      border-left: 4px solid transparent;
+    }
+    #lista-ultimas .item-local { color: var(--painel-texto-secundario); font-size: 1rem; }
+    #lista-ultimas .item-valor { font-weight: 700; }
+
+    /* Correção do Problema 4: .gf-watermark (gestfila.css) fica fixo no
+       canto inferior direito da VIEWPORT, sobrepondo o texto do rodapé
+       ("Última atualização", também no canto direito) - reposicionado pra
+       cima da barra do rodapé em vez de por cima dela. Sobrescrita só
+       aqui (não em gestfila.css, que é compartilhado com o resto do
+       sistema) - .gf-watermark hoje só é usado nesta página, mas evita
+       tocar o arquivo de identidade visual global por uma correção que é
+       só deste layout específico. */
+    .gf-watermark { bottom: 3.5rem; }
+  </style>
+</head>
+<body>
+  {% block conteudo %}{% endblock %}
+  {# Watermark discreto de marca (seção "Painel de TV") - nunca compete com a
+     informação real da tela (senha/local chamados), só um lembrete de marca
+     no canto, baixa opacidade. #}
+  <span class="gf-logo gf-watermark"><span class="gf-logo-gest">GEST</span><span class="gf-logo-fila">FILA</span></span>
+</body>
+</html>

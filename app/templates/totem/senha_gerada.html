@@ -1,0 +1,16 @@
+{% extends "totem/_layout.html" %}
+
+{% block titulo %}Senha gerada - Totem{% endblock %}
+
+{% block conteudo %}
+  <meta http-equiv="refresh" content="10;url={{ url_for('totem.tela_raiz', slug=totem.slug) }}">
+  <header>
+    <h1>Sua senha</h1>
+    <p>{{ unidade.nome }}</p>
+  </header>
+
+  <div class="senha-codigo">{{ senha.codigo }}</div>
+  <p class="mensagem">Aguarde ser chamado no painel. Esta tela voltará ao início em alguns segundos.</p>
+
+  <a class="botao-totem navegacao" href="{{ url_for('totem.tela_raiz', slug=totem.slug) }}" style="margin-top:2rem; max-width:320px;">Novo atendimento</a>
+{% endblock %}

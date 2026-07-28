@@ -1,0 +1,52 @@
+{% macro form_filtros(filtros, opcoes, endpoint, querystring, mostrar_operador=False) %}
+  <form method="get" action="{{ url_for(endpoint) }}" class="filtros">
+    {% if current_user.is_super_admin and querystring.empresa_id %}
+      <input type="hidden" name="empresa_id" value="{{ querystring.empresa_id }}">
+    {% endif %}
+    <div>
+      <label for="unidade_id">Unidade</label>
+      <select id="unidade_id" name="unidade_id">
+        <option value="">Todas</option>
+        {% for u in opcoes.unidades %}
+          <option value="{{ u.id }}" {{ 'selected' if filtros.unidade_id == u.id else '' }}>{{ u.nome }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="fila_id">Fila</label>
+      <select id="fila_id" name="fila_id">
+        <option value="">Todas</option>
+        {% for f in opcoes.filas %}
+          <option value="{{ f.id }}" {{ 'selected' if filtros.fila_id == f.id else '' }}>{{ f.nome }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% if mostrar_operador %}
+      <div>
+        <label for="operador_id">Operador</label>
+        <select id="operador_id" name="operador_id">
+          <option value="">Todos</option>
+          {% for o in opcoes.operadores %}
+            <option value="{{ o.id }}" {{ 'selected' if filtros.operador_id == o.id else '' }}>{{ o.nome }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    {% endif %}
+    <div>
+      <label for="data_inicio">De</label>
+      <input type="text" id="data_inicio" name="data_inicio" value="{{ filtros.data_inicio_str }}" placeholder="AAAA-MM-DD">
+    </div>
+    <div>
+      <label for="data_fim">Até</label>
+      <input type="text" id="data_fim" name="data_fim" value="{{ filtros.data_fim_str }}" placeholder="AAAA-MM-DD">
+    </div>
+    <div>
+      <button class="botao" type="submit">Filtrar</button>
+    </div>
+  </form>
+  <p class="exportar">
+    Exportar:
+    <a href="{{ url_for(endpoint, formato='csv', **querystring) }}">CSV</a>
+    <a href="{{ url_for(endpoint, formato='xlsx', **querystring) }}">Excel</a>
+  </p>
+{% endmacro %}

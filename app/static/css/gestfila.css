@@ -1,0 +1,65 @@
+/* Identidade visual GESTFILA - variáveis globais de cor + logo tipográfico.
+   Carregado por todo layout do sistema (admin, atendimento, relatórios, auth,
+   totem, painel/TV) - cada layout continua com seu próprio <style> específico
+   de tela, mas todos referenciam estas variáveis em vez de cores soltas, pra
+   manutenção futura da paleta ficar num único lugar. */
+
+:root {
+  --gf-primaria: #C0392B;
+  --gf-primaria-escura: #922B21;
+  --gf-primaria-clara: #FADBD8;
+  --gf-cinza-escuro: #2C3E50;
+  --gf-cinza-medio: #95A5A6;
+  --gf-cinza-claro: #F4F6F7;
+  --gf-branco: #FFFFFF;
+  --gf-sucesso: #27AE60;
+  --gf-alerta: #E67E22;
+  --gf-info: #2980B9;
+}
+
+/* Logo tipográfico "GESTFILA" - puro HTML/CSS, sem imagem/arquivo externo.
+   "GEST" usa --gf-cinza-escuro por padrão (funciona sobre fundos claros -
+   login, totem, corpo das telas); a variante `.gf-logo--claro` troca "GEST"
+   pra branco, usada sempre que o logo aparece sobre um fundo escuro (navbar
+   dos painéis admin/atendimento/relatórios, watermark do painel de TV) -
+   sem essa variante "GEST" ficaria invisível (mesma cor do fundo). */
+.gf-logo {
+  display: inline-flex;
+  align-items: baseline;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.gf-logo-gest { color: var(--gf-cinza-escuro); }
+.gf-logo-fila { color: var(--gf-primaria); }
+.gf-logo--claro .gf-logo-gest { color: var(--gf-branco); }
+
+.gf-logo--navbar { font-size: 1.3rem; height: 40px; align-items: center; }
+.gf-logo--grande { font-size: 2.4rem; }
+
+.gf-marca {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .35rem;
+  text-align: center;
+}
+.gf-subtitulo { font-size: .85rem; font-weight: 400; color: var(--gf-cinza-medio); }
+.gf-slogan { font-size: .8rem; font-weight: 400; font-style: italic; color: var(--gf-cinza-medio); }
+
+/* Watermark discreto (seção "Painel de TV") - texto de marca no canto,
+   opacidade baixa, nunca compete com a informação real da tela (senha/local
+   chamados). */
+.gf-watermark {
+  position: fixed;
+  bottom: .75rem;
+  right: 1rem;
+  font-size: 1rem;
+  font-weight: 700;
+  opacity: .35;
+  pointer-events: none;
+  letter-spacing: .04em;
+}
+.gf-watermark .gf-logo-gest { color: var(--gf-cinza-medio); }
+.gf-watermark .gf-logo-fila { color: var(--gf-primaria); }

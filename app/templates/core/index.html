@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block titulo %}Início - GESTFILA{% endblock %}
+
+{% block cabecalho_marca %}
+  <span class="gf-logo gf-logo--navbar" style="margin-bottom: 1rem;"><span class="gf-logo-gest">GEST</span><span class="gf-logo-fila">FILA</span></span>
+{% endblock %}
+
+{% block conteudo %}
+  <div class="top-bar">
+    <h1>Olá, {{ usuario.nome }}</h1>
+    <a href="{{ url_for('auth.logout') }}">Sair</a>
+  </div>
+  <p>
+    {% if is_super_admin %}
+      Você está autenticado como <strong>Super Admin</strong>.
+    {% else %}
+      Empresa atual: <strong>{{ empresa_id }}</strong>.
+    {% endif %}
+  </p>
+  {% if is_super_admin or usuario.tem_perfil('admin') %}
+    <p><a href="{{ url_for('admin.painel') }}">Ir para administração →</a></p>
+  {% endif %}
+  {% if usuario.tem_perfil('atendente', 'executor', 'atendente_executor', 'admin') %}
+    <p><a href="{{ url_for('atendimento.listar_filas') }}">Ir para atendimento (chamada de senhas) →</a></p>
+  {% endif %}
+  {% if is_super_admin or usuario.tem_perfil('gerencial', 'admin') %}
+    <p><a href="{{ url_for('core.dashboard') }}">Ir para o dashboard →</a></p>
+    <p><a href="{{ url_for('relatorios.index') }}">Ir para relatórios →</a></p>
+  {% endif %}
+{% endblock %}

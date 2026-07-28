@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard - GESTFILA</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%23FFFFFF'/%3E%3Ctext x='50' y='72' font-family='Arial,sans-serif' font-size='68' font-weight='700' text-anchor='middle' fill='%23C0392B'%3EG%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/gestfila.css') }}">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--gf-cinza-claro);
+      color: var(--gf-cinza-escuro);
+    }
+    nav {
+      background: var(--gf-cinza-escuro);
+      color: #fff;
+      padding: .9rem 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    nav .grupo-nav-esquerda { display: flex; align-items: center; }
+    nav .gf-logo { margin-right: 1.25rem; }
+    nav a { color: #cfd6e4; text-decoration: none; margin-right: 1.25rem; font-size: .9rem; padding-bottom: .2rem; border-bottom: 2px solid transparent; }
+    nav a:hover { color: #fff; border-bottom-color: var(--gf-primaria); }
+
+    .barra-contexto {
+      background: var(--gf-branco); border-bottom: 1px solid var(--gf-cinza-medio);
+      padding: .55rem 1.5rem; display: flex; justify-content: center;
+    }
+    .form-contexto { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; max-width: 1100px; width: 100%; }
+    .form-contexto label { margin: 0; font-size: .8rem; color: #555; white-space: nowrap; }
+    .form-contexto select {
+      padding: .35rem .5rem; border: 1px solid var(--gf-cinza-medio); border-radius: 6px;
+      font-size: .85rem; background: #fff; max-width: 260px;
+    }
+    .form-contexto button { padding: .35rem .75rem; font-size: .8rem; }
+
+    .botao {
+      display: inline-block; padding: .55rem 1rem; background: var(--gf-primaria); color: #fff;
+      border: none; border-radius: 8px; font-size: .9rem; text-decoration: none; cursor: pointer;
+    }
+    .botao:hover { background: var(--gf-primaria-escura); }
+    .botao.secundario { background: #fff; color: var(--gf-cinza-escuro); border: 1px solid var(--gf-cinza-medio); }
+    .botao.secundario:hover { background: var(--gf-cinza-claro); }
+
+    main { max-width: 1100px; margin: 2rem auto; padding: 0 1.5rem; }
+    h1 { font-size: 1.5rem; margin-bottom: .25rem; }
+    .subtitulo { color: #666; margin-bottom: 1.5rem; font-size: .9rem; }
+
+    .grade-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+    .kpi { background: #fff; border-radius: 12px; border: 1px solid var(--gf-cinza-claro); box-shadow: 0 2px 10px rgba(0,0,0,.05); padding: 1.25rem 1.4rem; }
+    .kpi-numero { font-size: 2.1rem; font-weight: 700; color: var(--gf-primaria); line-height: 1.1; }
+    .kpi-label { font-size: .85rem; color: #666; margin-top: .3rem; }
+
+    .card { background: #fff; padding: 1.25rem; border-radius: 12px; border: 1px solid var(--gf-cinza-claro); box-shadow: 0 2px 10px rgba(0,0,0,.05); margin-bottom: 1.5rem; }
+    .card h2 { font-size: 1.05rem; margin: 0 0 1rem; }
+
+    .grade-duas-colunas { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; }
+
+    .lista-filas { display: flex; flex-direction: column; gap: .5rem; }
+    .linha-fila { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .5rem .1rem; border-bottom: 1px solid #f0f1f3; font-size: .9rem; }
+    .linha-fila:last-child { border-bottom: none; }
+    .linha-fila .nome-fila { font-weight: 600; }
+    .linha-fila .unidade-fila { color: #888; font-size: .8rem; font-weight: 400; }
+    .linha-fila .aguardando-fila { color: #666; font-size: .82rem; white-space: nowrap; }
+    .badge { display: inline-block; padding: .15rem .55rem; border-radius: 999px; font-size: .75rem; white-space: nowrap; }
+    .badge.ativa { background: #e3f6e8; color: var(--gf-sucesso); }
+    .badge.fora_horario { background: #fdf0e2; color: var(--gf-alerta); }
+    .badge.inativa { background: #eceef0; color: var(--gf-cinza-medio); }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: .55rem .5rem; border-bottom: 1px solid #eceef2; font-size: .85rem; }
+    th { color: #555; font-weight: 600; }
+    tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: var(--gf-primaria-clara); }
+    .vazio { color: #999; font-size: .85rem; }
+
+    #grafico-chamadas-hora { max-height: 260px; }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="grupo-nav-esquerda">
+      <span class="gf-logo gf-logo--navbar gf-logo--claro"><span class="gf-logo-gest">GEST</span><span class="gf-logo-fila">FILA</span></span>
+      <a href="{{ url_for('core.index') }}">🏠 Painel de Senhas</a>
+      {% if current_user.is_super_admin or current_user.tem_perfil('admin') %}
+        <a href="{{ url_for('admin.painel') }}">⚙ Administração</a>
+      {% endif %}
+      {% if current_user.is_super_admin or current_user.tem_perfil('admin', 'gerencial') %}
+        <a href="{{ url_for('relatorios.index') }}">📈 Relatórios</a>
+      {% endif %}
+      {% if current_user.tem_perfil('atendente', 'executor', 'atendente_executor', 'admin') %}
+        <a href="{{ url_for('atendimento.listar_filas') }}">🎫 Atendimento</a>
+      {% endif %}
+    </div>
+    <a href="{{ url_for('auth.logout') }}">Sair ({{ current_user.nome }})</a>
+  </nav>
+
+  {% if pode_filtrar_unidade %}
+    <div class="barra-contexto">
+      <form method="get" action="{{ request.path }}" class="form-contexto">
+        {% if current_user.is_super_admin %}
+          <label for="contexto-empresa">Empresa</label>
+          <select id="contexto-empresa" name="empresa_id" onchange="var u = document.getElementById('contexto-unidade'); if (u) { u.value = ''; } this.form.submit();">
+            {% for emp in empresas_para_contexto() %}
+              <option value="{{ emp.id }}" {{ 'selected' if emp.id == empresa.id else '' }}>{{ emp.nome }}</option>
+            {% endfor %}
+          </select>
+        {% endif %}
+
+        <label for="contexto-unidade">Unidade</label>
+        <select id="contexto-unidade" name="unidade_id" onchange="this.form.submit()">
+          <option value="">Todas as unidades</option>
+          {% for u in unidades_do_contexto(empresa) %}
+            <option value="{{ u.id }}" {{ 'selected' if unidade and u.id == unidade.id else '' }}>[{{ u.sigla_exibicao }}] {{ u.nome }}</option>
+          {% endfor %}
+        </select>
+
+        <button class="botao secundario" type="submit">Aplicar</button>
+      </form>
+    </div>
+  {% endif %}
+
+  <main>
+    <h1>Dashboard</h1>
+    <p class="subtitulo">
+      {{ empresa.nome }}{% if unidade %} · {{ unidade.nome }}{% else %} · Todas as unidades{% endif %}
+    </p>
+
+    <div class="grade-kpis">
+      <div class="kpi">
+        <div class="kpi-numero" id="kpi-aguardando">{{ kpis.aguardando }}</div>
+        <div class="kpi-label">Senhas aguardando agora</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-numero" id="kpi-chamadas-hoje">{{ kpis.chamadas_hoje }}</div>
+        <div class="kpi-label">Chamadas hoje</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-numero" id="kpi-tempo-espera">—</div>
+        <div class="kpi-label">Tempo médio de espera hoje</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-numero" id="kpi-filas-ativas">{{ kpis.filas_ativas }}</div>
+        <div class="kpi-label">Filas ativas</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Chamadas por hora (hoje)</h2>
+      <canvas id="grafico-chamadas-hora"></canvas>
+    </div>
+
+    <div class="grade-duas-colunas">
+      <div class="card">
+        <h2>Filas</h2>
+        {% if not filas_status %}
+          <p class="vazio">Nenhuma fila cadastrada nesta unidade/empresa ainda.</p>
+        {% else %}
+          <div class="lista-filas">
+            {% for item in filas_status %}
+              <div class="linha-fila">
+                <span>
+                  <span class="nome-fila">{{ item.fila.nome }}</span>
+                  <span class="unidade-fila">({{ item.fila.unidade.nome }})</span>
+                </span>
+                <span class="aguardando-fila">{{ item.aguardando }} aguardando</span>
+                <span class="badge {{ item.status }}">
+                  {{ {'ativa': 'Ativa', 'fora_horario': 'Fora do horário', 'inativa': 'Inativa'}[item.status] }}
+                </span>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>Últimos atendimentos</h2>
+        {% if not chamadas %}
+          <p class="vazio">Nenhuma chamada registrada ainda.</p>
+        {% else %}
+          <table>
+            <thead><tr><th>Senha</th><th>Fila</th><th>Local</th><th>Nome</th><th>Quando</th></tr></thead>
+            <tbody>
+              {% for chamada in chamadas %}
+                <tr>
+                  <td>{{ chamada.codigo }}</td>
+                  <td>{{ chamada.fila }}</td>
+                  <td>{{ chamada.local }}</td>
+                  <td>{{ chamada.nome_paciente or '—' }}</td>
+                  <td><span class="hora-relogio" data-hora-de="{{ chamada.timestamp.isoformat() }}">—</span></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% endif %}
+      </div>
+    </div>
+  </main>
+
+  <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+  <script>
+    (function () {
+      const URL_KPIS = {{ url_for('core.api_dashboard_kpis') | tojson }};
+      const TIMESTAMPS_CHAMADAS_HOJE = {{ timestamps_chamadas_hoje | tojson }};
+      const POLLING_MS = 30000;
+
+      // Timestamps do servidor são UTC "naive" (datetime.utcnow()) - o "Z" força o
+      // navegador a interpretar como UTC e converter pro fuso local dele mesmo (mesmo
+      // padrão já usado em toda a tela de Atendimento - nunca formatar hora no
+      // servidor).
+      function formatarHoraLocal(isoUtc) {
+        return new Date(isoUtc + "Z").toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      }
+      document.querySelectorAll(".hora-relogio[data-hora-de]").forEach((el) => {
+        el.textContent = formatarHoraLocal(el.dataset.horaDe);
+      });
+
+      function formatarTempo(segundos) {
+        if (segundos === null || segundos === undefined) return "—";
+        const min = Math.floor(segundos / 60);
+        const seg = Math.round(segundos % 60);
+        return `${min}m ${String(seg).padStart(2, "0")}s`;
+      }
+
+      const elTempoEspera = document.getElementById("kpi-tempo-espera");
+      elTempoEspera.textContent = formatarTempo({{ kpis.tempo_medio_espera_segundos | tojson }});
+
+      // Gráfico de barras (Chart.js) - "chamadas por hora" agrupado no fuso LOCAL do
+      // navegador de quem está vendo o dashboard (getHours(), não getUTCHours()) -
+      // mesma convenção de nunca calcular hora-de-parede no servidor.
+      const contagemPorHora = new Array(24).fill(0);
+      TIMESTAMPS_CHAMADAS_HOJE.forEach((iso) => {
+        const hora = new Date(iso + "Z").getHours();
+        contagemPorHora[hora] += 1;
+      });
+      const rotulosHora = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, "0") + "h");
+
+      new Chart(document.getElementById("grafico-chamadas-hora"), {
+        type: "bar",
+        data: {
+          labels: rotulosHora,
+          datasets: [{
+            label: "Chamadas",
+            data: contagemPorHora,
+            backgroundColor: "#C0392B",
+            borderRadius: 4,
+          }],
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+        },
+      });
+
+      // Polling dos 4 KPIs a cada 30s (item 3 do pedido) - só os cartões do topo,
+      // não a página inteira (gráfico/lista de filas/tabela continuam do render
+      // inicial - recarregar tudo a cada 30s seria mais pesado que o necessário).
+      function atualizarKpis() {
+        fetch(URL_KPIS)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((dados) => {
+            if (!dados) return;
+            document.getElementById("kpi-aguardando").textContent = dados.aguardando;
+            document.getElementById("kpi-chamadas-hoje").textContent = dados.chamadas_hoje;
+            document.getElementById("kpi-tempo-espera").textContent = formatarTempo(dados.tempo_medio_espera_segundos);
+            document.getElementById("kpi-filas-ativas").textContent = dados.filas_ativas;
+          })
+          .catch(() => {}); // rede instável não deve quebrar a tela - só tenta de novo no próximo ciclo
+      }
+      setInterval(atualizarKpis, POLLING_MS);
+    })();
+  </script>
+</body>
+</html>

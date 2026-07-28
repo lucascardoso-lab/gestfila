@@ -1,0 +1,40 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}Locais{% endblock %}
+
+{% block conteudo %}
+  <h1>Locais</h1>
+  {% set nome_tela = self.titulo() %}
+  {% include "admin/_breadcrumb.html" %}
+  <p class="subtitulo">
+    <a class="botao" href="{{ url_for('admin.novo_local', empresa_id=empresa.id) }}">+ Novo local</a>
+    <a class="botao secundario" href="{{ url_for('admin.ocupacao_locais', empresa_id=empresa.id) }}">Ver ocupação atual</a>
+  </p>
+  <table>
+    <thead><tr><th>Nome</th><th>Unidade</th><th>Tipo</th><th>Status</th><th>Ações</th></tr></thead>
+    <tbody>
+      {% for local in locais %}
+        <tr>
+          <td>{{ local.nome }}</td>
+          <td>{{ local.unidade.nome }}</td>
+          <td>{{ {'recepcao': 'Recepção', 'coleta': 'Coleta', 'outro': 'Outro'}.get(local.tipo, '—') }}</td>
+          <td><span class="badge {{ 'ativo' if local.ativo else 'inativo' }}">{{ 'Ativo' if local.ativo else 'Inativo' }}</span></td>
+          <td class="acoes">
+            <a href="{{ url_for('admin.editar_local', local_id=local.id) }}">Editar</a>
+            <a href="{{ url_for('admin.rodizio_local', local_id=local.id) }}">Configurar rodízio</a>
+            <form class="inline" method="post" action="{{ url_for('admin.alternar_local', local_id=local.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="link" type="submit">{{ 'Desativar' if local.ativo else 'Ativar' }}</button>
+            </form>
+            <form class="inline" method="post" action="{{ url_for('admin.excluir_local', local_id=local.id) }}" onsubmit="return confirm('Excluir definitivamente o local \'{{ local.nome }}\'? Esta ação não pode ser desfeita.');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="link-perigo" type="submit">Excluir</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5">Nenhum local cadastrado.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

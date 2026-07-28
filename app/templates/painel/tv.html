@@ -1,0 +1,372 @@
+{% extends "painel/_layout.html" %}
+
+{% block titulo %}{{ tv.nome }} - Painel{% endblock %}
+
+{% block conteudo %}
+  <div class="painel">
+    <header class="cabecalho">
+      <div class="cabecalho-marca">
+        <span class="gf-logo gf-logo--navbar gf-logo--claro"><span class="gf-logo-gest">GEST</span><span class="gf-logo-fila">FILA</span></span>
+        <span class="cabecalho-unidade">{{ tv.unidade.nome }} — {{ tv.nome }}</span>
+      </div>
+      <div class="cabecalho-info">
+        <span id="data">—</span>
+        <span id="relogio">—</span>
+        <span id="status-conexao">Conectando…</span>
+      </div>
+    </header>
+
+    <main class="conteudo-principal">
+      <section class="chamada-atual" id="chamada-atual">
+        <p class="chamada-atual-rotulo">Chamando agora</p>
+        <span class="chamada-badge-prioritario" id="chamada-badge-prioritario" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3 2 20h20L12 3z" fill="currentColor"/>
+            <rect x="11" y="10" width="2" height="5" fill="#fff"/>
+            <rect x="11" y="16.5" width="2" height="2" fill="#fff"/>
+          </svg>
+          Prioritário
+        </span>
+        <p class="chamada-atual-valor" id="chamada-valor">—</p>
+        <p class="chamada-atual-dirija" id="chamada-dirija-rotulo">Dirija-se ao</p>
+        <p class="chamada-atual-local" id="chamada-local">—</p>
+      </section>
+
+      <aside class="ultimas-chamadas">
+        <h2>Últimas chamadas</h2>
+        <ul id="lista-ultimas"></ul>
+        <p id="mensagem-vazio">Aguardando chamadas…</p>
+      </aside>
+    </main>
+
+    <footer>
+      <span class="rodape-mensagem">Tenha em mãos seu documento e sua carteirinha.</span>
+      <span id="contador-chamadas">0 chamadas hoje</span>
+      <span id="ultima-atualizacao">Última atualização: —</span>
+    </footer>
+  </div>
+
+  <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
+  <script>
+    (function () {
+      const TV_ID = {{ tv.id }};
+      const TV_SOM_ATIVO = {{ tv.som_ativo | tojson }};
+      const TV_VOLUME = {{ tv.volume | tojson }};
+      const TEXTO_CHAMADA_SENHA_TEMPLATE = {{ empresa.texto_chamada_senha_template | tojson }};
+      const TEXTO_CHAMADA_NOME_TEMPLATE = {{ empresa.texto_chamada_nome_template | tojson }};
+      const MAX_ITENS_HISTORICO = 5;
+      const RECARGA_DIARIA_MS = 24 * 60 * 60 * 1000;
+
+      const elStatus = document.getElementById("status-conexao");
+      const elRelogio = document.getElementById("relogio");
+      const elData = document.getElementById("data");
+      const elChamadaAtual = document.getElementById("chamada-atual");
+      const elBadgePrioritario = document.getElementById("chamada-badge-prioritario");
+      const elChamadaValor = document.getElementById("chamada-valor");
+      const elChamadaLocal = document.getElementById("chamada-local");
+      const elListaUltimas = document.getElementById("lista-ultimas");
+      const elVazio = document.getElementById("mensagem-vazio");
+      const elContador = document.getElementById("contador-chamadas");
+      const elAtualizacao = document.getElementById("ultima-atualizacao");
+
+      let totalChamadas = 0;
+      let chamadaAtualDados = null;
+
+      // --- Relógio/data (client-side, nunca formatado no servidor - mesma
+      // convenção já usada no resto do projeto, seções 10.11/10.12.2). ---
+      function atualizarRelogio() {
+        const agora = new Date();
+        elRelogio.textContent = agora.toLocaleTimeString("pt-BR");
+        elData.textContent = agora.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" });
+      }
+      atualizarRelogio();
+      setInterval(atualizarRelogio, 1000);
+
+      function atualizarStatus(texto, classe) {
+        elStatus.textContent = texto;
+        elStatus.className = classe || "";
+      }
+
+      function montarTextoChamada(dados) {
+        const template = dados.tipo === "nome" ? TEXTO_CHAMADA_NOME_TEMPLATE : TEXTO_CHAMADA_SENHA_TEMPLATE;
+        return template
+          .replace(/\{senha\}/g, dados.senha || "")
+          .replace(/\{local\}/g, dados.local || "")
+          .replace(/\{nome\}/g, dados.nome_paciente || "");
+      }
+
+      // Escolhe a melhor voz pt disponível, em vez da primeira que aparecer -
+      // vozes "Online"/"Natural"/"Neural" (Edge/Windows mais recente) e vozes
+      // "Google" (Chrome) usam síntese muito mais natural que as vozes SAPI
+      // locais clássicas do Windows (essas tendem a soar robóticas, era o que
+      // estava saindo antes). Dentro de cada nível de qualidade, prefere pt-BR
+      // sobre outras variantes de português (pt-PT, pt-AO, etc.).
+      // (mantida sem nenhuma alteração - correção validada na seção 10.13)
+      function vozPtPreferida() {
+        const vozes = speechSynthesis.getVoices().filter((v) => v.lang && v.lang.toLowerCase().startsWith("pt"));
+        if (!vozes.length) return null;
+
+        function pontuar(v) {
+          const nome = v.name.toLowerCase();
+          let pontos = 0;
+          if (nome.includes("online") || nome.includes("natural") || nome.includes("neural")) pontos += 3;
+          if (nome.includes("google")) pontos += 2;
+          if (v.lang.toLowerCase() === "pt-br") pontos += 1;
+          return pontos;
+        }
+
+        return [...vozes].sort((a, b) => pontuar(b) - pontuar(a))[0];
+      }
+
+      function falarChamada(dados) {
+        if (!TV_SOM_ATIVO) return; // som desativado para esta TV (cadastro admin)
+        if (!("speechSynthesis" in window)) return; // sem suporte a TTS - degrada graciosamente
+
+        const fala = new SpeechSynthesisUtterance(montarTextoChamada(dados));
+        const voz = vozPtPreferida();
+        // usa o idioma da própria voz escolhida - forçar "pt-BR" quando a voz é de
+        // outra variante (ex.: pt-PT) é um descompasso que alguns motores tratam
+        // como erro silencioso; só cai no default quando não há voz pt nenhuma.
+        fala.lang = voz ? voz.lang : "pt-BR";
+        fala.volume = TV_VOLUME / 100;
+        if (voz) fala.voice = voz;
+
+        speechSynthesis.cancel(); // evita empilhar falas se varias chamadas chegarem rapido
+        speechSynthesis.speak(fala);
+      }
+
+      // valor central do card: código da senha, ou o nome (chamada por nome,
+      // 2ª etapa da coleta) - mesmo card, só troca o conteúdo, sem variação
+      // visual própria (decisão explícita, ver Sessão A).
+      function valorPrincipal(dados) {
+        return dados.tipo === "nome" ? (dados.nome_paciente || "—") : (dados.senha || "—");
+      }
+
+      // Correção do Problema 2: chamada por nome tem comprimento imprevisível
+      // (de "Ana" a um nome composto inteiro) - o clamp() da senha (pensado
+      // pra um código curto de poucos caracteres) estourava o card com 2+
+      // palavras. Faixas pensadas pro pior caso plausível (nome composto
+      // longo, ~30+ caracteres, ex.: "Maria Aparecida dos Santos Silva"),
+      // não só o caso do teste manual - cada faixa já tem seu próprio teto
+      // limitado por vw/vh, igual ao padrão usado no resto do card (item 9,
+      // responsividade 1920x1080/1366x768).
+      function tamanhoFonteNome(texto) {
+        const tamanho = (texto || "").length;
+        if (tamanho <= 10) return "clamp(48px, min(7vw, 11vh), 110px)";
+        if (tamanho <= 20) return "clamp(40px, min(5.5vw, 9vh), 86px)";
+        if (tamanho <= 32) return "clamp(32px, min(4.2vw, 7vh), 64px)";
+        return "clamp(26px, min(3.4vw, 5.5vh), 50px)";
+      }
+
+      function renderizarChamadaAtual(dados) {
+        const valor = valorPrincipal(dados);
+        elChamadaValor.textContent = valor; // textContent - nunca innerHTML com dado do servidor/WebSocket
+        elChamadaLocal.textContent = dados.local || "—";
+
+        if (dados.tipo === "nome") {
+          elChamadaValor.classList.add("chamada-atual-valor--nome");
+          elChamadaValor.style.fontSize = tamanhoFonteNome(valor);
+        } else {
+          elChamadaValor.classList.remove("chamada-atual-valor--nome");
+          elChamadaValor.style.fontSize = "";
+        }
+
+        // seção 10.4: cor do tipo de senha (ex.: prioritárias) destaca o card -
+        // sem cor configurada, mantém a cor padrão do tema.
+        //
+        // Bloco 2 (acessibilidade): o selo "Prioritário" usa exatamente o
+        // mesmo sinal que já decide a cor (`dados.cor`) - o backend só inclui
+        // esse campo no payload quando `Senha.prioridade` é True
+        // (app/atendimento/helpers.py::_payload_chamada, adendo 10.27). Não
+        // reimplementa nenhum critério de prioridade aqui no JS - só reflete
+        // o mesmo gate já existente, então cor e selo NUNCA saem
+        // dessincronizados. Sem cor + sem selo = chamada normal, como pedido.
+        if (dados.cor) {
+          elChamadaAtual.style.backgroundColor = dados.cor;
+          elChamadaValor.style.color = "#fff";
+          elBadgePrioritario.hidden = false;
+        } else {
+          elChamadaAtual.style.backgroundColor = "";
+          elChamadaValor.style.color = "";
+          elBadgePrioritario.hidden = true;
+        }
+      }
+
+      // Animação de nova chamada (fade + leve zoom, ~3s de destaque - Sessão B
+      // Parte 3): disparada só a partir daqui, nunca de recarregarHistorico()
+      // - mesmo princípio já usado no áudio (seção 10.13): nada de efeito
+      // "de chamada nova" numa reconexão/reload, só em evento ao vivo.
+      // Remover e reaplicar a classe (com um reflow forçado no meio) é
+      // necessário porque o navegador não reinicia uma animação CSS só por
+      // ela já estar presente na classList - sem isso, duas chamadas segui-
+      // das (ou um "Tocar" logo após) não re-disparariam o efeito.
+      function dispararAnimacaoDestaque() {
+        elChamadaAtual.classList.remove("animar");
+        void elChamadaAtual.offsetWidth;
+        elChamadaAtual.classList.add("animar");
+      }
+
+      function construirItemHistorico(dados) {
+        const item = document.createElement("li");
+
+        const colunaValor = document.createElement("span");
+        colunaValor.className = "item-valor";
+        colunaValor.textContent = valorPrincipal(dados);
+
+        const colunaLocal = document.createElement("span");
+        colunaLocal.className = "item-local";
+        colunaLocal.textContent = dados.local || "—";
+
+        item.append(colunaValor, colunaLocal);
+
+        // seção 10.4: indicador discreto (borda), não o preenchimento inteiro
+        // que o card em destaque usa - a lista tem menor destaque visual de
+        // propósito (item 4 do pedido), só um sinal de que aquela chamada
+        // era de um tipo prioritário.
+        if (dados.cor) {
+          item.style.borderLeftColor = dados.cor;
+        }
+
+        return item;
+      }
+
+      // Correção do Problema 3: com totalChamadas=1, a chamada em andamento
+      // ocupa o card e não existe NENHUMA outra pra listar - a lista fica
+      // com 0 itens de propósito (não duplicar a chamada em destaque, seção
+      // 10.13/Sessão A), mas antes disso não tinha nenhuma mensagem própria
+      // pra esse estado (só "Aguardando chamadas…", reservada pro caso de
+      // zero chamadas no dia todo) - parecia quebrado (painel "Últimas
+      // chamadas" em branco, só o título). Duas mensagens distintas agora:
+      // uma pra "nada aconteceu ainda hoje", outra pra "só teve a de agora".
+      function atualizarMensagemListaVazia() {
+        if (totalChamadas === 0) {
+          elVazio.textContent = "Aguardando chamadas…";
+          elVazio.style.display = "";
+        } else if (elListaUltimas.children.length === 0) {
+          elVazio.textContent = "Nenhuma chamada anterior hoje.";
+          elVazio.style.display = "";
+        } else {
+          elVazio.style.display = "none";
+        }
+      }
+
+      function adicionarAoHistorico(dados) {
+        elListaUltimas.prepend(construirItemHistorico(dados));
+        while (elListaUltimas.children.length > MAX_ITENS_HISTORICO) {
+          elListaUltimas.removeChild(elListaUltimas.lastElementChild);
+        }
+      }
+
+      function inserirChamada(dados) {
+        // Bug corrigido (seção 10.13): o botão "Tocar" repete o áudio da senha
+        // JÁ chamada, sem nenhuma mudança de status/timestamp - com
+        // `repetir: true` (emitido por registrar_toque), só re-renderiza o
+        // mesmo card em vez de empurrá-lo para "últimas chamadas" (o que
+        // duplicaria a mesma senha na lista).
+        if (dados.repetir) {
+          renderizarChamadaAtual(dados);
+          dispararAnimacaoDestaque();
+          elAtualizacao.textContent = `Última atualização: ${new Date().toLocaleTimeString("pt-BR")}`;
+          return;
+        }
+
+        // a chamada que estava em destaque até agora vira a chamada mais
+        // recente do histórico - nunca duplicada entre o card e a lista.
+        if (totalChamadas > 0) {
+          adicionarAoHistorico(chamadaAtualDados);
+        }
+        chamadaAtualDados = dados;
+        renderizarChamadaAtual(dados);
+        dispararAnimacaoDestaque();
+
+        totalChamadas += 1;
+        elContador.textContent = `${totalChamadas} chamada${totalChamadas === 1 ? "" : "s"} hoje`;
+        elAtualizacao.textContent = `Última atualização: ${new Date().toLocaleTimeString("pt-BR")}`;
+        atualizarMensagemListaVazia();
+      }
+
+      // Bug corrigido (seção 10.13): o histórico só existia na memória do
+      // navegador - reload/reconexão zerava tudo. `entrar_tv` manda o
+      // histórico "de hoje" (server-side, historico_chamadas_tv) toda vez que
+      // a TV conecta/reconecta - a lista é sempre reconstruída a partir daí.
+      function recarregarHistorico(dados) {
+        elListaUltimas.innerHTML = "";
+        const historico = (dados && dados.historico) || []; // cronológico, mais antiga primeiro
+
+        if (!historico.length) {
+          chamadaAtualDados = null;
+          renderizarChamadaAtual({});
+        } else {
+          chamadaAtualDados = historico[historico.length - 1];
+          renderizarChamadaAtual(chamadaAtualDados);
+
+          // o resto do histórico (excluindo a que já está no card), mais
+          // recente primeiro.
+          for (let i = historico.length - 2; i >= 0; i--) {
+            adicionarAoHistorico(historico[i]);
+          }
+        }
+
+        totalChamadas = (dados && dados.total_hoje) || 0;
+        elContador.textContent = `${totalChamadas} chamada${totalChamadas === 1 ? "" : "s"} hoje`;
+        atualizarMensagemListaVazia();
+
+        // Correção do Bloco 0 (causa raiz diferente da regressão presumida -
+        // não foi quebrado pelo ajuste do watermark, é comportamento original
+        // de antes do redesign inteiro: "Última atualização" só era tocado
+        // dentro de inserirChamada(), nunca na reconstrução de histórico -
+        // ficava travado no placeholder "—" indefinidamente sempre que a
+        // chamada em destaque chegava por reconexão/reload em vez de evento
+        // ao vivo nesta sessão do navegador). Reflete o momento da conexão -
+        // "a tela está sincronizada com o servidor agora" - não o horário
+        // real da chamada (isso exigiria mudar o payload do WebSocket, fora
+        // do escopo de CSS/HTML/JS do painel).
+        elAtualizacao.textContent = `Última atualização: ${new Date().toLocaleTimeString("pt-BR")}`;
+      }
+
+      const socket = io("/painel", {
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 10000,
+      });
+
+      // hook de depuração: permite disparar manualmente eventos de teste pelo console
+      // do navegador, ex.:
+      //   __socketPainel.emit('chamada', {tipo: 'senha', local: 'Coleta A 01', senha: 'BR009'})
+      window.__socketPainel = socket;
+
+      socket.on("connect", () => {
+        atualizarStatus("Sincronizando…", "");
+        socket.emit("entrar_tv", { tv_id: TV_ID });
+      });
+
+      socket.on("entrou", (dados) => {
+        atualizarStatus("Conectado", "conectado");
+        recarregarHistorico(dados);
+      });
+
+      socket.on("erro", (dados) => {
+        atualizarStatus((dados && dados.mensagem) || "Erro ao conectar à TV", "desconectado");
+      });
+
+      // 'disconnect' dispara assim que a conexão cai - como reconnection:true
+      // já está ativo, o cliente começa a tentar reconectar imediatamente
+      // (amarelo = tentando). Só vira vermelho (desconectado) se uma
+      // tentativa de fato falhar (connect_error) - nenhuma mudança na
+      // configuração/timers de reconexão em si, só na cor exibida.
+      socket.on("disconnect", () => atualizarStatus("Reconectando…", "reconectando"));
+      socket.on("connect_error", () => atualizarStatus("Sem conexão - tentando reconectar…", "desconectado"));
+
+      // evento principal desta tela: {tipo: 'senha'|'nome', local, senha|nome_paciente, cor?, repetir?}
+      // emitido pelo backend nas salas tv_<id>/fila_<id>.
+      socket.on("chamada", (dados) => {
+        inserirChamada(dados);
+        falarChamada(dados);
+      });
+
+      // Smart TVs ficam com o navegador aberto por dias - recarregar 1x/dia evita
+      // memory leak acumulado na sessão do navegador (seção 8 do BLUEPRINT).
+      setTimeout(() => window.location.reload(), RECARGA_DIARIA_MS);
+    })();
+  </script>
+{% endblock %}

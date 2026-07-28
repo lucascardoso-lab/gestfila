@@ -1,0 +1,131 @@
+{% extends "admin/_layout.html" %}
+
+{% set rotulos_dia = {'domingo': 'Domingo', 'segunda': 'Segunda', 'terca': 'Terça', 'quarta': 'Quarta',
+                       'quinta': 'Quinta', 'sexta': 'Sexta', 'sabado': 'Sábado'} %}
+
+{% block titulo %}{{ 'Editar fila' if fila else 'Nova fila' }}{% endblock %}
+
+{% block conteudo %}
+  <h1>{{ 'Editar fila' if fila else 'Nova fila' }}</h1>
+  {% set nome_tela = self.titulo() %}
+  {% include "admin/_breadcrumb.html" %}
+  <div class="card" style="max-width:760px;">
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <label for="nome">Nome</label>
+      <input type="text" id="nome" name="nome"
+             value="{{ valores.nome if valores else (fila.nome if fila else '') }}" required autofocus>
+
+      <label for="unidade_id">Unidade</label>
+      {% set unidade_sel = valores.unidade_id if valores else (fila.unidade_id if fila else none) %}
+      <select id="unidade_id" name="unidade_id" required>
+        {% for unidade in unidades %}
+          <option value="{{ unidade.id }}" {{ 'selected' if unidade.id == unidade_sel else '' }}>{{ unidade.nome }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="sigla">Sigla (usada no código da senha, ex.: LAB001)</label>
+      <input type="text" id="sigla" name="sigla" maxlength="4"
+             value="{{ valores.sigla if valores else (fila.sigla if fila else '') }}" required>
+
+      <label for="digitos_sequencial">Dígitos do sequencial</label>
+      <input type="text" id="digitos_sequencial" name="digitos_sequencial"
+             value="{{ valores.digitos_sequencial if valores else (fila.digitos_sequencial if fila else 3) }}">
+
+      <label for="prioridade_padrao">Prioridade padrão (0 = sem prioridade)</label>
+      <input type="text" id="prioridade_padrao" name="prioridade_padrao"
+             value="{{ valores.prioridade_padrao if valores else (fila.prioridade_padrao if fila else 0) }}">
+
+      {% set zera_sel = valores.zera_diariamente if valores else (fila.zera_diariamente if fila else true) %}
+      <label><input type="checkbox" name="zera_diariamente" {{ 'checked' if zera_sel else '' }}> Zerar sequencial diariamente</label>
+
+      <label for="prioridade_rodizio">Quantidade de chamadas prioritárias seguidas (rodízio, 0 = sem prioridade)</label>
+      <input type="text" id="prioridade_rodizio" name="prioridade_rodizio"
+             value="{{ valores.prioridade_rodizio if valores else (fila.prioridade_rodizio if fila else 0) }}">
+
+      <label for="totem_id">Totem (deixe em branco para disponibilizar em todos os totens da unidade)</label>
+      {% set totem_sel = valores.totem_id if valores else (fila.totem_id if fila else none) %}
+      <select id="totem_id" name="totem_id">
+        <option value="">Nenhum (todos os totens)</option>
+        {% for unidade_nome, itens_unidade in totens|groupby('unidade.nome') %}
+          <optgroup label="{{ unidade_nome|upper }}">
+            {% for totem in itens_unidade %}
+              <option value="{{ totem.id }}" {{ 'selected' if totem.id == totem_sel else '' }}>[{{ totem.unidade.sigla_exibicao }}] {{ totem.nome }}</option>
+            {% endfor %}
+          </optgroup>
+        {% endfor %}
+      </select>
+
+      <label for="tv_id">TV (atalho - vincula esta fila à TV selecionada)</label>
+      {% set tv_sel = valores.tv_id if valores else (fila.tv_id if fila else none) %}
+      <select id="tv_id" name="tv_id">
+        <option value="">Nenhuma</option>
+        {% for unidade_nome, itens_unidade in tvs|groupby('unidade.nome') %}
+          <optgroup label="{{ unidade_nome|upper }}">
+            {% for tv in itens_unidade %}
+              <option value="{{ tv.id }}" {{ 'selected' if tv.id == tv_sel else '' }}>[{{ tv.unidade.sigla_exibicao }}] {{ tv.nome }}</option>
+            {% endfor %}
+          </optgroup>
+        {% endfor %}
+      </select>
+
+      <label for="tempo_espera_maximo_min">Tempo de espera máximo (minutos, opcional)</label>
+      <input type="text" id="tempo_espera_maximo_min" name="tempo_espera_maximo_min"
+             value="{{ valores.tempo_espera_maximo_min if valores else (fila.tempo_espera_maximo_min if fila else '') }}">
+
+      <label for="tempo_atendimento_maximo_min">Tempo de atendimento máximo (minutos, opcional)</label>
+      <input type="text" id="tempo_atendimento_maximo_min" name="tempo_atendimento_maximo_min"
+             value="{{ valores.tempo_atendimento_maximo_min if valores else (fila.tempo_atendimento_maximo_min if fila else '') }}">
+
+      {% set alerta_sel = valores.alerta_email if valores else (fila.alerta_email if fila else false) %}
+      <label><input type="checkbox" name="alerta_email" {{ 'checked' if alerta_sel else '' }}> Enviar alerta por e-mail</label>
+
+      <label style="margin-top:1.5rem;">Tipos de senha aceitos por esta fila (seção 10.4 - deixe todos desmarcados para gerar senha direto, sem tela de escolha no totem)</label>
+      {% set tipos_sel = valores.tipo_senha_ids if valores else (fila.tipos_senha|map(attribute='id')|list if fila else []) %}
+      {% if not tipos_senha %}
+        <p class="vazio" style="margin-top:.35rem;">Nenhum tipo de senha cadastrado para esta empresa ainda.</p>
+      {% else %}
+        <div style="margin-top:.5rem; display:flex; flex-direction:column; gap:.4rem;">
+          {% for tipo in tipos_senha %}
+            <label style="display:flex; align-items:center; gap:.5rem; margin:0; font-weight:normal;">
+              <input type="checkbox" name="tipo_senha_ids" value="{{ tipo.id }}" {{ 'checked' if tipo.id in tipos_sel else '' }}>
+              {{ tipo.nome }}{% if tipo.prefixo %} ({{ tipo.prefixo }}){% endif %}{% if not tipo.ativo %} <span class="badge inativo">Inativo</span>{% endif %}
+            </label>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      {% set exibir_prefixo_sel = valores.exibir_prefixo_tipo_quando_normal if valores else (fila.exibir_prefixo_tipo_quando_normal if fila else false) %}
+      <label style="margin-top:1rem;"><input type="checkbox" name="exibir_prefixo_tipo_quando_normal" {{ 'checked' if exibir_prefixo_sel else '' }}> Exibir prefixo do tipo mesmo quando for o tipo padrão (peso de prioridade 0)</label>
+
+      <label style="margin-top:1.5rem;">Horário de funcionamento</label>
+      {% set horario = valores.horario_funcionamento if valores else (fila.horario_funcionamento if fila else none) %}
+      <table style="margin-top:.5rem;">
+        <thead>
+          <tr>
+            <th></th>
+            {% for dia in dias_semana %}
+              <th>{{ rotulos_dia[dia] }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for periodo, rotulo_periodo in [('manha', 'Manhã'), ('tarde', 'Tarde')] %}
+            <tr>
+              <td>{{ rotulo_periodo }}</td>
+              {% for dia in dias_semana %}
+                {% set marcado = horario[dia][periodo] if horario and dia in horario else true %}
+                <td style="text-align:center;">
+                  <input type="checkbox" name="horario_{{ dia }}_{{ periodo }}" {{ 'checked' if marcado else '' }}>
+                </td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <p><button class="botao" type="submit" style="margin-top:1.5rem;">Salvar</button></p>
+    </form>
+  </div>
+{% endblock %}

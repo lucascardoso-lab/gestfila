@@ -1,0 +1,32 @@
+{% extends "totem/_layout.html" %}
+
+{% block titulo %}{{ unidade.nome }} - Totem{% endblock %}
+
+{% block conteudo %}
+  <header>
+    <h1>{{ unidade.nome }}</h1>
+    <p>Toque em uma opção para continuar</p>
+  </header>
+
+  {% if botao_pai %}
+    {% if botao_pai.parent_id %}
+      <a class="botao-voltar" href="{{ url_for('totem.submenu', slug=totem.slug, botao_id=botao_pai.parent_id) }}">← Voltar</a>
+    {% else %}
+      <a class="botao-voltar" href="{{ url_for('totem.tela_raiz', slug=totem.slug) }}">← Voltar</a>
+    {% endif %}
+  {% endif %}
+
+  <div class="grade">
+    {% for item in botoes %}
+      {% if item.gera_senha %}
+        <a class="botao-totem" href="{{ url_for('totem.confirmar_geracao', slug=totem.slug, botao_id=item.botao.id) }}">{{ item.botao.label }}</a>
+      {% elif item.tem_filhos %}
+        <a class="botao-totem navegacao" href="{{ url_for('totem.submenu', slug=totem.slug, botao_id=item.botao.id) }}">{{ item.botao.label }}</a>
+      {% else %}
+        <div class="botao-totem desabilitado">{{ item.botao.label }}</div>
+      {% endif %}
+    {% else %}
+      <p class="mensagem">Nenhuma opção disponível neste momento.</p>
+    {% endfor %}
+  </div>
+{% endblock %}

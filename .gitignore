@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.env
+venv/
+.venv/
+instance/
+*.db
+*.sqlite3
+.pytest_cache/
+
+# Snapshots manuais de backup feitos durante sessões de debug (redundantes
+# assim que existe histórico git real - ver BLUEPRINT.md, checklist de
+# publicação no GitHub).
+backups/
+
+# Configuração local do Claude Code (caminhos/preferências específicos desta
+# máquina, não é config do projeto em si).
+.claude/

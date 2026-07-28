@@ -1,0 +1,37 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}{{ 'Editar tipo de senha' if tipo else 'Novo tipo de senha' }}{% endblock %}
+
+{% block conteudo %}
+  <h1>{{ 'Editar tipo de senha' if tipo else 'Novo tipo de senha' }}</h1>
+  {% set nome_tela = self.titulo() %}
+  {% include "admin/_breadcrumb.html" %}
+  <div class="card">
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <label for="nome">Nome</label>
+      <input type="text" id="nome" name="nome" maxlength="80"
+             value="{{ valores.nome if valores else (tipo.nome if tipo else '') }}"
+             placeholder="ex.: Idoso, Gestante, PCD, Normal" required autofocus>
+
+      <label for="prefixo">Prefixo (1-2 letras, opcional - combinado com a sigla da fila no código)</label>
+      <input type="text" id="prefixo" name="prefixo" maxlength="2" style="text-transform:uppercase;"
+             value="{{ valores.prefixo if valores else (tipo.prefixo if tipo else '') }}" placeholder="ex.: I">
+
+      <label for="cor">Cor (hex, usada no totem/painel)</label>
+      <input type="text" id="cor" name="cor" maxlength="7"
+             value="{{ valores.cor if valores else (tipo.cor if tipo else '') }}" placeholder="ex.: #E53935">
+
+      <label for="peso_prioridade">Peso de prioridade (0 = sem prioridade; maior peso = preferência no rodízio)</label>
+      <input type="text" id="peso_prioridade" name="peso_prioridade"
+             value="{{ valores.peso_prioridade if valores else (tipo.peso_prioridade if tipo else 0) }}">
+
+      <label for="tempo_maximo_min">Tempo máximo de referência (minutos, opcional)</label>
+      <input type="text" id="tempo_maximo_min" name="tempo_maximo_min"
+             value="{{ valores.tempo_maximo_min if valores else (tipo.tempo_maximo_min if tipo else '') }}">
+
+      <p><button class="botao" type="submit" style="margin-top:1.5rem;">Salvar</button></p>
+    </form>
+  </div>
+{% endblock %}

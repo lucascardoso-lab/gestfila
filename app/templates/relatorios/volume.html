@@ -1,0 +1,32 @@
+{% extends "relatorios/_layout.html" %}
+{% from "relatorios/_macros.html" import form_filtros with context %}
+
+{% block titulo %}Volume de senhas{% endblock %}
+
+{% block conteudo %}
+  <h1>Volume de senhas</h1>
+  <p class="subtitulo">Senhas geradas por fila/unidade/dia, prioridade vs. normal.</p>
+  <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
+
+  {{ form_filtros(filtros, opcoes, 'relatorios.volume', querystring) }}
+
+  {% if not linhas %}
+    <p>Nenhum dado para os filtros selecionados.</p>
+  {% else %}
+    <table>
+      <thead><tr><th>Data</th><th>Unidade</th><th>Fila</th><th>Prioridade</th><th>Normal</th><th>Total</th></tr></thead>
+      <tbody>
+        {% for linha in linhas %}
+          <tr>
+            <td>{{ linha.data.strftime('%d/%m/%Y') }}</td>
+            <td>{{ linha.unidade }}</td>
+            <td>{{ linha.fila }}</td>
+            <td><span class="badge prioridade">{{ linha.prioridade }}</span></td>
+            <td><span class="badge normal">{{ linha.normal }}</span></td>
+            <td>{{ linha.total }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}

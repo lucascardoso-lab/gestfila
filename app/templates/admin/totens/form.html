@@ -1,0 +1,45 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}{{ 'Editar totem' if totem else 'Novo totem' }}{% endblock %}
+
+{% block conteudo %}
+  <h1>{{ 'Editar totem' if totem else 'Novo totem' }}</h1>
+  {% set nome_tela = self.titulo() %}
+  {% include "admin/_breadcrumb.html" %}
+
+  {% if totem %}
+    {% set link_publico = url_for('totem.tela_raiz', slug=totem.slug, _external=True) %}
+    <div class="card" style="margin-bottom:1rem;">
+      <label>Link público (fixo desde a criação)</label>
+      <a href="{{ link_publico }}" target="_blank" rel="noopener" style="word-break:break-all;">{{ link_publico }}</a>
+      <button type="button" class="botao-copiar" data-link="{{ link_publico }}">Copiar link</button>
+      <p class="subtitulo" style="margin:.35rem 0 0;">Renomear este totem não altera este link - ele já pode estar configurado no equipamento físico.</p>
+    </div>
+  {% endif %}
+
+  <div class="card">
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <label for="nome">Nome</label>
+      <input type="text" id="nome" name="nome"
+             value="{{ valores.nome if valores else (totem.nome if totem else '') }}" required autofocus>
+
+      <label for="unidade_id">Unidade</label>
+      {% set unidade_sel = valores.unidade_id if valores else (totem.unidade_id if totem else none) %}
+      <select id="unidade_id" name="unidade_id" required>
+        {% for unidade in unidades %}
+          <option value="{{ unidade.id }}" {{ 'selected' if unidade.id == unidade_sel else '' }}>{{ unidade.nome }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="nome_impressora_windows">Nome da impressora no Windows (opcional - seção 10.6)</label>
+      <input type="text" id="nome_impressora_windows" name="nome_impressora_windows" maxlength="120"
+             value="{{ valores.nome_impressora_windows if valores else (totem.nome_impressora_windows if totem else '') }}"
+             placeholder='ex.: Bematech MP-4200 TH'>
+      <p class="subtitulo" style="margin:.35rem 0 0;">Nome exato como aparece em "Dispositivos e Impressoras" do Windows deste totem. Deixe em branco para não imprimir (só exibição em tela).</p>
+
+      <p><button class="botao" type="submit" style="margin-top:1.5rem;">Salvar</button></p>
+    </form>
+  </div>
+{% endblock %}

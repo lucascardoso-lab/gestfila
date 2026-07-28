@@ -1,0 +1,79 @@
+{% extends "relatorios/_layout.html" %}
+
+{% block titulo %}Dashboard{% endblock %}
+
+{% block conteudo %}
+  <h1>Dashboard</h1>
+  <p class="subtitulo">Visão geral operacional - fora do escopo original do BLUEPRINT.</p>
+  <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
+
+  <div class="dashboard-cartoes">
+    <div class="card cartao">
+      <span class="cartao-numero">{{ recursos.filas_ativas }}</span>
+      <span class="cartao-label">Filas ativas</span>
+    </div>
+    <div class="card cartao">
+      <span class="cartao-numero">{{ recursos.totens_ativos }} / {{ recursos.totens_inativos }}</span>
+      <span class="cartao-label">Totens ativos / inativos</span>
+    </div>
+    <div class="card cartao">
+      <span class="cartao-numero">{{ recursos.tvs_ativas }}</span>
+      <span class="cartao-label">TVs ativas</span>
+    </div>
+    <div class="card cartao">
+      <span class="cartao-numero">{{ senhas_aguardando_total }}</span>
+      <span class="cartao-label">Senhas aguardando (total)</span>
+    </div>
+  </div>
+
+  {% if alertas %}
+    <h2>Alertas de configuração</h2>
+    <div class="alertas">
+      {% for alerta in alertas %}
+        <p class="aviso alerta alerta-{{ alerta.tipo }}">{{ alerta.mensagem }}</p>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="dashboard-colunas">
+    <div>
+      <h2>Senhas aguardando por fila</h2>
+      {% if not filas_com_espera %}
+        <p>Nenhuma fila ativa nesta empresa/unidade.</p>
+      {% else %}
+        <table>
+          <thead><tr><th>Fila</th><th>Aguardando</th></tr></thead>
+          <tbody>
+            {% for linha in filas_com_espera %}
+              <tr>
+                <td>{{ linha.fila.nome }}</td>
+                <td>{{ linha.aguardando }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </div>
+
+    <div>
+      <h2>Últimas chamadas</h2>
+      {% if not chamadas %}
+        <p>Nenhuma chamada registrada ainda.</p>
+      {% else %}
+        <table>
+          <thead><tr><th>Hora</th><th>Fila</th><th>Senha/Nome</th><th>Local</th></tr></thead>
+          <tbody>
+            {% for chamada in chamadas %}
+              <tr>
+                <td>{{ chamada.timestamp.strftime('%d/%m %H:%M:%S') }}</td>
+                <td>{{ chamada.fila }}</td>
+                <td>{{ chamada.nome_paciente if chamada.evento == 'chamada_nome' else chamada.codigo }}</td>
+                <td>{{ chamada.local }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

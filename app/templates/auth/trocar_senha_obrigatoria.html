@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block titulo %}Troca de senha obrigatória - GESTFILA{% endblock %}
+
+{% block cabecalho_marca %}
+  <div class="gf-marca" style="margin-bottom: 1.75rem;">
+    <span class="gf-logo gf-logo--grande"><span class="gf-logo-gest">GEST</span><span class="gf-logo-fila">FILA</span></span>
+  </div>
+{% endblock %}
+
+{% block conteudo %}
+  <h1>Troca de senha obrigatória</h1>
+  <p>Por segurança, você precisa definir uma nova senha antes de continuar.</p>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label for="nova_senha">Nova senha</label>
+    <input type="password" id="nova_senha" name="nova_senha" autocomplete="new-password" minlength="8" required autofocus>
+
+    <label for="confirmar_senha">Confirmar nova senha</label>
+    <input type="password" id="confirmar_senha" name="confirmar_senha" autocomplete="new-password" minlength="8" required>
+
+    <button type="submit">Definir senha</button>
+  </form>
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "totem/_layout.html" %}
+
+{% block titulo %}Escolha o tipo de atendimento - Totem{% endblock %}
+
+{% block conteudo %}
+  {% set voltar_destino = url_for('totem.submenu', slug=totem.slug, botao_id=botao.parent_id) if botao.parent_id else url_for('totem.tela_raiz', slug=totem.slug) %}
+
+  <header>
+    <h1>{{ botao.label }}</h1>
+    <p>Toque no tipo de atendimento que melhor se aplica a você</p>
+  </header>
+
+  <a class="botao-voltar" href="{{ voltar_destino }}">← Voltar</a>
+
+  <div class="grade">
+    {% for tipo in tipos %}
+      <a class="botao-totem" style="{% if tipo.cor %}background:{{ tipo.cor }};color:#fff;{% endif %}"
+         href="{{ url_for('totem.confirmar_geracao', slug=totem.slug, botao_id=botao.id, tipo_senha_id=tipo.id) }}">
+        {{ tipo.nome }}
+      </a>
+    {% endfor %}
+  </div>
+{% endblock %}

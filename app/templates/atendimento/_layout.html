@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}Atendimento{% endblock %} - GESTFILA</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%23FFFFFF'/%3E%3Ctext x='50' y='72' font-family='Arial,sans-serif' font-size='68' font-weight='700' text-anchor='middle' fill='%23C0392B'%3EG%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/gestfila.css') }}">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--gf-cinza-claro);
+      color: var(--gf-cinza-escuro);
+    }
+    nav {
+      background: var(--gf-cinza-escuro);
+      color: #fff;
+      padding: .9rem 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    nav .grupo-nav-esquerda { display: flex; align-items: center; }
+    nav .gf-logo { margin-right: 1.25rem; }
+    nav a { color: #cfd6e4; text-decoration: none; margin-right: 1.25rem; font-size: .9rem; padding-bottom: .2rem; border-bottom: 2px solid transparent; }
+    nav a:hover { color: #fff; border-bottom-color: var(--gf-primaria); }
+    main { max-width: 960px; margin: 2rem auto; padding: 0 1.5rem; }
+    h1 { font-size: 1.4rem; margin-bottom: .25rem; }
+    .subtitulo { color: #666; margin-bottom: 1.5rem; font-size: .9rem; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,.05); }
+    th, td { text-align: left; padding: .65rem .9rem; border-bottom: 1px solid #eceef2; font-size: .9rem; }
+    th { background: var(--gf-cinza-claro); color: #555; }
+    tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: var(--gf-primaria-clara); }
+    .badge { display: inline-block; padding: .15rem .55rem; border-radius: 999px; font-size: .75rem; }
+    .badge.prioridade { background: var(--gf-primaria-clara); color: var(--gf-primaria-escura); }
+    .badge.normal { background: #eceef2; color: #555; }
+    .badge.em-atendimento { background: var(--gf-primaria-clara); color: var(--gf-primaria-escura); font-weight: 600; }
+    .badge.aguardando { background: #eaf2f8; color: var(--gf-info); }
+    .badge.finalizado { background: #e5e8ea; color: var(--gf-cinza-escuro); }
+    .acoes a, .acoes form { margin-right: .75rem; display: inline-block; }
+    form.inline { display: inline; }
+    .botao {
+      display: inline-block; padding: .55rem 1rem; background: var(--gf-primaria); color: #fff;
+      border: none; border-radius: 8px; font-size: .9rem; text-decoration: none; cursor: pointer;
+    }
+    .botao:hover { background: var(--gf-primaria-escura); }
+    .botao.secundario { background: #fff; color: var(--gf-cinza-escuro); border: 1px solid var(--gf-cinza-medio); }
+    .botao.secundario:hover { background: var(--gf-cinza-claro); }
+    .card { background: #fff; padding: 2rem; border-radius: 12px; border: 1px solid var(--gf-cinza-claro); box-shadow: 0 2px 10px rgba(0,0,0,.05); max-width: 560px; margin-bottom: 1.5rem; }
+    label { display: block; margin-bottom: .35rem; margin-top: 1rem; font-size: .9rem; color: #555; }
+    input[type="text"], input[type="number"], select {
+      width: 100%; padding: .6rem .75rem; border: 1px solid var(--gf-cinza-medio); border-radius: 8px; font-size: 1rem;
+    }
+    input[type="text"]:focus, input[type="number"]:focus, select:focus {
+      outline: none; border-color: var(--gf-primaria); box-shadow: 0 0 0 3px var(--gf-primaria-clara);
+    }
+    .flash { padding: .6rem .8rem; border-radius: 8px; margin-bottom: 1rem; font-size: .9rem; }
+    .flash.error { background: var(--gf-primaria-clara); color: var(--gf-primaria-escura); }
+    .flash.info { background: #eaf2f8; color: var(--gf-info); }
+    .flash.aviso { background: #fdf0e2; color: var(--gf-alerta); }
+
+    /* Encerramento automático (seção 10.18) - card fixo NÃO bloqueante (não
+       cobre nav/conteúdo, não impede interação com o resto da tela). Laranja
+       (var(--gf-alerta)) - semântica de aviso/contagem regressiva, diferente
+       do vermelho da marca (usado em ações primárias/destaque). */
+    .aviso-encerramento {
+      position: fixed; bottom: 1.25rem; right: 1.25rem; z-index: 9999;
+      max-width: 340px; background: var(--gf-alerta); color: #fff; padding: 1rem 1.1rem;
+      border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.25);
+      display: flex; align-items: center; gap: .9rem; font-size: .9rem;
+    }
+    /* Bug corrigido: `display: flex` acima tem a MESMA especificidade do
+       `[hidden] { display: none; }` nativo do navegador - como a regra da
+       classe vem depois no CSS, ela sempre vencia e o atributo `hidden`
+       nunca escondia o card de verdade (aparecia sempre, mesmo longe do
+       horário de encerramento). Precisa de uma regra própria pra `[hidden]`
+       vencer a de `display: flex`. */
+    .aviso-encerramento[hidden] { display: none; }
+    .aviso-encerramento button {
+      background: #fff; color: var(--gf-alerta); border: none; border-radius: 6px;
+      padding: .4rem .8rem; font-size: .85rem; font-weight: 600; cursor: pointer;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="grupo-nav-esquerda">
+      <span class="gf-logo gf-logo--navbar gf-logo--claro"><span class="gf-logo-gest">GEST</span><span class="gf-logo-fila">FILA</span></span>
+      <a href="{{ url_for('core.index') }}">🏠 Painel de Senhas</a>
+      <a href="{{ url_for('core.dashboard') }}">📊 Dashboard</a>
+      <a href="{{ url_for('atendimento.listar_filas') }}">🎫 Filas</a>
+    </div>
+    <a href="{{ url_for('auth.logout') }}">Sair ({{ current_user.nome }})</a>
+  </nav>
+  <main>
+    {% with mensagens = get_flashed_messages(with_categories=true) %}
+      {% for categoria, mensagem in mensagens %}
+        <div class="flash {{ categoria }}">{{ mensagem }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block conteudo %}{% endblock %}
+  </main>
+
+  <div id="aviso-encerramento" class="aviso-encerramento" role="alert" hidden>
+    <span>⚠️ O sistema encerrará automaticamente em <strong id="contagem-encerramento">--:--</strong></span>
+    <button type="button" id="fechar-aviso-encerramento">Entendi</button>
+  </div>
+
+  <script>
+    (function () {
+      // seção 10.18 do BLUEPRINT: horário configurável via .env
+      // (HORARIO_ENCERRAMENTO_SESSOES/AVISO_ENCERRAMENTO_MINUTOS), injetado em
+      // TODOS os templates deste blueprint via atendimento/__init__.py::
+      // _injetar_config_encerramento - só existe nas telas de Atendimento
+      // (totem/TV usam layouts próprios, sem este script).
+      var partes = {{ horario_encerramento_sessoes | tojson }}.split(":").map(Number);
+      var HORA_ENCERRAMENTO = partes[0];
+      var MINUTO_ENCERRAMENTO = partes[1];
+      var AVISO_MS = {{ aviso_encerramento_minutos | tojson }} * 60 * 1000;
+      var URL_LOGOUT = {{ url_for('auth.logout') | tojson }};
+
+      var elAviso = document.getElementById("aviso-encerramento");
+      var elContagem = document.getElementById("contagem-encerramento");
+      var elFechar = document.getElementById("fechar-aviso-encerramento");
+      var fechadoPeloOperador = false;
+
+      elFechar.addEventListener("click", function () {
+        // só esconde o card - o encerramento em si (e o redirecionamento)
+        // continuam acontecendo no horário, como o pedido deixa explícito.
+        fechadoPeloOperador = true;
+        elAviso.hidden = true;
+      });
+
+      function proximoHorarioDeEncerramento() {
+        var agora = new Date();
+        return new Date(
+          agora.getFullYear(), agora.getMonth(), agora.getDate(),
+          HORA_ENCERRAMENTO, MINUTO_ENCERRAMENTO, 0, 0
+        );
+      }
+
+      function formatarContagem(diferencaMs) {
+        var segundosTotais = Math.max(0, Math.floor(diferencaMs / 1000));
+        var minutos = Math.floor(segundosTotais / 60);
+        var segundos = segundosTotais % 60;
+        return minutos + ":" + String(segundos).padStart(2, "0");
+      }
+
+      function verificarEncerramento() {
+        var diferencaMs = proximoHorarioDeEncerramento() - new Date();
+
+        if (diferencaMs <= 0) {
+          // horário local atingiu HORA_ENCERRAMENTO:MINUTO_ENCERRAMENTO:00 -
+          // backend (app/middleware/encerramento.py) é o backup de segurança
+          // pro caso desta aba estar em background e este código não rodar.
+          window.location.href = URL_LOGOUT;
+          return;
+        }
+
+        if (diferencaMs <= AVISO_MS) {
+          elContagem.textContent = formatarContagem(diferencaMs);
+          if (!fechadoPeloOperador) elAviso.hidden = false;
+        }
+      }
+
+      verificarEncerramento();
+      setInterval(verificarEncerramento, 1000);
+    })();
+  </script>
+</body>
+</html>

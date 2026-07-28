@@ -1,0 +1,48 @@
+{% extends "atendimento/_layout.html" %}
+
+{% block titulo %}Filas{% endblock %}
+
+{% block conteudo %}
+  <h1>Filas</h1>
+  <p class="subtitulo">Unidades e filas em que você pode atender.</p>
+
+  {% if not filas %}
+    <p>Nenhuma fila disponível para o seu usuário.</p>
+  {% else %}
+    <table>
+      <thead>
+        <tr>
+          <th>Unidade</th>
+          <th>Fila</th>
+          <th>Aguardando</th>
+          <th>Rodízio</th>
+          <th>Ações</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for fila in filas %}
+          <tr>
+            <td>{{ fila.unidade.nome }}</td>
+            <td>{{ fila.nome }}</td>
+            <td>
+              {{ contagens[fila.id].aguardando }}
+              {% if contagens[fila.id].prioridade %}
+                <span class="badge prioridade">{{ contagens[fila.id].prioridade }} prioritária(s)</span>
+              {% endif %}
+            </td>
+            <td>{{ fila.prioridade_rodizio }}</td>
+            <td class="acoes">
+              {% if current_user.is_super_admin or current_user.tem_perfil('atendente', 'atendente_executor', 'admin') %}
+                <a href="{{ url_for('atendimento.painel_fila', setor='recepcao', fila_id=fila.id) }}">Recepção</a>
+              {% endif %}
+              {% if current_user.is_super_admin or current_user.tem_perfil('executor', 'atendente_executor', 'admin') %}
+                <a href="{{ url_for('atendimento.painel_fila', setor='coleta', fila_id=fila.id) }}">Coleta</a>
+              {% endif %}
+              <a href="{{ url_for('atendimento.alocar_fila', fila_id=fila.id) }}">Alocar fila</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}

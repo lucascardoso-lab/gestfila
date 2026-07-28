@@ -1,0 +1,30 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}Unidades{% endblock %}
+
+{% block conteudo %}
+  <h1>Unidades</h1>
+  {% set nome_tela = self.titulo() %}
+  {% include "admin/_breadcrumb.html" %}
+  <p class="subtitulo"><a class="botao" href="{{ url_for('admin.nova_unidade', empresa_id=empresa.id) }}">+ Nova unidade</a></p>
+  <table>
+    <thead><tr><th>Nome</th><th>Status</th><th>Ações</th></tr></thead>
+    <tbody>
+      {% for unidade in unidades %}
+        <tr>
+          <td>{{ unidade.nome }}</td>
+          <td><span class="badge {{ 'ativo' if unidade.ativo else 'inativo' }}">{{ 'Ativa' if unidade.ativo else 'Inativa' }}</span></td>
+          <td class="acoes">
+            <a href="{{ url_for('admin.editar_unidade', unidade_id=unidade.id) }}">Editar</a>
+            <form class="inline" method="post" action="{{ url_for('admin.alternar_unidade', unidade_id=unidade.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="link" type="submit">{{ 'Desativar' if unidade.ativo else 'Ativar' }}</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="3">Nenhuma unidade cadastrada.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

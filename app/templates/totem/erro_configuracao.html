@@ -1,0 +1,9 @@
+{% extends "totem/_layout.html" %}
+
+{% block titulo %}Serviço indisponível - Totem{% endblock %}
+
+{% block conteudo %}
+  <header><h1>{{ unidade.nome }}</h1></header>
+  <p class="mensagem">{{ mensagem or "Este serviço ainda não está configurado para gerar senhas. Procure a recepção." }}</p>
+  <a class="botao-totem navegacao" href="{{ url_for('totem.tela_raiz', slug=totem.slug) }}" style="margin-top:2rem; max-width:320px;">Voltar ao início</a>
+{% endblock %}

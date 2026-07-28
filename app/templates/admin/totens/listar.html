@@ -1,0 +1,41 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}Totens{% endblock %}
+
+{% block conteudo %}
+  <h1>Totens</h1>
+  {% set nome_tela = self.titulo() %}
+  {% include "admin/_breadcrumb.html" %}
+  <p class="subtitulo"><a class="botao" href="{{ url_for('admin.novo_totem', empresa_id=empresa.id) }}">+ Novo totem</a></p>
+  <table>
+    <thead><tr><th>Nome</th><th>Unidade</th><th>Impressora</th><th>Status</th><th>Link público</th><th>Ações</th></tr></thead>
+    <tbody>
+      {% for totem in totens %}
+        {% set link_publico = url_for('totem.tela_raiz', slug=totem.slug, _external=True) %}
+        <tr>
+          <td>{{ totem.nome }}</td>
+          <td>{{ totem.unidade.nome }}</td>
+          <td>{{ totem.nome_impressora_windows or '—' }}</td>
+          <td><span class="badge {{ 'ativo' if totem.ativo else 'inativo' }}">{{ 'Ativo' if totem.ativo else 'Inativo' }}</span></td>
+          <td>
+            <a class="link-publico" href="{{ link_publico }}" target="_blank" rel="noopener" title="{{ link_publico }}">Abrir totem</a>
+            <button type="button" class="botao-copiar" data-link="{{ link_publico }}">Copiar link</button>
+          </td>
+          <td class="acoes">
+            <a href="{{ url_for('admin.editar_totem', totem_id=totem.id) }}">Editar</a>
+            <form class="inline" method="post" action="{{ url_for('admin.alternar_totem', totem_id=totem.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="link" type="submit">{{ 'Desativar' if totem.ativo else 'Ativar' }}</button>
+            </form>
+            <form class="inline" method="post" action="{{ url_for('admin.excluir_totem', totem_id=totem.id) }}" onsubmit="return confirm('Excluir definitivamente o totem \'{{ totem.nome }}\'? Esta ação não pode ser desfeita.');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="link-perigo" type="submit">Excluir</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6">Nenhum totem cadastrado.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

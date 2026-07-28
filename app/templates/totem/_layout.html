@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>{% block titulo %}Totem{% endblock %} - GESTFILA</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%23FFFFFF'/%3E%3Ctext x='50' y='72' font-family='Arial,sans-serif' font-size='68' font-weight='700' text-anchor='middle' fill='%23C0392B'%3EG%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/gestfila.css') }}">
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: linear-gradient(180deg, #ffffff 0%, var(--gf-cinza-claro) 100%);
+      color: var(--gf-cinza-escuro);
+    }
+    .totem {
+      min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+      padding: 2rem 1.5rem;
+    }
+    .totem > .gf-logo { margin-bottom: 1.5rem; }
+    header { text-align: center; margin-bottom: 1.5rem; }
+    header h1 { font-size: 2.2rem; margin: 0 0 .25rem; color: var(--gf-cinza-escuro); }
+    header p { font-size: 1.2rem; color: var(--gf-cinza-medio); margin: 0; }
+    .grade {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1.25rem; width: 100%; max-width: 1100px;
+    }
+    .botao-totem {
+      display: flex; align-items: center; justify-content: center; text-align: center;
+      min-height: 140px; border-radius: 12px; font-size: 1.6rem; font-weight: 700;
+      text-decoration: none; color: #fff; background: var(--gf-primaria); border: none;
+      cursor: pointer; padding: 1rem; line-height: 1.25;
+      box-shadow: 0 4px 14px rgba(192,57,43,.28);
+    }
+    .botao-totem:hover { background: var(--gf-primaria-escura); }
+    .botao-totem.navegacao { background: var(--gf-cinza-escuro); color: #fff; box-shadow: 0 4px 14px rgba(44,62,80,.28); }
+    .botao-totem.navegacao:hover { background: #1c2b38; }
+    .botao-totem.desabilitado { background: var(--gf-cinza-claro); color: var(--gf-cinza-medio); cursor: default; box-shadow: none; }
+    .botao-voltar {
+      align-self: flex-start; margin-bottom: 1.5rem; background: var(--gf-cinza-claro); border: none;
+      color: var(--gf-cinza-escuro); font-size: 1.1rem; padding: .6rem 1.4rem; border-radius: 10px;
+      text-decoration: none;
+    }
+    .botao-voltar:hover { background: #e8eaec; }
+    .senha-codigo {
+      font-size: 6rem; font-weight: 800; letter-spacing: .1em; background: var(--gf-branco);
+      color: var(--gf-primaria); padding: 1.5rem 3rem; border-radius: 24px; margin: 2rem 0;
+      border: 3px solid var(--gf-primaria); box-shadow: 0 4px 20px rgba(192,57,43,.18);
+    }
+    .mensagem { font-size: 1.4rem; text-align: center; max-width: 600px; color: var(--gf-cinza-escuro); }
+    form { margin: 0; width: 100%; }
+    form button.botao-totem { width: 100%; font: inherit; }
+  </style>
+</head>
+<body>
+  <div class="totem">
+    <span class="gf-logo gf-logo--grande"><span class="gf-logo-gest">GEST</span><span class="gf-logo-fila">FILA</span></span>
+    {% block conteudo %}{% endblock %}
+  </div>
+</body>
+</html>

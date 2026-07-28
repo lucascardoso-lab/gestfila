@@ -1,0 +1,2290 @@
+# BLUEPRINT — Sistema de Gestão de Senhas e Chamadas (multi-clínica)
+
+> Documento de especificação para guiar o desenvolvimento incremental no Claude Code / VS Code.
+> Stack definida: **Python 3.11+ / Flask / Flask-SocketIO / MySQL 8 / Apache2 (mod_wsgi ou proxy reverso) / Nginx opcional como proxy do WS**.
+> Referência visual: sistema "ChameFácil" (Prolins) usado atualmente na clínica — telas de totem, painel de chamada (TV) e tela de alocação de fila foram usadas como inspiração de UX.
+
+---
+
+## 0. Como usar este documento com o Claude Code
+
+Cole este arquivo na raiz do projeto como `BLUEPRINT.md` e peça ao Claude Code para:
+1. Ler o blueprint inteiro antes de gerar qualquer código.
+2. Implementar **por fases** (seção 9), nunca o sistema todo de uma vez.
+3. Seguir o modelo de dados da seção 4 sem renomear tabelas/campos (evita retrabalho de migração).
+4. Sempre perguntar antes de pular uma fase.
+
+Prompt sugerido de abertura no Claude Code:
+```
+Leia o arquivo BLUEPRINT.md inteiro. Vamos implementar a Fase 1 (estrutura base +
+autenticação + multi-tenant). Crie a estrutura de pastas, requirements.txt,
+config e os models do SQLAlchemy. Não implemente totem/painel ainda.
+```
+
+---
+
+## 1. Visão geral do produto
+
+Sistema de **gerenciamento de filas e senhas de atendimento** para clínicas/hospitais, com:
+
+- **Totem touch-screen**: paciente toca um botão de serviço → sistema gera senha → imprime (ou exibe) → senha entra na fila daquele serviço/local.
+- **Painel de chamada (TV)**: exibe lista de senhas chamadas (local + senha), toca áudio de chamada (texto-para-voz ou pré-gravado), atualiza em tempo real via WebSocket.
+- **Chamada por nome (sala de coleta)**: fluxo de 2 etapas —
+  1. Operador chama a **senha** (ex.: `BR009`) no totem/TV, paciente se dirige à sala de coleta.
+  2. Dentro da sala, o operador escreve o **nome do paciente em um campo livre** (sem cadastro prévio) e dispara uma **segunda chamada, agora pelo nome**, exibida na TV/painel.
+- **Perfis de acesso**: Administrador, Gerencial (relatórios), Recepção, Coleta, Recepção+Coleta.
+- **Multiempresa (multi-tenant)**: uma instalação só, múltiplas empresas/clínicas, cada uma com suas unidades (locais), usuários, filas e TVs.
+- **Permissão por unidade**: usuário vinculado a uma ou mais unidades dentro da empresa.
+- **Administração via web**: criar botões do totem, criar TVs, criar filas internas — tudo sem precisar editar código.
+- **Relatórios**: tempo de atendimento por serviço, por operador (coletador/recepção), por setor, por local/unidade.
+
+---
+
+## 2. Padrão da senha impressa (regra de negócio crítica)
+
+Senha = **prefixo (sigla do serviço) + sequencial numérico**, reiniciando por dia (e por unidade).
+
+Exemplos observados nas imagens: `BR009` (Broncoscopia), `A N294` / `AN294` (Atendimento Normal).
+
+Regras a implementar:
+- Cada **serviço** (ex.: Laboratório, Ultrassonografia, Quimioterapia, Consultórios, Coleta, Broncoscopia) tem uma **sigla configurável** (2–4 letras), definida pelo admin ao criar o botão do totem.
+- Sequencial: `0001`–`9999`, **zera à meia-noite** (configurável: por dia ou nunca zera).
+- Sequencial é **por unidade + por serviço** (duas unidades diferentes podem ter `A001` ao mesmo tempo sem conflito).
+- Formato de exibição: `{SIGLA}{NUMERO:03d}` (ajustável: 3 dígitos como no exemplo `BR009`, ou outro padding configurável por empresa).
+- Prioridade: senhas de **prioridade** (idoso, gestante, etc.) usam sigla própria (ex.: `P` antes do número, ou fila com peso/prioridade — ver tela "Alocar fila" com "Quantidade de chamadas seguidas", que define quantas senhas prioritárias avançadas seguidamente antes de voltar à fila normal — replicar esse comportamento de **rodízio configurável**).
+
+Tabela de regras por serviço fica no model `Servico` (seção 4).
+
+---
+
+## 3. Perfis de acesso (roles)
+
+| Perfil | Permissões |
+|---|---|
+| **Super Admin** (dono do sistema) | Cria empresas, vê tudo, não pertence a nenhuma empresa específica |
+| **Administrador (empresa)** | CRUD completo dentro da própria empresa: unidades, usuários, botões do totem, TVs, filas, serviços, siglas. Acesso a todos os relatórios de todas as unidades da empresa |
+| **Gerencial** | Somente leitura de relatórios (pode ser restrito a unidades específicas) |
+| **Recepção** | Opera o totem/gera senha manualmente, chama senha no painel, NÃO acessa coleta nem relatórios |
+| **Coleta** | Chama senha + tela de "chamar por nome", NÃO acessa recepção nem relatórios |
+| **Recepção + Coleta** | União dos dois perfis acima |
+
+Implementar como **RBAC simples**: tabela `perfis` com permissões em JSON ou tabela `perfil_permissoes`, associada a `usuario` via `usuario_empresa_unidade` (ver seção 4) — isso cobre o requisito de "permissão por unidade".
+
+---
+
+## 4. Modelo de dados (MySQL — multi-tenant via `empresa_id`)
+
+```
+empresas
+  id PK
+  nome
+  cnpj
+  ativo
+  criado_em
+
+unidades                         -- "locais" (Recepção, Coleta, Consultório 3º andar, etc.)
+  id PK
+  empresa_id FK -> empresas
+  nome
+  ativo
+
+usuarios
+  id PK
+  empresa_id FK -> empresas      -- NULL se for super admin
+  nome
+  login
+  senha_hash
+  ativo
+  criado_em
+
+perfis
+  id PK
+  nome                           -- 'admin', 'gerencial', 'recepcao', 'coleta', 'recepcao_coleta'
+  descricao
+
+usuario_perfil
+  usuario_id FK
+  perfil_id FK
+
+usuario_unidade                  -- permissão por unidade
+  usuario_id FK
+  unidade_id FK
+
+servicos                          -- ex: Laboratório, Ultrassonografia, Coleta, Broncoscopia
+  id PK
+  empresa_id FK
+  unidade_id FK
+  nome
+  sigla              VARCHAR(4)  -- usada na senha, ex 'BR', 'A'
+  digitos_sequencial  TINYINT DEFAULT 3
+  zera_diariamente    BOOLEAN DEFAULT TRUE
+  prioridade_padrao   TINYINT DEFAULT 0
+  ativo
+
+totem_botoes                      -- botões configuráveis do totem (telas e submenus)
+  id PK
+  empresa_id FK
+  unidade_id FK
+  parent_id FK -> totem_botoes (NULL = botão de tela raiz, permite submenu como na Imagem 2/3)
+  servico_id FK NULL               -- se preenchido, botão gera senha direto
+  label                            -- texto exibido, ex 'ULTRASSONOGRAFIA'
+  ordem
+  ativo
+
+filas
+  id PK
+  empresa_id FK
+  unidade_id FK
+  servico_id FK
+  nome
+  prioridade_rodizio  TINYINT DEFAULT 0  -- "quantidade de chamadas seguidas" prioritárias (Imagem 1)
+  ativo
+
+senhas
+  id PK
+  empresa_id FK
+  unidade_id FK
+  servico_id FK
+  fila_id FK
+  codigo              VARCHAR(10)   -- ex: 'BR009'
+  sequencial           INT
+  prioridade           BOOLEAN DEFAULT FALSE
+  status               ENUM('aguardando','chamada','em_atendimento','finalizada','cancelada')
+  nome_paciente        VARCHAR(120) NULL   -- preenchido só na hora da chamada por nome, sem cadastro
+  guiche_local         VARCHAR(60) NULL    -- ex: 'Coleta A 01', 'Guichê 02'
+  criada_em            DATETIME
+  chamada_em           DATETIME NULL
+  chamada_nome_em      DATETIME NULL       -- 2ª chamada (por nome, na coleta)
+  atendimento_iniciado_em DATETIME NULL
+  finalizada_em        DATETIME NULL
+  operador_id FK -> usuarios NULL
+  setor                ENUM('recepcao','coleta','outro')
+
+tvs                                -- TVs cadastráveis pelo admin (Imagem 5)
+  id PK
+  empresa_id FK
+  unidade_id FK
+  nome                 -- 'TV 1º Andar', 'TV Mesanino 01', etc.
+  layout               -- referência a um template visual (opcional, fase 2)
+  ativo
+
+tv_filas                            -- quais filas cada TV exibe
+  tv_id FK
+  fila_id FK
+
+logs_atendimento                    -- base para relatórios de tempo
+  id PK
+  senha_id FK
+  evento     ENUM('gerada','chamada_senha','chamada_nome','inicio_atendimento','fim_atendimento')
+  timestamp
+  usuario_id FK NULL
+  unidade_id FK
+  setor ENUM('recepcao','coleta','outro')
+```
+
+**Índices recomendados:** `(empresa_id, unidade_id, status)` em `senhas`; `(servico_id, criada_em)` para o cálculo do sequencial diário.
+
+---
+
+## 5. Fluxos principais
+
+### 5.1 Geração de senha (Totem)
+1. Paciente toca botão (pode haver navegação em submenu — ver Imagens 2 e 3: tela raiz → categoria → médico/serviço específico).
+2. Backend calcula próximo sequencial do serviço/unidade/dia, monta `codigo`.
+3. Grava em `senhas` (status `aguardando`), grava log `gerada`.
+4. Emite evento WebSocket para a fila (atualiza contadores) — TV não exibe ainda, só quando for chamada.
+5. Exibe/imprime o código ao paciente.
+
+### 5.2 Chamada da senha (painel/TV)
+1. Operador (recepção ou coleta) clica "Chamar próxima" ou seleciona senha específica + define `guiche_local`.
+2. Status → `chamada`, grava `chamada_em`, log `chamada_senha`.
+3. Emite WebSocket (`namespace /painel`, sala = `tv_<id>` ou `fila_<id>`) com payload `{local, senha}`.
+4. TV recebe e:
+   - Insere no topo da lista (linha destacada em vermelho, como na Imagem 4).
+   - Dispara áudio (TTS ou arquivo de voz: "Senha BR009, dirija-se à Coleta A 01").
+5. Regra de rodízio de prioridade (campo `prioridade_rodizio` da fila) decide se a próxima chamada automática deve ser prioritária ou normal.
+
+### 5.3 Chamada por nome (sala de coleta) — fluxo de 2 etapas
+1. A senha já foi chamada (5.2) e o paciente está na sala.
+2. Operador da coleta abre tela "Atendimento Interno"/"Coleta", digita o nome **em campo livre** (sem buscar/cadastrar paciente).
+3. Sistema grava `nome_paciente`, `chamada_nome_em`, log `chamada_nome`.
+4. Emite WebSocket separado (ou mesmo canal, payload com `tipo: 'nome'`) para a TV da sala de coleta exibir o nome chamado.
+5. Esse nome **não fica salvo como cadastro reutilizável** — é só texto livre por chamada (atende ao requisito "sem necessidade de cadastro do nome do paciente").
+
+### 5.4 Tela "Alocar fila" (Imagem 1) — replicar
+Tela administrativa/operacional onde o operador:
+- Seleciona **Prioridade** (nível) + **quantidade de chamadas seguidas** daquele nível antes de voltar ao rodízio normal.
+- Seleciona **Local** (unidade) onde a fila será alocada.
+- Botão "Adicionar prioridade" empilha regras (mostradas na tabela à direita: Prioridade × Chamadas).
+- Botão "Alocar" salva a configuração de rodízio para aquela fila/unidade.
+
+### 5.5 Cadastro de botões do totem (admin web) — replicar Imagens 2 e 3
+- CRUD de `totem_botoes` com suporte a hierarquia (botão pode abrir submenu de outros botões, como `CONSULTÓRIOS` abrindo lista de médicos).
+- Cada botão final (sem filhos) associa a um `servico_id` (gera senha) OU pode ser puramente navegacional (sem `servico_id`, só abre submenu).
+- Admin define label, ordem de exibição, unidade de destino.
+
+### 5.6 Cadastro de TVs (admin web) — replicar Imagem 5
+- CRUD de `tvs`: nome, unidade, quais filas aparecem nela (`tv_filas`).
+- Sistema gera uma URL única por TV (ex.: `/painel/tv/<id>`) para abrir no navegador da Smart TV.
+
+---
+
+## 6. Painel de chamada (TV) — requisitos técnicos
+
+- Página HTML simples, full-screen, sem necessidade de login (acesso por URL fixa/token).
+- Conecta via **Socket.IO client** (JS) à sala correspondente à TV.
+- Layout: 2 colunas (Local | Senha) como na Imagem 4, linha mais recente destacada, lista das últimas N chamadas, rodapé com indicadores (ex.: tempo médio de espera).
+- Áudio: usar **Web Speech API (`speechSynthesis`)** no navegador da própria Smart TV (evita depender de arquivos de áudio prontos) — fallback para arquivos `.mp3` pré-gravados se a Smart TV não suportar TTS bem em PT-BR.
+- Deve sobreviver a reconexões (Smart TVs ficam dias ligadas) — implementar `reconnection: true` no Socket.IO client e um *heartbeat*/sala persistente no servidor.
+
+---
+
+## 7. Relatórios (perfil Gerencial/Admin)
+
+Baseados na tabela `logs_atendimento`, calcular:
+
+1. **Tempo médio de espera** (gerada → chamada_senha), por serviço, por unidade, por dia/período.
+2. **Tempo de atendimento** (chamada_senha → fim_atendimento, ou chamada_nome → fim_atendimento na coleta), por operador, por setor (recepção/coleta), por serviço.
+3. **Volume de senhas** por serviço/unidade/período, comparativo prioridade vs. normal.
+4. **Ranking de operadores** (coletador/recepcionista) por volume e tempo médio.
+5. Exportação CSV/Excel (usar `openpyxl` ou `pandas`).
+6. Filtros: empresa (se super admin), unidade, serviço, operador, intervalo de datas.
+
+Sugestão de implementação: views agregadas (`CREATE VIEW`) ou queries com `GROUP BY` direto via SQLAlchemy — não precisa de data warehouse para o volume esperado.
+
+**Tempo de atendimento — segmento inicial (hand-off Recepção → Coleta):** o
+relatório 2 também mede o PRIMEIRO segmento de atendimento de uma senha (ex.:
+Recepção, da chamada até realocar para a Coleta - seção 5.3), via
+`_pares_inicio_realocado` (`app/relatorios/queries.py`), além do último segmento
+já coberto (última chamada → `fim_atendimento`). Essas linhas aparecem sem
+fila/local (exibidos como "—") - `logs_atendimento` não guarda snapshot de
+fila/local por evento, e o `Senha.fila_id`/`local_id` atuais já refletem o
+destino da realocação, não a fila de origem onde essa chamada realmente
+ocorreu. **Limitação de escopo assumida, não bug:** só o PRIMEIRO hand-off é
+medido - uma senha realocada mais de uma vez (ex.: Recepção → Fila A → Fila B)
+não tem os segmentos intermediários medidos, só o primeiro (chamada inicial →
+1ª realocação) e o último (última chamada → `fim_atendimento`).
+
+**Correção deliberada — Realocar não grava mais log `chamada_nome`:** o botão
+Realocar (seção 10.2) permite editar o campo Nome no mesmo formulário usado
+para mover a senha para outra fila. Antes, essa edição de nome gravava um log
+`chamada_nome` normal — como esse log fica cronologicamente colado ao evento
+`realocado` (mesma request), `_pares_inicio_realocado` o escolhia como "início"
+do segmento em vez do `chamada_senha` genuíno que de fato abriu o atendimento
+na fila de origem, medindo esse segmento como ~0s em vez do tempo real. Desde
+a correção, `talvez_atualizar_nome()` (`app/atendimento/helpers.py`) aceita
+`registrar_como_chamada=False` - usado só pelo Realocar - que continua
+gravando `nome_paciente`/`chamada_nome_em` na senha (estado normal), mas não
+cria esse log. Como efeito colateral **também deliberado** (não é um bug à
+parte): essa edição de nome no Realocar deixa de contar como uma chamada em
+`ranking_operadores()` (volume) e no feed de `ultimas_chamadas()` do
+dashboard — antes, uma única visita "Chamar → Realocar com nome" inflava
+esses dois relatórios contando 2 chamadas para 1 atendimento físico; agora
+conta 1, como deveria. O evento `realocado` (não afetado, sem mudança)
+continua sendo o marcador de auditoria do hand-off em si.
+
+---
+
+## 8. Boas práticas de sistemas de senha (a aplicar)
+
+- **Idempotência na geração de senha**: usar transação + `SELECT ... FOR UPDATE` na tabela de sequencial por serviço/unidade/dia para evitar senha duplicada em concorrência (totem é tocado por múltiplos pacientes simultaneamente).
+- **Separar geração de evento de notificação**: gravar no banco primeiro, emitir WebSocket depois (garante consistência mesmo se o front cair).
+- **Idle/keep-alive nas TVs**: ping periódico + auto-reload diário (Smart TVs acumulam memory leak em sessões de navegador de dias).
+- **Modo de contingência manual**: permitir chamar senha digitando o código manualmente, caso o totem físico falhe.
+- **Auditoria**: nunca apagar `senhas`/`logs_atendimento` — usar `status = 'cancelada'`, nunca `DELETE`.
+- **Sigla de serviço única por unidade** (constraint), evita colisão de código de senha.
+- **Reset de sequencial à meia-noite** via job agendado (ou cálculo *on the fly* filtrando `criada_em::date = hoje`, o que evita depender de cron).
+- **Multi-tenant**: todo o middleware de autenticação deve injetar `empresa_id` no contexto da requisição e **toda query deve filtrar por ele** — nunca confiar em filtro feito só no front.
+- **Senhas de usuário (login)**: hash com `werkzeug.security` (`generate_password_hash`/`bcrypt`), nunca texto puro.
+- **Rate limit no endpoint de geração de senha do totem** (evita "ataque" de toque repetido gerando milhares de senhas).
+- **Acessibilidade**: tela do totem com fontes grandes, alto contraste — já presente no design de referência (botões grandes, cores fortes).
+- **LGPD**: nome do paciente é dado pessoal mesmo sendo "campo livre sem cadastro" — definir política de retenção/expurgo desse campo após X dias.
+
+---
+
+## 9. Fases de implementação sugeridas (para o Claude Code)
+
+| Fase | Entrega |
+|---|---|
+| **1** | Estrutura do projeto, `requirements.txt`, config Flask, conexão MySQL (SQLAlchemy), models da seção 4, autenticação (login/logout, hash de senha), middleware multi-tenant |
+| **2** | CRUD admin: empresas, unidades, usuários, perfis, vínculo usuário-unidade |
+| **3** | CRUD admin: serviços (siglas), botões do totem (com hierarquia), filas, TVs |
+| **4** | Totem: tela pública de seleção de serviço + geração de senha (com lock de concorrência) |
+| **5** | WebSocket (Flask-SocketIO): infraestrutura de salas por TV/fila |
+| **6** | Painel de chamada (TV): front-end + integração WS + TTS |
+| **7** | Tela de chamada da senha (recepção/coleta) + tela "Alocar fila" (rodízio de prioridade) |
+| **8** | Fluxo de chamada por nome (coleta) — 2ª etapa |
+| **9** | Relatórios + exportação |
+| **10** | Hardening: rate limit, logs de auditoria, testes, deploy Apache2/Gunicorn |
+
+**Recomendação de execução:** uma fase por sessão de chat no Claude Code, validando cada fase antes de avançar.
+
+---
+
+## 10. Stack técnica resumida
+
+| Camada | Tecnologia |
+|---|---|
+| Backend | Python 3.11+, Flask, Flask-SQLAlchemy, Flask-Login, Flask-SocketIO (com `eventlet` ou `gevent`) |
+| Banco | MySQL 8 (driver `PyMySQL` ou `mysqlclient`) |
+| Front (totem/painel/admin) | Jinja2 + JS puro (ou HTMX para interações sem SPA) + Socket.IO client |
+| Servidor de produção | Gunicorn + `eventlet` worker, atrás de **Apache2** (`mod_proxy`/`mod_proxy_wstunnel`) fazendo proxy para o Gunicorn — Apache2 puro com `mod_wsgi` **não sustenta WebSocket bem**, por isso o proxy reverso é necessário |
+| Relatórios/export | pandas + openpyxl |
+| Deploy alvo | Linux (Ubuntu/Debian), systemd service para o Gunicorn |
+
+---
+
+## 10.1. ADENDO — Fusão de Serviço em Fila (decisão pós-Fase 10)
+
+> Decisão tomada após testar o totem na prática: a separação Serviço/Fila criava um
+> passo a mais sem ganho real (cada médico/serviço precisa de sua própria sigla e
+> sequencial, e sempre acaba tendo exatamente 1 fila por serviço na prática).
+> Inspirado na tela de referência do sistema concorrente (ChameFácil/Prolins).
+
+**Mudança de modelo:** a tabela `servicos` é **eliminada**. Seus campos passam a
+viver direto em `filas`:
+
+```
+filas
+  id PK
+  empresa_id FK
+  unidade_id FK
+  nome
+  sigla              VARCHAR(4)        -- migrado de servicos.sigla
+  digitos_sequencial  TINYINT DEFAULT 3 -- migrado de servicos.digitos_sequencial
+  zera_diariamente    BOOLEAN DEFAULT TRUE -- migrado de servicos.zera_diariamente
+  prioridade_padrao   TINYINT DEFAULT 0    -- migrado de servicos.prioridade_padrao
+  prioridade_rodizio  TINYINT DEFAULT 0    -- já existia em filas
+  totem_id FK -> tvs ou tabela própria de totens (NULL = disponível em todos)
+  tv_id FK -> tvs (NULL = usa o vínculo via tv_filas existente; ver nota abaixo)
+  horario_funcionamento JSON  -- ver estrutura abaixo
+  tempo_espera_maximo_min  INT NULL
+  tempo_atendimento_maximo_min INT NULL
+  alerta_email             BOOLEAN DEFAULT FALSE
+  ativo
+```
+
+**`horario_funcionamento` (JSON), estrutura sugerida:**
+```json
+{
+  "domingo":  {"manha": false, "tarde": false},
+  "segunda":  {"manha": true,  "tarde": true},
+  "terca":    {"manha": true,  "tarde": true},
+  "quarta":   {"manha": true,  "tarde": true},
+  "quinta":   {"manha": true,  "tarde": true},
+  "sexta":    {"manha": true,  "tarde": true},
+  "sabado":   {"manha": true,  "tarde": false}
+}
+```
+Fora do horário configurado, o totem deve recusar gerar senha para aquela fila
+(mensagem similar à já existente "Este serviço ainda não está configurado...").
+
+**Sobre `tv_id` direto na fila vs. tabela `tv_filas` existente:** manter `tv_filas`
+(relação N:N) para o caso de uma fila aparecer em mais de uma TV, mas o campo
+`tv_id`/`totem_id` simples na própria fila serve como **atalho de cadastro rápido**
+(ao criar a fila, já vincula automaticamente a 1 TV e 1 totem, populando `tv_filas`
+por trás) — replicar a UX do print de referência, que tem isso como dropdown simples.
+
+**Todas as referências a `servico_id` no restante do documento** (totem_botoes,
+senhas, logs_atendimento, relatórios da seção 7) passam a apontar para `fila_id`
+diretamente — o conceito de "serviço" deixa de existir como entidade, e os botões
+do totem passam a vincular direto a uma `fila_id`.
+
+**Migração de dados existentes (script obrigatório, não apenas schema):**
+1. Para cada linha em `servicos`, criar/atualizar a `fila` correspondente
+   copiando sigla, digitos_sequencial, zera_diariamente, prioridade_padrao.
+2. Atualizar `totem_botoes.servico_id` → `totem_botoes.fila_id` apontando para
+   a fila migrada.
+3. Atualizar `senhas.servico_id` → `senhas.fila_id` (já existia fila_id em
+   senhas conforme seção 4 original — confirmar que bate com a fila migrada,
+   não com uma fila nova).
+4. Não fazer DROP da tabela `servicos` até confirmar que a migração de dados
+   rodou sem perda (manter como tabela "morta" por 1 deploy, remover depois).
+
+**Caso real que motivou a mudança:** um botão "MEDICOS" (menu) tinha sigla
+genérica CM compartilhada por todos os médicos do submenu. Após a fusão, cada
+médico (ex.: Rodrigo Brum, Leandro Gonçalves) deve ser sua própria `fila` com
+sigla própria (RB, LG, etc.), vinculada a um botão-folha do totem; o botão
+"MEDICOS" em si deve ficar **sem** fila vinculada (campo `fila_id` nulo no
+botão), servindo apenas de menu de navegação para o submenu.
+
+---
+
+## 10.2. ADENDO — Tela unificada de Atendimento (chamar/tocar/realocar/finalizar + redirecionamento)
+
+> Baseado em referência visual do sistema concorrente (ChameFácil/Prolins), tela
+> "Atendimento". Substitui/expande a tela simples de "chamada de senha" descrita
+> na seção 5.2 original por um painel operacional único, mais completo.
+
+**Layout da tela (uma única tela por operador, por local fixo):**
+- Campo **Local** — fixo para aquele posto de atendimento (ex.: "Coleta B 02 -
+  Coleta Exames"), definido no perfil/sessão do operador ou escolhido ao logar.
+- Campo **Senha chamada** — mostra a senha atualmente em atendimento naquele local.
+- Campo **Agendados** — fila de pacientes com horário agendado (fora do escopo
+  imediato; registrar como pendência futura, não implementar nesta fase).
+- Campo **Código** — busca/chama uma senha específica digitando o código
+  manualmente (modo de contingência, já previsto na seção 8 do blueprint original).
+- Campo **Nome** — **é aqui que se registra o nome do paciente** (texto livre,
+  sem cadastro), consolidando o que a seção 5.3 original descrevia como tela
+  separada. Passa a fazer parte desta tela única.
+- Bloco **Redirecionar** — lista de filas de destino (ex.: Coleta, ENTREGA DE
+  AMOSTRA, PCD) como **radio buttons** (seleção única, não múltipla) — ao marcar
+  uma e confirmar, a senha é movida para aquela fila/setor.
+- Botões de ação: **Chamar | Tocar | Realocar | Finalizar | Aguardar | Enquetes**
+
+**Semântica de cada botão de ação:**
+| Botão | Efeito |
+|---|---|
+| **Chamar** | Avança para a próxima senha da fila (ou a do campo Código, se preenchido); status → `chamada`; grava `chamada_em`; emite WebSocket para a TV; dispara áudio |
+| **Tocar** | Repete o áudio/exibição da senha **atualmente** chamada, sem alterar nenhum status ou timestamp — útil quando o paciente não ouviu/não apareceu |
+| **Realocar** | Move a senha atual para **outra fila/local**, usando o bloco Redirecionar (radio button) como destino; equivale a trocar `fila_id`/`guiche_local` da senha em andamento, sem finalizar o atendimento |
+| **Finalizar** | Conclui o atendimento; status → `finalizada`; grava `finalizada_em` (ou `atendimento_iniciado_em`→fim, conforme o fluxo já especificado na seção 4); libera o operador para chamar a próxima |
+| **Aguardar** | Coloca a senha atual de volta em espera (status volta para `aguardando`), sem finalizar — para quando o atendimento precisa pausar |
+| **Enquetes** | Fora de escopo por ora — registrar como pendência futura (possível pesquisa de satisfação pós-atendimento), não implementar nesta fase |
+
+**Sobre o campo Nome + Redirecionar combinados:** o fluxo real observado é:
+operador chama a senha (paciente chega), digita o nome no campo livre, e *então*
+pode usar Realocar para mandar esse paciente (já identificado pelo nome) para a
+fila de Coleta, por exemplo — unificando o que antes eram "2 chamadas separadas"
+(seção 5.3 original) em uma única tela operacional contínua.
+
+**Multi-tenant/RBAC:** esta tela é acessada pelos perfis `recepcao`, `coleta`,
+`recepcao_coleta` e `admin`, restrita às filas/unidades permitidas ao operador,
+seguindo o mesmo middleware já validado nas fases anteriores.
+
+**Listas auxiliares na mesma tela (referência adicional: ver imagem mais completa
+do fluxo em produção):** abaixo dos botões de ação, a tela exibe duas tabelas
+em tempo real:
+
+1. **"Senhas em espera"** — todas as senhas com status `aguardando` para a(s)
+   fila(s) daquele local, com colunas:
+   - **Senha** (código, ex.: `A N275`)
+   - **T. Espera** — tempo ao vivo desde `criada_em` até agora, formato
+     `HH:MM:SS`, recalculado continuamente no front (não precisa de novo
+     evento de servidor por segundo; calcular client-side a partir do
+     timestamp de criação recebido)
+   - **H. Agend.** — horário agendado, se houver (mesmo "Agendados" do campo
+     superior; exibir vazio quando não houver agendamento, sem bloquear o
+     restante da funcionalidade)
+   - **Nome** — preenchido apenas se o operador já tiver registrado nesta tela
+   - **Observações** — texto livre opcional por senha (campo novo; adicionar
+     `observacoes` em `senhas`, nullable)
+   - **Ações** — botão "Chamar" individual por linha, que chama *aquela* senha
+     específica diretamente (atalho equivalente a preencher o campo Código
+     e clicar Chamar)
+
+2. **"Senhas atendidas"** — histórico das últimas senhas já chamadas/finalizadas
+   naquele local, com colunas:
+   - **Senha**
+   - **Tempo de espera** — tempo total entre `criada_em` e `chamada_em`
+     (congelado, não ao vivo, já que o atendimento já ocorreu)
+   - **Guichê** — o `guiche_local` usado naquele atendimento
+
+Essas duas tabelas devem atualizar via WebSocket (mesma infraestrutura da Fase
+5/6): ao chamar uma senha, ela some de "Senhas em espera" e aparece no topo de
+"Senhas atendidas" em tempo real, sem precisar recarregar a página.
+
+---
+
+## 10.3. ADENDO — Cadastro de Locais (guichês/postos de atendimento)
+
+> O campo "Local" da tela de Atendimento (seção 10.2) estava implementado como
+> texto livre editável, o que gera inconsistência (o mesmo posto físico podendo
+> ser digitado de formas diferentes por operadores diferentes, quebrando
+> relatórios e agrupamentos). Vira uma entidade cadastrável própria.
+
+**Nova tabela:**
+```
+locais
+  id PK
+  empresa_id FK
+  unidade_id FK
+  nome           -- ex: "rec1-01", "Coleta B 02", "Guichê Farmácia"
+  tipo           ENUM('recepcao','coleta','outro') NULL  -- opcional, ajuda a
+                                                            -- filtrar locais por
+                                                            -- contexto de uso
+  ativo
+```
+
+**Mudança em `senhas`:** o campo `guiche_local` (VARCHAR livre, seção 4 original)
+passa a ser substituído por `local_id FK -> locais` (manter `guiche_local` como
+coluna morta/legada por 1 deploy, igual ao tratamento dado a `servicos` no
+adendo 10.1, até confirmar migração sem perda de dado histórico).
+
+**Comportamento na tela de Atendimento:**
+- Ao logar ou iniciar o turno, o operador **escolhe** o Local entre os cadastrados
+  para a(s) unidade(s) que ele tem permissão de acessar — não é mais digitado
+  livremente.
+- A escolha do local fica na sessão do operador durante aquele turno/login,
+  podendo ser trocada manualmente (ex.: um link/botão "Trocar local" na própria
+  tela de Atendimento), sem precisar deslogar.
+- CRUD de `locais` é administrativo (perfil `admin`/super admin), seguindo o
+  mesmo padrão de isolamento multi-tenant e RBAC já estabelecido (404 ao tentar
+  acessar local de outra empresa via ID manual, etc.).
+
+**Relatórios (seção 7):** os agrupamentos "por setor (recepção/coleta)" passam
+a poder usar também o agrupamento por `local_id` quando fizer sentido (ex.:
+tempo médio de atendimento por guichê específico, não só por setor genérico).
+
+---
+
+## 10.4. ADENDO — Tipos de senha configuráveis (prefixo/cor/peso)
+
+> Origem: documento de referência de especificação enterprise (estilo hospital
+> de grande porte, ONA/JCI). A maior parte daquele documento é desproporcional
+> para este projeto (ver nota de escopo ao final desta seção) — só o conceito de
+> "tipo de senha" com regras próprias foi adotado, adaptado ao modelo já existente.
+
+**Nova tabela `tipos_senha`:**
+```
+tipos_senha
+  id PK
+  empresa_id FK
+  nome              -- ex: "Idoso", "Gestante", "PCD", "Oncologia", "Normal"
+  prefixo           VARCHAR(2)  -- combinado com a sigla da fila na composição
+                                  -- do código final (ver regra de composição abaixo)
+  cor               VARCHAR(7)  -- hex, usado no totem/painel (ex: "#E53935")
+  peso_prioridade   TINYINT DEFAULT 0  -- maior peso = preferência no rodízio
+  tempo_maximo_min  INT NULL    -- referência para alertas/relatórios (opcional)
+  ativo
+```
+
+**Composição do código da senha:** a regra original da seção 2 (sigla da fila +
+sequencial) se mantém como base, e o prefixo do tipo de senha se soma a ela.
+Exemplo: fila "Laboratório" (sigla `LAB`) + tipo "Idoso" (prefixo `I`) gera
+`LAB-I001`, enquanto o tipo "Normal" (prefixo vazio ou `N`) gera `LAB001` ou
+`LABN001`, dependendo da configuração de exibição (definir um campo
+`exibir_prefixo_tipo_quando_normal` booleano na fila para esse ajuste fino,
+default `false` — não exibir prefixo redundante quando for o tipo padrão).
+
+**Vínculo com o rodízio de prioridade já existente (`prioridade_rodizio` em
+`filas`, seção 5.4):** o `peso_prioridade` do tipo de senha escolhido no totem
+é o que efetivamente entra no cálculo de "quantas chamadas seguidas" daquele
+nível antes de voltar ao rodízio normal — não se cria um sistema de prioridade
+paralelo, o tipo de senha é o que *alimenta* o rodízio que já temos.
+
+**No totem:** ao tocar um botão-folha vinculado a uma fila, se a fila tiver mais
+de 1 tipo de senha ativo configurado, exibir uma tela intermediária para o
+paciente escolher o tipo (ex.: "Normal" ou "Prioritário/Idoso/Gestante/PCD")
+antes de gerar o código — se só houver 1 tipo ativo (ou nenhum configurado),
+gerar direto como hoje, sem essa tela extra, para não adicionar fricção
+desnecessária em filas simples (ex.: Laboratório pode não precisar de tipos).
+
+**No painel/TV:** usar a `cor` do tipo de senha para destacar visualmente a
+linha daquela chamada (ex.: senhas prioritárias com fundo diferenciado).
+
+**Cadastro administrativo:** CRUD de `tipos_senha` por empresa (não por
+unidade — o catálogo de tipos é da empresa toda, reaproveitado entre unidades),
+seguindo o mesmo padrão de RBAC e isolamento multi-tenant já validado.
+
+---
+
+### Nota de escopo — o que NÃO foi adotado do documento de referência enterprise
+
+Para deixar explícito e evitar que sessões futuras do Claude Code tentem
+reintroduzir isso "para completude": as seguintes partes do documento de
+referência foram **deliberadamente descartadas** por serem desproporcionais
+ao contexto real deste projeto (uma clínica, equipe pequena, Flask+MySQL
+local) — não implementar nenhum destes itens a menos que o cliente solicite
+explicitamente em uma decisão futura própria, com seu próprio adendo:
+
+- Infraestrutura: Redis, RabbitMQ, Docker, Kubernetes, microsserviços,
+  Prometheus/Grafana, CI/CD — manter Flask + MySQL + Gunicorn/eventlet +
+  Apache2/Nginx conforme seção 10 original.
+- Integrações externas: HL7, FHIR, TISS, ERP, HIS, LIS, RIS, Prontuário
+  Eletrônico, Portal do Paciente, WhatsApp, SMS, Email, Webhooks.
+- OAuth2/JWT/MFA — a autenticação por sessão (Flask-Login) já validada nas
+  Fases 1-2 é suficiente para este contexto; não migrar para token-based
+  sem necessidade real identificada.
+- Múltiplos idiomas no totem, Libras, leitura por voz no totem (TTS já
+  existe no painel/TV conforme seção 6; não duplicar no totem sem demanda).
+- Dashboard BI separado, mapas de calor, gráficos avançados — os relatórios
+  da seção 7 (tabelas + exportação CSV/Excel) atendem a necessidade atual;
+  visualização gráfica pode ser um adendo futuro isolado, se necessário.
+- Estados de senha além dos já definidos na seção 4 (`aguardando`, `chamada`,
+  `em_atendimento`, `finalizada`, `cancelada`) — rechamada/transferência já
+  são cobertas pelos botões Tocar/Realocar da seção 10.2 sem precisar de
+  novos valores de enum; "ausente"/"expirada" não têm necessidade identificada
+  agora.
+
+---
+
+## 10.5. ADENDO — Navegação multi-nível do totem + quantidade de acompanhantes
+
+> Baseado em mapeamento detalhado da navegação real do sistema de referência
+> (ChameFácil/Prolins), confirmando e expandindo a hierarquia de botões já
+> prevista na seção 5.5 original.
+
+**Profundidade de navegação arbitrária:** a hierarquia de `totem_botoes`
+(via `parent_id`, seção 4) já suporta múltiplos níveis por natureza da
+modelagem (auto-relacionamento), mas fica confirmado aqui que isso é usado
+**na prática** com 2 a 3 níveis de profundidade, não só 1 submenu simples.
+Exemplo observado:
+```
+Tela raiz
+ ├─ ULTRASSONOGRAFIA (botão-folha, gera senha direto)
+ ├─ LABORATÓRIO (botão-folha, gera senha direto)
+ ├─ CONSULTÓRIOS (menu, sem fila_id)
+ │   ├─ Atendimento Idoso Acima de 80 Anos Lei 13466 (botão-folha → fila própria)
+ │   ├─ Atendimento Normal (botão-folha → fila própria)
+ │   ├─ Atendimento Preferencial Lei 10048 (botão-folha → fila própria)
+ │   ├─ BRONCOSCOPIA (botão-folha → fila própria)
+ │   ├─ ... (demais tipos/serviços do mesmo nível, todos folhas, caminhos
+ │   │      independentes entre si — não há ordem obrigatória entre eles)
+ │   └─ [outro grupo, ex. lista de médicos, também poderia estar neste
+ │        mesmo nível ou em um filho de "CONSULTÓRIOS", dependendo de como
+ │        o admin organizar; ambos os grupos são igualmente válidos como
+ │        filhos diretos de um menu, sem relação de dependência entre eles]
+ ├─ QUIMIO/AMBULATÓRIO-MEZANINO1 (menu, sem fila_id)
+ │   ├─ ADMINISTRAÇÃO DE MEDICAMENTOS M1 (botão-folha → fila própria)
+ │   └─ AUTORIZAÇÃO DE GUIAS (botão-folha → fila própria)
+ └─ QUIMIO/AMBULATÓRIO-MEZANINO2 (menu, sem fila_id)
+     ├─ ADMINISTRAÇÃO DE MEDICAMENTOS M2 (botão-folha → fila própria)
+     ├─ ANEXO M2 (ORAIS E INJEÇÕES SC) (botão-folha → fila própria)
+     ├─ AUTORIZAÇÃO DE GUIAS M2 (botão-folha → fila própria)
+     ├─ EQUIPE MULTIDISCIPLINAR (botão-folha → fila própria)
+     └─ TRANSFUSÃO (botão-folha → fila própria)
+```
+Importante: dentro de um mesmo menu (ex.: CONSULTÓRIOS), os botões-folha que
+representam **tipos de atendimento** (Idoso, Normal, Preferencial, etc.) e os
+que representam **médicos específicos** (caso cadastrados) são **caminhos
+independentes, lado a lado, no mesmo nível** — não há uma navegação obrigatória
+"primeiro escolha o tipo, depois o médico" nem o inverso. Cada botão-folha é
+sua própria fila com sua própria sigla, conforme já estabelecido no adendo 10.1.
+A interface de cadastro de botões (seção 5.5/Fase 3) já permite isso livremente,
+sem necessidade de mudança de schema — este adendo é só uma confirmação de uso,
+não uma alteração estrutural.
+
+**Vínculo com `tipos_senha` (adendo 10.4):** os botões "Atendimento Idoso Acima
+de 80 Anos Lei 13466 2017" e "Atendimento Preferencial Lei 10048 2000" não são
+uma coleção própria — são **filas** cujo nome reflete o `tipo_senha` predominante
+esperado ali, mas o catálogo de `tipos_senha` continua único por empresa
+(reaproveitado entre todas as áreas: Consultórios, Quimio, etc.), conforme já
+definido. Não criar uma segunda tabela de tipos específica de Consultórios.
+
+**Novo: campo "Quantidade de acompanhantes" no momento de gerar a senha:**
+- Modal exibido ao tocar um botão-folha, antes da geração efetiva do código:
+  "Toque no número de pessoas que estão lhe acompanhando" — opções de 0 a 6
+  (configurável: o limite máximo pode ser um parâmetro da fila, default 6).
+- Natureza **somente informativa/estatística** — não gera senhas extras, não
+  altera o código gerado, não afeta o rodízio de prioridade.
+- Adicionar campo `qtd_acompanhantes` (TINYINT, default 0, nullable) em `senhas`.
+- Uso pretendido: relatórios futuros de fluxo de pessoas/capacidade de sala de
+  espera (não implementar o relatório agora, só capturar o dado desde já, para
+  não perder histórico enquanto a funcionalidade de relatório não existe).
+- Botão "Gerar Senha" no modal confirma; botão "Cancelar" volta sem gerar nada.
+
+---
+
+## 10.6. ADENDO — Impressão física da senha (impressora térmica Bematech, USB, Windows)
+
+> Resolve o ponto que ficou aberto desde a seção 11 original ("Impressão física
+> da senha: impressora térmica local no totem ou só exibição em tela?"). A
+> resposta é: sim, impressão física, em ambiente Windows, com impressora
+> Bematech (modelo MP-4200 TH ou similar) conectada via USB, já instalada e
+> reconhecida pelo Windows em "Dispositivos e Impressoras".
+
+**Abordagem técnica escolhida:** em vez de comunicação USB raw (que exige
+drivers libusb/WinUSB e é frágil no Windows), enviar os comandos ESC/POS
+através da **fila de impressão nativa do Windows**, usando a biblioteca
+`pywin32` (`win32print`). A impressora já está instalada e visível no sistema
+operacional, então o totem só precisa montar a sequência de bytes ESC/POS e
+enviá-la como um trabalho de impressão RAW para o nome da impressora
+configurado (ex.: "Bematech MP-4200 TH"), sem precisar de driver adicional
+nem de biblioteca de acesso a USB de baixo nível (`pyusb`).
+
+**Biblioteca para montar os comandos ESC/POS:** usar `python-escpos`, que tem
+suporte nativo a perfis Bematech (`escpos.impl.bematech` no PyESCPOS, ou
+`profile="..."` no python-escpos), gerando os bytes corretos sem precisar
+escrever os comandos hexadecimais manualmente. A camada de **envio** desses
+bytes, porém, deve ser via `win32print` (fila do Windows), não via a conexão
+USB direta que essas bibliotecas oferecem por padrão — combinar: usar a
+biblioteca só para *gerar* a sequência de bytes, e `win32print` para *enviar*.
+
+**Novo campo de configuração:**
+```
+empresas (ou unidades, ou tvs/totens — definir o nível mais adequado)
+  nome_impressora_windows  VARCHAR(120) NULL
+    -- nome exato da impressora como aparece em "Dispositivos e Impressoras"
+    -- do Windows daquele totem específico, ex: "Bematech MP-4200 TH"
+```
+Como cada totem físico pode ter sua própria impressora local, o campo deve
+ficar associado ao **totem** (ou à TV/totem físico, conforme a tabela de
+cadastro de totens já mencionada no adendo 10.1), não à empresa inteira —
+permitindo que totens diferentes, em PCs diferentes, apontem para impressoras
+diferentes.
+
+**Layout do cupom impresso:**
+```
+        [Nome da empresa/clínica]
+        ----------------------
+              CM03
+        ----------------------
+        24/06/2026  14:32
+```
+- Nome da empresa: vem do cadastro de `empresas` já existente.
+- Código da senha: fonte grande (usar comando ESC/POS de tamanho de fonte
+  duplo/triplo, já suportado nativamente pela biblioteca escolhida).
+- Data/hora: momento da impressão (= momento da geração da senha).
+- Corte de papel automático ao final (`cut()`), se a impressora suportar
+  (Bematech MP-4200 TH normalmente suporta guilhotina).
+
+**Tratamento de falha:** se a impressão falhar (impressora desligada, sem
+papel, fila travada), o totem **não deve travar nem impedir** a geração da
+senha — a senha já foi gravada no banco e deve continuar seu fluxo normal
+(aparecer na fila, poder ser chamada, etc.) mesmo sem o papel saindo. Registrar
+a falha de impressão em log (não em `logs_atendimento`, que é sobre o fluxo de
+atendimento — usar log de aplicação simples, ex.: arquivo de log do Flask),
+e opcionalmente exibir um aviso discreto na tela do totem ("Anote seu código:
+CM03" como reforço, sem bloquear o fluxo).
+
+**Fora de escopo deste adendo:** múltiplas impressoras de rede, fila de
+impressão remota, monitoramento de nível de papel em tempo real — implementar
+apenas o caminho feliz (impressão local USB-via-Windows) mais a tolerância a
+falha descrita acima.
+
+---
+
+## 10.7. ADENDO — Link direto de acesso público nas telas de Totens e TVs
+
+> Falha de usabilidade identificada: as telas administrativas de Totens e TVs
+> não exibem a URL pública de cada item, obrigando consulta direta ao banco
+> de dados para descobrir o ID e montar a URL manualmente. Corrigir nas duas
+> telas (Totens e TVs), não só em uma.
+
+**Tela de Totens (`/admin/totens`):** adicionar coluna **"Link"** (ou ação
+"Abrir totem") na tabela de listagem, com a URL pública completa e clicável
+(abre em nova aba), no formato já estabelecido (`/totem/<id>` ou equivalente
+ao que já está implementado). Incluir também um botão de **copiar link**
+(ícone ou texto "Copiar"), já que totens físicos costumam precisar que esse
+link seja configurado manualmente no navegador do equipamento em modo
+quiosque — copiar evita erro de digitação.
+
+**Tela de TVs (`/admin/tvs`):** mesma correção — coluna "Link"/ação "Abrir
+painel" com a URL pública (`/painel/tv/<id>` ou equivalente), clicável, com
+botão de copiar.
+
+**Padrão a seguir para futuras telas:** qualquer entidade cadastrável que
+gere uma URL pública de acesso (sem necessidade de login) deve exibir esse
+link diretamente na listagem administrativa correspondente, como regra geral
+de usabilidade deste sistema — evitar depender de consulta ao banco para
+operação rotineira.
+
+---
+
+## 10.8. ADENDO — Rodízio de chamadas por Local (múltiplas filas)
+
+> Baseado em telas administrativas do sistema de referência (ChameFácil/Prolins):
+> lá, a tela de Atendimento é organizada por **Local**, não por Fila — um Local é
+> "alocado" com uma lista ordenada de múltiplas filas, cada uma com uma
+> "quantidade de chamadas seguidas", e o sistema revezar automaticamente entre
+> elas, sem o operador escolher fila manualmente. Isso é um nível acima do
+> `prioridade_rodizio` já existente (seção 5.4/adendo 10.2), que só revezar
+> prioritário-vs-normal **dentro** de uma única fila. Este adendo formaliza a
+> avaliação já feita: **seguimos com a opção completa** — rotação automática
+> entre múltiplas filas por Local, com tela de Atendimento unificada
+> **coexistindo** com a tela atual por `fila_id`, não a substituindo.
+
+### 1. Modelo de dados — `LocalRodizioFila` (association object)
+
+```
+local_rodizio_filas
+  local_id FK -> locais              -- PK composta com fila_id
+  fila_id  FK -> filas
+  ordem              TINYINT DEFAULT 0  -- posição da fila na lista (desempate/exibição)
+  chamadas_seguidas  TINYINT DEFAULT 1  -- quantas chamadas consecutivas dessa fila
+                                          -- antes de passar para a próxima da lista
+```
+
+**Por que precisa ser uma classe mapeada (model próprio), não uma tabela
+associativa simples:** todas as relações N:N já existentes no projeto
+(`usuario_perfil`, `usuario_unidade`, `tv_filas`, `fila_tipos_senha`,
+`local_filas_destino` — esta última do bloco "Redirecionar" já implementado)
+são tabelas puras, só com as duas FKs como chave composta, sem nenhum dado
+extra por par. `local_rodizio_filas` precisa carregar `ordem` e
+`chamadas_seguidas` por par Local×Fila — não cabe numa tabela associativa
+simples, exige um `db.Model` de verdade (`LocalRodizioFila`), com
+`db.relationship` pros dois lados (`local`, `fila`). É a primeira relação
+N:N do projeto com esse formato — outras telas que reaproveitarem esse
+padrão no futuro devem seguir o mesmo modelo (classe mapeada, não
+`db.Table()`), sempre que precisarem de dados por par além das FKs.
+
+**Mesma unidade obrigatória (Local e Fila do rodízio):** validado na camada
+de aplicação (tela admin, seção 2 abaixo), nunca no schema — mesmo padrão já
+estabelecido para `local_filas_destino`.
+
+**Requisito explícito de migração** (ver seção 5): a tabela nasce vazia. Um
+Local sem nenhuma linha aqui não entra no fluxo novo — ver seção 5.
+
+### 2. Tela admin — cadastro de rodízio por Local
+
+**Não é uma aba dentro do formulário de cadastro de Local** (`admin/locais/form.html`,
+adendo 10.3) — vira uma **tela dedicada separada**, pelos mesmos motivos que
+"Alocar fila" (seção 5.4) já é separada do cadastro de `Fila`: a interação
+(lista ordenada + um número por item) é mais complexa que os campos simples
+do formulário de Local (nome/unidade/tipo + os checkboxes de
+`filas_destino_permitidas`), e misturar as duas deixaria o formulário
+principal poluído.
+
+**Diferente de "Alocar fila" (que vive em `atendimento_bp`, acessível a
+perfis operacionais `recepcao`/`coleta`/`admin`):** esta tela fica em
+`admin_bp`, só para `admin`/super admin — decisão deliberada, porque
+configurar **quais filas um Local atende e em que ordem** é uma decisão
+estrutural de operação da unidade (mais parecida com o cadastro do próprio
+Local e com `filas_destino_permitidas`, ambos já admin-only), não um ajuste
+fino do dia a dia como `prioridade_rodizio` costuma ser.
+
+**Rotas propostas** (mesmo padrão de `autorizar_objeto`/`resolver_empresa_contexto`
+já usado em `admin/locais.py`):
+```
+GET  /admin/locais/<int:local_id>/rodizio
+POST /admin/locais/<int:local_id>/rodizio
+```
+
+**Template novo** (`admin/locais/rodizio.html`): lista as filas da MESMA
+unidade do Local (igual ao filtro já usado nos checkboxes de
+`filas_destino_permitidas`), cada uma com:
+- checkbox "participa do rodízio deste Local";
+- campo numérico `chamadas_seguidas` (default 1, mínimo 1);
+- campo numérico `ordem` (posição na lista — sem drag-and-drop/JS, consistente
+  com o restante do admin, que já é JS-light).
+
+Ao salvar, substitui a lista inteira (mesmo padrão já usado em `tv.filas`/
+`local.filas_destino_permitidas` — mais simples que calcular diff de
+adição/remoção, e o volume por Local é pequeno).
+
+**Aviso obrigatório na tela:** ao salvar uma configuração com 1+ fila, exibir
+texto explícito — *"Ao salvar, este Local passará a usar a tela unificada de
+Atendimento por Local (rotação automática entre as filas configuradas), em
+vez da escolha manual de fila."* — mitiga o risco de confusão sobre qual modo
+cada Local está usando (ver seção 7).
+
+**Link de entrada:** nova ação "Configurar rodízio" na listagem
+(`admin/locais/listar.html`), ao lado de "Editar"/ativar-desativar.
+
+### 3. Nova rota de Atendimento — `/atendimento/<setor>/local/<local_id>`
+
+**Coexiste** com `/atendimento/<setor>/filas/<fila_id>` (adendo 10.2), que
+continua existindo sem nenhuma mudança de comportamento. Reaproveitamento:
+
+- Mesmo template base (`atendimento/_layout.html`) e estrutura visual de
+  `painel_fila.html` (Local / Senha chamada / Código / Nome / Redirecionar /
+  botões de ação / tabelas "Senhas em espera" e "Senhas atendidas") — um novo
+  `atendimento/painel_local.html` adaptado, não uma tela do zero.
+- **O que muda:** "Senhas em espera" passa a agregar candidatas de **todas**
+  as filas do rodízio daquele Local (nova função `senhas_aguardando_local(local)`,
+  filtrando `Senha.fila_id.in_(ids_das_filas_do_rodizio)` em vez de uma só
+  fila). O botão "Chamar" delega para `selecionar_proxima_fila_e_senha(local)`
+  (seção 4) em vez de `selecionar_proxima_senha(fila)` diretamente — decide
+  tanto a fila quanto a senha.
+- **`senha_atual_no_local`/`senhas_atendidas_no_local` generalizadas:** hoje
+  filtram por `fila_id` **e** `local_id` simultaneamente (`atendimento/helpers.py`)
+  — precisam soltar o filtro de `fila_id` fixo (ou trocar por `fila_id.in_(...)`)
+  quando chamadas a partir da tela por-Local, mantendo o comportamento atual
+  (filtro fixo por uma fila) intacto para a tela por-fila existente. Ou seja:
+  as funções ganham um modo mais genérico, não são reescritas — a tela por-fila
+  continua passando 1 fila só, sem notar diferença.
+- **Tocar/Finalizar/Aguardar:** operam sobre "a senha atualmente chamada neste
+  Local" (independente de qual fila) — mesma lógica de registro
+  (`registrar_toque`, `registrar_fim_atendimento`, `registrar_volta_espera`),
+  que já recebem a `senha` já resolvida, não a fila — reaproveitamento total,
+  sem mudança nelas.
+- **Realocar:** sem mudança nenhuma — já opera sobre `senha.fila_id` e o bloco
+  Redirecionar (`filas_destino`, restrição por Local já implementada),
+  independente de qual tela (por-fila ou por-Local) disparou a ação.
+- **Observações:** já é `senha_id`-scoped (`salvar_observacoes`), sem mudança.
+
+**Rotas de ação:** `chamar_local`/`tocar_local`/`finalizar_local`/`aguardar_local`
+(setor, local_id) — variantes da tela por-Local, espelhando as 4 já existentes
+por-fila. `realocar` pode ser reaproveitada tal como está (não depende de
+`fila_id` na URL de forma essencial, só usa isso pra montar o redirect de
+volta — a variante `_local` troca só o redirect de destino).
+
+### 4. `selecionar_proxima_fila_e_senha(local)` — lógica de decisão
+
+Mesmo princípio de design já usado em `prioridade_rodizio`/`chamadas_recentes`
+(seção 5.4/`atendimento/helpers.py`): **nenhum contador é persistido** — a
+posição atual do rodízio é recalculada a partir do histórico real de
+`Senha.chamada_em` a cada chamada.
+
+```
+def selecionar_proxima_fila_e_senha(local):
+    candidatas = [
+        item.fila for item in local.rodizio_ordenado  # ordenado por `ordem`
+        if item.fila.ativo and item.fila.aberta_em()   # pula fila fechada/inativa
+    ]
+    if not candidatas:
+        return None, None  # nenhuma fila do rodízio disponível agora
+
+    # reconstrói de qual fila foram as últimas chamadas NESTE local (não
+    # precisa contador novo - mesmo princípio de prioridade_rodizio)
+    ultimas_chamadas = Senha.query.filter(
+        Senha.local_id == local.id, Senha.chamada_em.isnot(None),
+    ).order_by(Senha.chamada_em.desc()).limit(SOMA_CHAMADAS_SEGUIDAS_CONFIGURADAS).all()
+
+    fila_da_vez = _proxima_fila_na_rotacao(candidatas, ultimas_chamadas)
+
+    # delega para a função já existente, sem mudança - é aqui que os dois
+    # rodízios se encontram (ver seção "Coexistência" abaixo)
+    senha = selecionar_proxima_senha(fila_da_vez)
+
+    # fila da vez está sem ninguém esperando - percorre as demais, na ordem,
+    # até achar uma com gente esperando (não trava o rodízio numa fila vazia)
+    if senha is None:
+        for fila in candidatas:
+            if fila.id == fila_da_vez.id:
+                continue
+            senha = selecionar_proxima_senha(fila)
+            if senha is not None:
+                fila_da_vez = fila
+                break
+
+    return fila_da_vez, senha
+```
+
+`_proxima_fila_na_rotacao`: conta, a partir da chamada mais recente pra trás,
+quantas foram seguidas da MESMA fila; se esse número ainda for menor que o
+`chamadas_seguidas` configurado pra ela, repete a mesma fila; senão avança
+pra próxima da lista (por `ordem`), ciclicamente ao chegar no fim.
+
+**`SOMA_CHAMADAS_SEGUIDAS_CONFIGURADAS` é dinâmica, não uma constante fixa**
+(observação registrada na revisão do adendo, antes da Fase 10.8-C) — é a soma
+de `chamadas_seguidas` de todas as filas candidatas **daquele Local
+especificamente** (`sum(item.chamadas_seguidas for item in candidatas)`),
+recalculada a cada chamada junto com a lista de candidatas (que já pula filas
+fechadas/inativas). Locais diferentes, com rodízios configurados de forma
+diferente, têm essa soma diferente — nunca um valor fixo global. Isso precisa
+ficar explícito no código da Fase 10.8-C (não só no pseudocódigo) e coberto
+por teste que confirma o comportamento com pelo menos dois Locais com somas
+distintas.
+
+**Coexistência com `prioridade_rodizio` — não competem, são duas camadas:**
+- **Camada externa (nova, deste adendo):** qual fila é a vez, dentre as N
+  filas do rodízio do Local.
+- **Camada interna (já existe, sem nenhuma mudança):** dentro da fila
+  escolhida, `prioridade_rodizio` decide prioritário-vs-normal, exatamente
+  como hoje (`selecionar_proxima_senha(fila)` reaproveitada sem alteração).
+
+Nenhuma fila muda de comportamento só por essa feature existir —
+`prioridade_rodizio` continua sendo lido e aplicado igual, tanto por filas
+que participam de um rodízio de Local quanto pelas que continuam no fluxo
+por-fila tradicional.
+
+### 5. Migração — requisito explícito de compatibilidade retroativa
+
+**Requisito, não implícito:** um Local **sem nenhuma linha** em
+`local_rodizio_filas` continua funcionando **exatamente como hoje** — fluxo
+manual por `fila_id`, via `listar_filas()` →
+`/atendimento/<setor>/filas/<fila_id>`. `escolher_local()` não muda de
+comportamento para esses Locais; nenhum redirecionamento automático ocorre.
+A tabela nasce vazia (migration só cria o schema, sem popular nada) — **zero
+impacto em qualquer Local/fila já cadastrado** até que um admin configure
+explicitamente um rodízio via a tela da seção 2.
+
+Só Locais com 1+ linha configurada entram no fluxo novo — e mesmo esses
+continuam com a URL antiga (`/atendimento/<setor>/filas/<fila_id>`) acessível
+por quem quiser (ex.: um operador pode preferir a tela de uma fila específica
+mesmo com o Local tendo rodízio configurado) — não há bloqueio de acesso à
+tela por-fila, só uma sugestão de fluxo automático quando o Local está
+configurado.
+
+### 6. Fases de implementação sugeridas
+
+Mesmo espírito da seção 9 original — uma fase por vez, aprovando antes de
+avançar (mesmo processo já usado no dashboard fora do BLUEPRINT):
+
+| Fase | Entrega |
+|---|---|
+| **10.8-A** | Model `LocalRodizioFila` + migration (tabela nova, vazia — zero impacto) |
+| **10.8-B** | Tela admin de configuração (`/admin/locais/<id>/rodizio`) — CRUD da lista ordenada, validação de mesma unidade, aviso de mudança de fluxo |
+| **10.8-C** | `selecionar_proxima_fila_e_senha(local)` + generalização de `senhas_aguardando_local`/`senha_atual_no_local`/`senhas_atendidas_no_local` — só a lógica, testável isoladamente, sem tela nova ainda |
+| **10.8-D** | Nova rota `/atendimento/<setor>/local/<local_id>` (GET + `/dados`) e template `painel_local.html` — só visualização, sem botões de ação ainda |
+| **10.8-E** | Botões de ação na tela nova (chamar/tocar/realocar/finalizar/aguardar por Local) + integração WebSocket (múltiplas salas `fila_<id>` agregadas no cliente) |
+| **10.8-F** | `escolher_local()` passa a oferecer/redirecionar para a tela nova quando o Local tiver rodízio configurado |
+
+### 7. Riscos identificados e mitigação
+
+| Risco | Mitigação |
+|---|---|
+| Confusão sobre qual Local usa qual modo (por-fila vs. rodízio) | A mera presença de linhas em `local_rodizio_filas` já decide isso automaticamente (sem campo de flag extra) — mitigado com o aviso explícito na tela de configuração (seção 2) |
+| Duas telas de atendimento mantidas em paralelo = manutenção dobrada a longo prazo | Reaproveitamento máximo de `atendimento/helpers.py` — só a *seleção* de fila/senha muda; `registrar_*` já são fila/senha-agnósticas |
+| Rodízio "preso" numa fila configurada mas vazia (sem ninguém esperando) | Pseudocódigo da seção 4 já prevê fallback: percorre as demais filas da lista até achar uma com gente esperando, sem travar |
+| Todas as filas do rodízio fechadas ao mesmo tempo (`horario_funcionamento`, fim de expediente) | Tela deve mostrar mensagem clara ("Nenhuma fila disponível neste horário"), nunca erro/quebra |
+| Rodízio do Local configurado com filas que não têm relação com `filas_destino_permitidas` (bloco Redirecionar) daquele mesmo Local | Não travar — só exibir aviso na tela de configuração se as listas não se sobrepõem, já que são conceitos relacionados mas independentes (rotação de chamada ≠ destinos de redirecionamento) |
+| WebSocket com N salas simultâneas na mesma conexão | Nenhuma infraestrutura nova necessária — `entrar_fila` já é chamável múltiplas vezes por conexão (mesmo padrão de `entrar_tv` iterando `tv.filas`); complexidade fica só no JS do cliente, que precisa agregar eventos de N filas na mesma tela |
+
+---
+
+## 10.9. ADENDO — Super admin global criável pelo próprio painel
+
+> Dor operacional relatada: o único jeito de criar um segundo super admin
+> (`empresa_id IS NULL`) era `flask shell`/acesso direto ao banco. O primeiro
+> super admin (`superadmin`, seeds/seed_inicial.py) não tinha como delegar
+> esse nível de acesso a outra pessoa sem acesso ao servidor.
+
+**Nenhuma mudança de schema** — `Usuario.is_super_admin` já era só uma
+`@property` (`empresa_id is None`), sem coluna própria. Todo o RBAC do sistema
+(`g.is_super_admin`, `tem_acesso_unidade`, `autorizar_objeto`) já dava bypass
+total pra super admin, com ou sem perfil/unidade atribuída — só faltava um
+caminho no painel pra gravar essa linha (`empresa_id=None`).
+
+**Onde fica na UI:** `/admin/usuarios` sem `empresa_id` selecionado já mostra,
+pro super admin, a tela de escolher empresa (`admin/selecionar_empresa.html`)
+— essa mesma tela ganhou uma seção "Super admins (sem empresa)" acima da
+lista de empresas, com badge própria (`.badge.super-admin`, roxo) distinguindo
+de admin de empresa, e um botão "+ Novo super admin".
+
+**Rotas novas** (`app/admin/usuarios.py`):
+- `POST /admin/usuarios/globais/novo` (`novo_usuario_global`) — só nome/login/
+  senha, sem perfis/unidades (mesmo formato do usuário `superadmin` semeado);
+  `abort(403)` se `not g.is_super_admin`, verificado no servidor, não só
+  escondido na UI.
+- `editar_usuario`/`alternar_usuario` (já existentes) passaram a detectar
+  `usuario.empresa_id is None` e desviar pro formulário simples
+  (`admin/usuarios/form_global.html`) e pro redirect correto (sem tentar
+  montar `empresa_id=None` na querystring).
+
+**RBAC (mantido):** só quem já é super admin pode criar outro — admin de
+empresa nunca vê a opção nem consegue disparar a rota diretamente (403);
+tentar editar/ativar um super admin global por ID direto também dá 404 pra
+admin de empresa (`autorizar_objeto` já cobria esse caso, sem mudança).
+
+---
+
+## 10.10. ADENDO — Busca com autocomplete no bloco Redirecionar (seção 10.2)
+
+> Dor de usabilidade real: com 30–50 médicos/filas cadastrados, a lista de
+> radio buttons do bloco "Redirecionar" (seção 10.2) ficava inutilizável -
+> rolagem enorme, sem busca.
+
+**Substituição da lista estática por um campo de busca** (`atendimento/
+_redirecionar_busca.html`, partial reaproveitado por `painel_fila.html` e
+`painel_local.html` — primeiro `{% include %}` do projeto, justificado pelo
+tamanho do componente): input de texto + dropdown filtrado **100% em
+JavaScript local**, sem round-trip ao servidor por tecla. A lista completa de
+filas candidatas (já calculada por `filas_destino()`, sem nenhuma mudança de
+isolamento multi-tenant) vem embutida como JSON no HTML
+(`#dados-filas-destino`), filtrada a partir de 2 letras digitadas.
+
+**Indicador de horário de funcionamento no dropdown:** cada item usa
+`Fila.aberta_em()` (já existente, adendo 10.1/10.5) pra se marcar como
+"● Atendendo agora" (filas dentro do horário) ou "· Fora do horário" (fora) —
+sem nenhuma lógica de horário nova, só reaproveitando o método já testado.
+Agrupamento no dropdown: filas "atendendo agora" primeiro, depois as demais,
+com divisor visual sutil só quando os dois grupos coexistem no resultado
+filtrado.
+
+**Contrato de formulário inalterado:** o widget produz o mesmo
+`<input type="hidden" name="fila_destino_id">` que os radio buttons produziam
+— as rotas `realocar`/`realocar_local` (`app/atendimento/chamada.py`) não
+mudaram uma linha.
+
+**Acessibilidade/touch:** alvos de toque de pelo menos 44px (campo de busca e
+itens do dropdown), consistente com uso em totem/tablet.
+
+> **CORRIGIDO** (mesma sessão de trabalho, seção 10.20 já em uso real): o
+> filtro só abria a caixa de seleção a partir de 2 caracteres digitados —
+> clicar/focar no campo vazio não dava nenhum retorno visual, parecendo
+> quebrado. Removida a exigência de mínimo de caracteres: focar OU clicar no
+> campo (mesmo já focado, mesmo vazio) agora abre a caixa de seleção
+> imediatamente com TODAS as filas candidatas (mesmo agrupamento "atendendo
+> agora" primeiro); digitar continua filtrando a partir daí, normalmente. O
+> campo passa a se comportar como uma caixa de seleção de verdade, que só
+> vai se estreitando conforme o operador digita — em vez de um campo de
+> busca "cego" até a segunda letra.
+
+---
+
+## 10.11. ADENDO — Horário de relógio junto da duração (tela de Atendimento)
+
+> Pedido direto: nas tabelas "Senhas em espera"/"Senhas atendidas" só existia
+> tempo decorrido (`T. Espera`/`Tempo de espera`), sem o horário de relógio
+> (ex.: "14:32") em que a senha foi gerada/chamada.
+
+Adicionado um `<span class="hora-relogio" data-hora-de="...">` ao lado de
+cada duração, em `painel_fila.html` e `painel_local.html` (renderização
+inicial via Jinja e reconstrução via WebSocket). **A formatação do horário
+acontece sempre no navegador** (`toLocaleTimeString`), nunca no servidor —
+`criada_em`/`chamada_em` são gravados em UTC "naive" (`datetime.utcnow()`),
+então formatar no Jinja mostraria a hora errada em servidores fora do fuso da
+clínica; o mesmo truque (`+ "Z"` força interpretação UTC, o navegador
+converte pro fuso local dele) já usado no cálculo do `T. Espera` ao vivo foi
+reaproveitado.
+
+`_serializar_atendida()` (`app/atendimento/chamada.py`) passou a incluir
+`chamada_em` no JSON de `/dados` (antes só existia em `espera`), pro
+refresh via WebSocket também conseguir montar o horário sem reload.
+
+---
+
+## 10.12. NOTA OPERACIONAL — Seed de Perfis é obrigatório em instalação nova
+
+> Diagnóstico de um "bug" reportado (`/admin/perfis` vazio, checkboxes de
+> Perfis sumidos na edição de usuário) que na verdade era dado faltando, não
+> defeito de código — registrado aqui pra não se repetir em deploys futuros.
+
+A tabela `perfis` (seção 3/4) é um **catálogo fixo do sistema** — não existe
+(nem deve existir) CRUD de Perfil pela web (`app/admin/perfis.py` é só
+leitura). Os 5 perfis padrão só são gravados por `seeds/seed_inicial.py`, que
+também garante o usuário `superadmin` inicial. Em uma instalação/banco novo,
+rodar migrations (`flask db upgrade`) cria o **schema**, mas não popula os
+Perfis — é preciso rodar `python seeds/seed_inicial.py` explicitamente depois
+(idempotente: seguro de rodar de novo, só insere o que faltar, nunca duplica
+nem mexe em usuários/empresas já existentes).
+
+---
+
+## 10.12.2. ADENDO — Dashboard operacional pós-login (KPIs, gráfico, filas, últimos atendimentos)
+
+> Pedido do cliente (Parte 2): tela `/dashboard` com 4 KPIs, gráfico de barras
+> por hora (Chart.js), lista de filas com status colorido e tabela de últimos
+> atendimentos; login passa a cair aqui em vez da tela genérica; KPIs
+> atualizam via polling de 30s; filtros por perfil; nome do paciente exibido
+> só pelo primeiro nome. Só CSS/HTML + a nova rota — nenhuma lógica de
+> atendimento, WebSocket, banco de dados ou regra de negócio já existente foi
+> alterada.
+
+**1. Nova rota `GET /dashboard`** (`app/core/routes.py::dashboard`, blueprint
+`core_bp`, path na raiz — distinta de `/relatorios/dashboard`, que **continua
+existindo sem nenhuma mudança**, só deixou de ser o destino dos links "📊
+Dashboard" do menu). Resolve a empresa com o mesmo `resolver_empresa_contexto()`
+já usado em admin/relatórios (super admin escolhe via barra de contexto,
+persistida em sessão — seção 10.22; qualquer outro perfil vê sempre a própria
+empresa) e renderiza `core/dashboard.html`, uma página autocontida (não
+estende `admin/_layout.html` nem `atendimento/_layout.html` — evita mostrar,
+pra um atendente/executor, uma navbar cheia de links administrativos que
+dariam 403 se clicados).
+
+**2. Os 4 KPIs** (`app/core/dashboard_queries.py::calcular_kpis`):
+- **Senhas aguardando agora** (`Senha.status == 'aguardando'`).
+- **Chamadas hoje** (`LogAtendimento.evento IN ('chamada_senha',
+  'chamada_nome')`, dia UTC atual — mesma janela de "hoje" já usada em todo o
+  projeto pro reset diário do totem/histórico da TV; mesmo par de eventos
+  `EVENTOS_INICIO_ATENDIMENTO` já usado em `relatorios/queries.py`, então
+  não duplica uma visita "Chamar → Realocar com nome" como 2 chamadas —
+  mesma correção da seção 7 já vale aqui de graça).
+- **Tempo médio de espera hoje** (`gerada` → `chamada_senha`, só das senhas
+  criadas hoje, agregado num único número — `None`, nunca `0`, quando ainda
+  não há nenhuma chamada hoje).
+- **Filas ativas** (`Fila.ativo == True`, escopadas por unidade visível).
+
+**3. Filtro por perfil** (`unidades_visiveis_dashboard`, escopo NOVO,
+específico desta tela — não reaproveita `_unidades_ids_visiveis` de
+`relatorios/helpers.py`, que restringiria 'gerencial' às unidades
+explicitamente atribuídas em `Usuario.unidades`):
+- **Super admin**: escolhe a empresa (barra de contexto); dentro dela, vê
+  todas as unidades por padrão, com a opção de estreitar pra uma só (mesmo
+  select de Unidade da seção 10.22 — narrowing seguro, o teto de visibilidade
+  dele já é irrestrito).
+- **Admin/Gerencial**: veem a EMPRESA INTEIRA por padrão (decisão de produto
+  específica do dashboard — diferente do resto de `relatorios/`, onde
+  'gerencial' já podia ser restrito a unidades específicas), com a mesma
+  opção de estreitar por unidade.
+- **Atendente/Executor/Atendente_executor**: veem só as próprias unidades
+  (`g.unidades_permitidas`, seção 10.19) — **sem** nenhum seletor de unidade
+  na tela, e sem conseguir estreitar/ampliar via `?unidade_id=` na
+  querystring (a função nem chama `resolver_unidade_contexto` pra esse
+  grupo) — fecha por completo a possibilidade de ver dado de uma unidade que
+  não é sua manipulando a URL.
+- Perfis puramente operacionais continuam caindo em "Iniciar Turno" no login
+  (seção 10.19/10.23, sem mudança) — mas nada os impede de visitar
+  `/dashboard` manualmente depois, com o escopo acima.
+
+**4. Login redireciona pra `/dashboard`** (`app/auth/routes.py::login`) — o
+fallback que antes era `core.index` (tela genérica, com uma lista solta de
+links) agora é `core.dashboard`, tanto no POST de login bem-sucedido quanto
+no GET de quem já está autenticado e reabre `/login`. Perfis puramente
+operacionais continuam indo pra `iniciar_turno` primeiro (checado antes,
+sem mudança). `core.index` continua existindo e acessível (link "🏠 Painel
+de Senhas" no menu, em todo layout), só deixou de ser o destino automático
+do login.
+
+**5. Polling dos KPIs a cada 30s** (`core/dashboard.html`, JS) — só os 4
+cartões do topo são atualizados via `fetch()` periódico em
+`GET /api/dashboard/kpis` (JSON, mesmo escopo por perfil do item 3); o
+gráfico, a lista de filas e a tabela de últimos atendimentos continuam do
+render inicial (recarregar a página inteira a cada 30s seria mais pesado que
+o necessário e não foi pedido).
+
+**6. Gráfico de barras por hora** (Chart.js, vendorizado em
+`app/static/vendor/chart.umd.min.js` — mesmo padrão de dependência local já
+usado pro Socket.IO, sem CDN externo) — o servidor manda só os timestamps
+(ISO, UTC) das chamadas de hoje; o agrupamento por HORA em si é feito em
+JavaScript, no fuso horário LOCAL de quem está vendo a tela (mesma convenção
+já estabelecida no projeto: nunca formatar/agrupar hora-de-parede no
+servidor, sempre no navegador).
+
+**7. Nome do paciente — só o primeiro nome** (`primeiro_nome()`,
+`app/core/dashboard_queries.py`) — aplicado na tabela de "Últimos
+atendimentos" por privacidade/compacidade na tela; `nome_paciente` continua
+gravado por inteiro no banco (seção 10.2, sem mudança), o truncamento é só
+de exibição nesta tabela específica.
+
+**8. Filas com status colorido** (`filas_com_status`): Ativa (verde, dentro
+do horário agora — `Fila.aberta_em()`, sem lógica de horário nova), Fora do
+horário (laranja — ativa mas fechada agora) ou Inativa (cinza) — reaproveita
+as cores de badge já padronizadas no rebrand GESTFILA (seção 10.24).
+
+**9. Templates alterados/criados** (só CSS/HTML + os dois endpoints novos -
+nenhuma rota de atendimento, WebSocket, query ou regra de negócio já
+existente foi tocada): `app/static/vendor/chart.umd.min.js` (novo, Chart.js
+v4.5.1), `app/core/dashboard_queries.py` (novo), `app/core/routes.py`
+(rotas `dashboard`/`api_dashboard_kpis` adicionadas),
+`app/templates/core/dashboard.html` (novo), `app/auth/routes.py` (destino
+do login), `app/templates/admin/_layout.html`,
+`app/templates/atendimento/_layout.html`, `app/templates/relatorios/_layout.html`,
+`app/templates/core/index.html` (link "Dashboard" repontado pra `core.dashboard`).
+
+**Confirmação:** suíte completa (41 arquivos de teste) revalidada sem
+nenhuma quebra, incluindo os testes já existentes de login, totem, painel de
+TV e tela de Atendimento — nenhum desses fluxos foi afetado. Teste novo
+dedicado: `tests/test_regressao_dashboard_operacional.py` (20 casos) - cobre
+os 4 KPIs, filtro por perfil (admin/gerencial vendo a empresa inteira,
+atendente restrito e sem conseguir escapar via querystring), isolamento
+multi-tenant, o polling via `/api/dashboard/kpis`, o truncamento do nome do
+paciente e os 3 status coloridos de fila.
+
+---
+
+## 10.13. ADENDO — Correções no painel/TV (duplicação, histórico, voz)
+
+> Três problemas relatados juntos no painel de chamada (TV, seção 6): senha
+> duplicando na lista, som não confiável, voz robótica.
+
+**1. Duplicação ao usar "Tocar":** o botão "Tocar" (repete o áudio da senha
+JÁ chamada, seção 10.2) reemitia o mesmo evento WebSocket `chamada` que
+"Chamar" usa — a TV tratava toda `chamada` recebida como avanço novo,
+empilhando uma linha idêntica a cada "Tocar" e inflando o contador.
+`registrar_toque()` (`app/atendimento/helpers.py`) passou a marcar o payload
+com `repetir: true`; `painel/tv.html` usa essa marca pra só re-destacar a
+linha do topo (e repetir o áudio) em vez de duplicar.
+
+**2. Histórico da TV não sobrevivia a reload/reconexão:** a lista de
+chamadas só existia na memória do navegador (array JS) — um reload (ou a
+recarga diária automática já prevista na seção 8) ou uma queda de rede
+zerava tudo, mesmo com chamadas reais tendo acontecido. Nova função
+`historico_chamadas_tv(tv, limite=8)` (`app/atendimento/helpers.py`)
+reconstrói o histórico "de hoje" a partir de `Senha.chamada_em` (mesma
+janela UTC usada no reset diário do sequencial, seção 8/10.1) e é enviada no
+payload do evento `entrou` (`app/sockets/painel.py::entrar_tv`) toda vez que
+a TV conecta ou reconecta — resolve reload **e** quedas de rede temporárias,
+sem precisar de nenhuma lista de sessões em memória. Limitação aceita (mesmo
+espírito da seção 7 sobre `logs_atendimento` não guardar snapshot por
+evento): reflete o estado ATUAL de cada `Senha`, não um retrato de cada
+chamada individual.
+
+**3. Voz robótica:** a escolha de voz (`speechSynthesis.getVoices()`) pegava
+a primeira voz `pt` disponível, tipicamente uma voz SAPI local clássica do
+Windows. `vozPtPreferida()` (`painel/tv.html`) passou a pontuar as vozes
+disponíveis, priorizando vozes "Online"/"Natural"/"Neural" (Edge/Windows mais
+recente) e vozes "Google" (Chrome) sobre as locais — dentro do mesmo nível de
+qualidade, prefere `pt-BR` sobre outras variantes. Nenhuma mudança se o
+navegador só tiver vozes locais (mesmo comportamento de antes nesse caso).
+
+**Nota — workaround revertido:** um keep-alive especulativo de
+`speechSynthesis.pause()/resume()` (tentativa de mitigar um bug conhecido do
+Chrome em sessões longas) foi adicionado e depois **removido** na mesma
+sessão de trabalho, por ser não-verificável neste ambiente (sem runtime de
+navegador nos testes) e ter relatos de também causar cortes de fala em vez de
+só preveni-los — registrado aqui pra não ser reintroduzido sem validação
+manual real em produção primeiro.
+
+---
+
+## 10.14. ADENDO — Exclusão segura (Excluir) nas telas administrativas
+
+> Pedido: habilitar "Excluir" (exclusão de verdade, distinta do toggle
+> Ativar/Desativar já existente) em Empresas, Filas, Totens, TVs, Locais,
+> Tipos de senha e Botões do totem.
+
+**Decisão de design confirmada antes de implementar:** exclusão **segura**,
+não incondicional. Nenhuma FK do projeto tem `ondelete=CASCADE` — um DELETE
+bruto num item com histórico falharia com erro de integridade referencial
+(ou, pior, exigiria apagar `Senha`/`LogAtendimento` em cascata, o que
+contraria diretamente a seção 8: *"nunca apagar senhas/logs_atendimento -
+usar status, nunca DELETE"*). Cada rota `excluir_*` checa antes de excluir e,
+se houver qualquer vínculo/histórico, **bloqueia com mensagem clara** e
+sugere Desativar em vez de excluir:
+
+| Entidade | Bloqueia a exclusão se... |
+|---|---|
+| **Fila** | já tem senha gerada (histórico), ou botão do totem vinculado |
+| **Local** | já tem senha atendida ali (histórico) |
+| **Tipo de senha** | já foi usado numa senha |
+| **Totem** | alguma fila usa ele especificamente (`Fila.totem_id`) |
+| **TV** | alguma fila usa ela como atalho de cadastro (`Fila.tv_id`) |
+| **Botão do totem** | tem botão filho (hierarquia, `parent_id`) |
+| **Empresa** | tem qualquer unidade/usuário/fila/local/totem/TV/tipo de senha/botão — só exclui empresa **vazia** (criada por engano, antes de qualquer cadastro) |
+
+Quando **não** há bloqueio, a exclusão limpa sozinha os vínculos que são só
+configuração (não histórico) antes de apagar a linha — ex.: excluir uma fila
+remove os vínculos M2M com TVs/tipos de senha (`tv_filas`, `fila_tipos_senha`)
+e as linhas de `local_filas_destino`/`local_rodizio_filas` que a referenciam,
+mas nunca mexe na TV/tipo/Local em si; excluir um Local limpa o "local atual"
+(`Usuario.local_atual_id`) de quem estava com ele selecionado.
+
+**UI:** botão "Excluir" (`.link-perigo`, vermelho/negrito) em cada listagem,
+com `confirm()` no navegador antes de enviar (ação irreversível).
+
+---
+
+## 10.15. ADENDO — Ocupação de locais (um usuário por Local) + logout remoto
+
+> Pedido: impedir que dois usuários distintos ocupem o mesmo Local ao mesmo
+> tempo, e dar ao admin uma tela pra ver quem está logado em qual Local e
+> desconectar com um botão.
+
+**1. Bloqueio de ocupação simultânea:** `escolher_local()`
+(`app/atendimento/local.py`) passou a checar, antes de gravar
+`Usuario.local_atual_id`, se **outro** usuário já ocupa aquele Local
+(`Usuario.local_atual_id == local.id AND Usuario.id != current_user.id`). Se
+sim, bloqueia com mensagem nomeando quem já está usando o local. O próprio
+ocupante pode continuar reconfirmando/trocando de volta pro mesmo local sem
+se autobloquear.
+
+**2. Tela admin de ocupação** (`GET /admin/locais/ocupacao`, link "Ver
+ocupação atual" na listagem de Locais): lista todos os usuários com um Local
+escolhido agora, agregando **todas as unidades** da empresa de uma vez — nova
+função `usuarios_ativos_da_empresa(empresa_id)` (`app/atendimento/
+helpers.py`), irmã de `usuarios_ativos_por_local(unidade_id)` que já existia
+"pronta pra uso futuro" desde o adendo 10.3.
+
+**3. Botão "Desconectar" — libera o Local E derruba a sessão de login:**
+```
+usuarios
+  ...
+  sessao_versao  INTEGER NOT NULL DEFAULT 0   -- migration a1c4e8f2b7d3
+```
+A autenticação deste projeto é por cookie de sessão assinado (Flask-Login
+padrão), sem lista de sessões no servidor — não existe, por padrão, uma forma
+de "derrubar a sessão de outra pessoa à distância". O mecanismo adicionado:
+o número atual de `sessao_versao` é gravado no cookie no momento do login
+(`auth/routes.py::login`); a cada request, `load_user()` (`app/__init__.py`)
+compara o número do cookie com o do banco — se não bater (foi incrementado
+depois que o cookie foi emitido), a requisição é tratada como não autenticada
+(`current_user` vira anônimo, `@login_required` redireciona pro login), sem
+precisar de nenhuma lista de sessões revogadas em memória/banco. "Desconectar"
+(`admin/locais.py::desconectar_usuario_local`) incrementa `sessao_versao` E
+limpa `local_atual_id`/`local_desde` do usuário-alvo. Guarda: admin não pode
+desconectar a si mesmo (mesmo padrão já usado em "não desativar a si mesmo").
+
+---
+
+## 10.16. DECISÃO DE UX — Botão "Chamar" oculto para perfis operacionais
+
+> Pedido direto, só de UI: o botão "Chamar" principal (seção 10.2) deixou de
+> aparecer pra quem tem perfil `recepcao`, `coleta` ou `recepcao_coleta` — só
+> `admin`/super admin continuam vendo o botão, nas duas telas (por-fila e
+> por-Local). O botão "Chamar" individual por linha, na tabela "Senhas em
+> espera" (`painel_fila.html` apenas — `painel_local.html` nunca teve essa
+> coluna), **não foi alterado** por essa decisão (fora do escopo do pedido).
+
+Mudança só de template (`{% if current_user.is_super_admin or
+current_user.tem_perfil('admin') %}` em volta do botão) — nenhuma mudança de
+RBAC no backend; as rotas `chamar`/`chamar_local` continuam aceitando
+requisições de qualquer perfil operacional autorizado por
+`exigir_acesso_setor`, exatamente como antes.
+
+> **REVERTIDO** (mesma sessão de trabalho, com uso real do sistema): o
+> cliente reportou que recepção/coleta precisam chamar senhas diretamente —
+> é o próprio trabalho delas — e pediu pra reativar o botão "Chamar" pra
+> todos os perfis. O `{% if %}` acima foi removido de `painel_fila.html` e
+> `painel_local.html`; o botão volta a aparecer normalmente pra
+> recepcao/coleta/recepcao_coleta/admin, como era antes desta seção 10.16.
+> RBAC de backend nunca mudou em nenhuma das duas versões. Teste antigo
+> (`test_regressao_botao_chamar_oculto.py`) removido; substituído por
+> `tests/test_regressao_botao_chamar_visivel.py`, que cobre o comportamento
+> atual (botão visível pra todos os perfis operacionais).
+
+> **ESCLARECIDO / ESTADO FINAL** (mesma sessão, print com destaque em
+> vermelho): o que o cliente queria de volta não era o botão principal
+> (seleção automática/rodízio) e sim um "Chamar" **por linha**, na tabela
+> "Senhas em espera" — pra escolher manualmente qual senha específica
+> chamar. Esse recurso já existia em `painel_fila.html` (coluna "Ações")
+> desde sempre, mas **nunca existiu em `painel_local.html`** — por isso o
+> botão principal precisou ficar visível pra todo mundo na correção
+> anterior: sem o botão por linha, era a ÚNICA forma de chamar algo na tela
+> por-Local. Correção final: `painel_local.html` ganhou a mesma coluna
+> "Ações"/botão por linha de `painel_fila.html` (form com
+> `codigo=s.codigo` oculto, POST em `chamar_local`, mesmo bloqueio de
+> "Finalize o atendimento atual..." do botão principal) — com essa paridade
+> resolvida, o botão principal (`#botao-chamar`) volta a ficar restrito a
+> admin/super admin nas DUAS telas (estado idêntico ao desta seção 10.16
+> original). Teste `test_regressao_botao_chamar_visivel.py` removido;
+> substituído por `tests/test_regressao_botao_chamar_por_linha.py` (9
+> casos), que cobre o estado final: botão principal oculto pra
+> recepcao/coleta/recepcao_coleta (visível só pra admin) e botão por linha
+> visível pra todos, nas duas telas.
+
+---
+
+## 10.17. ADENDO — Controle de atendimento: bloqueio de chamada sem finalização + recuperação de estado
+
+> Pedido do cliente, com base nas seções 10.2 e 10.8: (1) enquanto o operador
+> tiver uma senha `chamada`/`em_atendimento` em andamento, não deixar chamar
+> a próxima antes de finalizar; (2) reabrir a tela já com o atendimento em
+> curso depois de um reload/crash, sem o painel/TV re-disparar o áudio; (3)
+> destacar visualmente quando há atendimento em andamento.
+
+**1. `senha_atual_no_local()` passou a ser escopada por operador, não só por
+Local** (`app/atendimento/helpers.py`) — a query pedida literalmente:
+```sql
+SELECT * FROM senhas WHERE operador_id = <usuario_logado>
+  AND local_id = <local_atual> AND status IN ('chamada','em_atendimento')
+ORDER BY chamada_em DESC LIMIT 1
+```
+Antes filtrava só por `local_id` + `status='chamada'` — fechava um caso
+latente: uma senha deixada "chamada" por um operador anterior que nunca
+finalizou (ex.: caiu a conexão) podia aparecer como "a senha atual" de um
+operador novo que passasse a ocupar o mesmo Local depois (mesmo já não sendo
+mais possível dois operadores ocuparem o mesmo Local ao mesmo tempo, adendo
+10.15 — isso não impede uma senha **órfã** de uma ocupação anterior). Essa é
+a MESMA função usada tanto pra popular a tela ("Senha chamada") quanto pra
+decidir o bloqueio — o que trava a próxima chamada é sempre exatamente o que
+está visível na tela.
+
+**2. Bloqueio, reforçado no servidor (não só escondendo botão):** `chamar()`
+e `chamar_local()` (`app/atendimento/chamada.py`) checam
+`senha_atual_no_local(...)` antes de travar/selecionar qualquer coisa; se
+houver senha em andamento, recusam com "Finalize o atendimento atual antes
+de chamar o próximo." — vale pro botão principal **e** pro individual por
+código, e pras duas variantes (por-fila e por-Local). Tocar/Realocar/
+Finalizar/Aguardar continuam ativos normalmente (agem sobre a senha atual).
+Depois de "Aguardar" (status volta pra `aguardando`), o Chamar libera
+sozinho — nenhuma lógica de exceção extra, é só o efeito natural do status
+mudar.
+
+**3. Recuperação de estado — já era, na prática, a arquitetura existente:**
+como `painel_fila`/`painel_local` (GET) sempre leem o estado atual do banco
+via `senha_atual_no_local()`, um reload já reabria com "Local"/"Senha
+chamada"/"Nome" preenchidos, sem precisar de nenhum código novo além do
+escopo por operador do item 1. **O painel/TV nunca re-dispara o evento
+`chamada` (áudio) num reload:** só as rotas de ação
+(`chamar`/`chamar_local`/`tocar`/`talvez_atualizar_nome`) chamam
+`emitir_chamada()` — as rotas GET (`painel_fila`, `painel_local`,
+`dados_fila`, `dados_local`) nunca chamam, confirmado por teste que conecta
+um cliente WebSocket na sala da fila e prova que reloads repetidos não geram
+nenhum evento novo ali.
+
+**4. Indicador visual:** badge "Em atendimento" + borda âmbar de destaque
+(`.senha-chamada.em-atendimento`) no card "Senha chamada", nas duas telas,
+tanto no render inicial quanto atualizado via WebSocket.
+
+**Testes:** `tests/test_regressao_bloqueio_chamada_recuperacao_estado.py`
+(18 casos) cobre bloqueio (principal, individual, por-Local, e a liberação
+automática após Aguardar), status `em_atendimento` bloqueando igual a
+`chamada`, recuperação de estado sem re-disparo de áudio (3 reloads seguidos
++ `/dados`), reload sem senha em andamento, indicador visual, e isolamento
+por operador (senha de um operador nunca aparece/bloqueia outro).
+
+---
+
+## 10.18. ADENDO — Encerramento automático das sessões de atendimento (23h)
+
+> Pedido do cliente: a clínica fecha antes das 23h, então nunca há atendimento
+> genuíno em curso nesse horário — o sistema deve avisar com antecedência e
+> encerrar sozinho as sessões de operador, cancelando qualquer senha ainda
+> aberta, sem precisar de Celery/APScheduler/fila de tarefas.
+
+**1. Configuração** (`.env`, lidas em `app/config.py`):
+```
+HORARIO_ENCERRAMENTO_SESSOES=23:00
+AVISO_ENCERRAMENTO_MINUTOS=5
+```
+
+**2. Aviso antecipado + redirecionamento — client-side** (`atendimento/
+_layout.html`, herdado por todas as telas de Atendimento): um `setInterval`
+de 1s compara a hora local do navegador com o horário configurado. A partir
+de `AVISO_ENCERRAMENTO_MINUTOS` antes, mostra um card fixo **não bloqueante**
+(canto da tela, não cobre nav/conteúdo) com contagem regressiva
+`M:SS`; o botão "Entendi" só esconde o card — a contagem e o redirecionamento
+continuam rodando por trás. No horário exato, redireciona pra `/logout`.
+Valores injetados via `atendimento_bp.context_processor`
+(`_injetar_config_encerramento`, `app/atendimento/__init__.py`), sem precisar
+passar por `render_template` em cada rota.
+
+**3. Backup server-side** (`app/middleware/encerramento.py`, `before_request`
+global): cobre o caso de a aba estar em background e o JS não ter disparado.
+A cada requisição, se `datetime.now().time() >= HORARIO_ENCERRAMENTO_SESSOES`:
+- Cancela toda `Senha` com status `chamada`/`em_atendimento` (→ `cancelada`,
+  nunca `DELETE` — seção 8), gravando `LogAtendimento(evento=
+  'encerramento_automatico_sistema', usuario_id=None)` por senha cancelada -
+  novo valor no `ENUM` `evento_log` (migration `c3d9f4a1e6b2`, mesmo padrão
+  já usado pra `realocado`/`voltou_aguardar` na migration `235bf852e44c`).
+  Roda pra todas as empresas de uma vez (faxina de fim de expediente do
+  sistema, não uma ação por-tenant); idempotente e sem flag "já rodei hoje" -
+  a query já filtra pelos dois status, então rodar de novo sem nada aberto é
+  um no-op barato.
+- Se a requisição é numa rota do blueprint `atendimento` e há um usuário
+  autenticado: limpa `local_atual_id`/`local_desde`, `logout_user()`,
+  `session.clear()`, flash informativo, redireciona pro login.
+
+**4. Escopo do encerramento forçado:** só as telas de **Atendimento**
+(`atendimento_bp`) derrubam a sessão — Totem (`/totem/<slug>`) e painel de TV
+(`/painel/tv/<slug>`) são públicos, sem sessão de operador, e continuam
+funcionando normalmente mesmo depois do horário (usam layouts próprios,
+sem o script de aviso). **Admin também não é derrubado** — configurar o
+sistema depois das 23h não é "atendimento em curso" (decisão explícita,
+já que o pedido fala especificamente de telas de atendimento/operadores).
+
+**Testes:** `tests/test_regressao_encerramento_automatico.py` (11 casos)
+cobre: dados corretos embutidos no HTML pro JS (horário/minutos/URL de
+logout), tela abrindo normalmente antes do horário, redirecionamento +
+sessão de fato encerrada no/após o horário, cancelamento das senhas abertas
+com log de auditoria (e que `finalizada`/`aguardando` não são tocadas),
+idempotência, e confirmação de que totem/TV/admin não são afetados. Mesma
+limitação de infraestrutura já registrada em testes anteriores desta sessão
+(sem runtime de navegador, não dá pra exercitar o `setInterval`/contagem
+regressiva de fato rodando - só que os dados corretos chegam até o JS).
+
+---
+
+## 10.19. ADENDO — Tela "Iniciar Turno" (configuração de turno pelo operador)
+
+> Pedido do cliente, com print de referência de um sistema concorrente (tela
+> "Alocar fila"): o operador deve poder escolher, ele mesmo, as filas (e o peso
+> de cada uma no rodízio) e o Local do seu turno logo após o login, antes de
+> acessar a tela de atendimento — sem depender de um admin pré-configurar o
+> rodízio do Local (adendo 10.8).
+
+**1. Fluxo:** `Login → Iniciar Turno (/atendimento/iniciar-turno) → Atendimento`.
+Após o login, perfis puramente operacionais (`recepcao`/`coleta`/
+`recepcao_coleta`, sem `admin`/`gerencial`, checado por
+`auth/routes.py::_deve_ir_direto_para_turno`) são redirecionados direto pra
+`iniciar_turno` em vez do dashboard (`core.index`) — quem também é
+admin/gerencial/super admin continua caindo no dashboard como antes, já que
+usa o sistema para mais do que atendimento.
+
+**2. Tela "Iniciar Turno"** (`GET/POST /atendimento/iniciar-turno`, RBAC
+`roles_required("recepcao", "coleta", "recepcao_coleta", "admin")` — mesma
+lista `PERFIS_OPERACIONAIS` de `atendimento/filas.py`; `gerencial`/sem
+perfil recebem 403):
+- **Filas** (múltipla, uma por vez, via JS sem reload): dropdown de
+  `filas_acessiveis()` + campo "Quantidade de chamadas seguidas" (padrão 0) +
+  botão "Adicionar fila" — a lista adicionada mostra ordem/nome/peso e um "×"
+  pra remover. A mesma fila pode ser adicionada mais de uma vez (só pra
+  ajustar o peso dela) — o servidor **mescla** entradas repetidas em uma única
+  (soma de `chamadas_seguidas`) antes de salvar (`_mesclar_filas_config`,
+  `app/atendimento/turno.py`), evitando `fila_id` duplicado no motor de
+  rodízio (`_proximo_item_na_rotacao` identifica "a vez" pelo `fila_id`, não
+  pela posição — duplicata seria ambígua).
+- **Local** (único, obrigatório): dropdown de `locais_acessiveis()`. Mesma
+  regra de "um Local = um operador por vez" já usada em `escolher_local`
+  (bloqueia com mensagem clara se outro operador já o ocupa).
+- **Botão "Iniciar atendimento":** valida ≥ 1 fila e um Local válido; grava
+  `TurnoAtivo` (upsert por `usuario_id`), ocupa o Local exatamente como
+  `escolher_local` já fazia (`current_user.local_atual_id`/`local_desde`,
+  `session[CHAVE_SESSAO_LOCAL]` — mantém compatibilidade com a tela por-fila
+  legada e com a tela administrativa de ocupação de locais), e redireciona
+  pra `painel_local` (a tela unificada por-Local do adendo 10.8).
+
+**3. Turno já ativo → pula a tela:** GET em `iniciar_turno` com um
+`TurnoAtivo.ativo=True` do operador redireciona direto pra `painel_local` —
+tanto no primeiro acesso do dia quanto após reload/crash (recuperação de
+estado, mesmo princípio do adendo 10.11: o estado vive no banco, não só na
+sessão do navegador). `?reconfigurar=1` (link discreto "Reconfigurar turno"
+nas telas de atendimento, ao lado de "Trocar local") contorna esse pulo e
+mostra o formulário pré-populado com a configuração atual, sem deslogar.
+
+**4. Encerrar turno** (`POST /atendimento/turno/encerrar`, botão "Encerrar
+turno" nas telas de atendimento, ao lado de "Sair"): marca
+`TurnoAtivo.ativo = False`, libera o Local (`local_atual_id = None`) e volta
+pra `iniciar_turno` — **sem deslogar** (`logout_user()` não é chamado); o
+operador pode iniciar outro turno em outro Local/filas sem logar de novo.
+
+**5. Persistência — tabela `turnos_ativos`** (migration `d53cf46b3068`):
+`id, usuario_id (FK usuarios, único), local_id (FK locais), filas_config
+(JSON: lista de {fila_id, ordem, chamadas_seguidas}), iniciado_em, ativo`.
+Uma linha por usuário (`unique` em `usuario_id`) — reiniciar o turno
+atualiza a mesma linha, sem acumular histórico de turnos passados.
+`app/middleware/encerramento.py` também marca `ativo=False` ao forçar logout
+às 23h (adendo 10.18), reaproveitando o mesmo campo.
+
+**6. Motor de rodízio ciente do turno** (`app/atendimento/helpers.py`):
+`fila_ids_do_local`/`selecionar_proxima_fila_e_senha`/`senhas_aguardando_local`
+ganharam um parâmetro `operador` opcional — quando o operador tem um
+`TurnoAtivo` para o Local em questão, a configuração do turno **prioriza**
+sobre o rodízio admin-configurado (`Local.rodizio_ordenado`, adendo 10.8) só
+pra decidir a rotação daquele operador; sem turno ativo (ou parâmetro
+omitido — compatibilidade com todas as chamadas antigas), comportamento
+idêntico a antes. Isso permite ao operador montar seu próprio rodízio num
+Local que nunca teve `LocalRodizioFila` nenhum configurado por um admin.
+
+**Testes:** `tests/test_regressao_turno_ativo.py` (22 casos) cobre:
+configuração com múltiplas filas (incl. a mesma fila duas vezes → mesclada em
+uma entrada de peso somado), bloqueio ao tentar iniciar sem nenhuma fila e
+sem Local, recuperação de turno ativo após reload/nova sessão (login →
+`iniciar_turno` → pula direto pro Local salvo), encerramento de turno sem
+deslogar (sessão continua autenticada, `TurnoAtivo.ativo=False`), Local já
+ocupado bloqueando o início do turno, RBAC (gerencial recebe 403), e que o
+motor de "Chamar" de fato usa a configuração do turno (não é só decorativo)
+num Local sem nenhum rodízio admin-configurado.
+
+---
+
+## 10.20. ADENDO — "Minhas filas" (acesso rápido) no bloco Redirecionar (seções 10.2/10.10/10.19)
+
+> Pedido do cliente: combinar dois modos de seleção de destino no bloco
+> Redirecionar — botões de acesso rápido pras filas do turno ativo do
+> operador (seção 10.19), além da busca livre já existente (adendo 10.10) —
+> com um único estado de seleção compartilhado entre os dois modos.
+
+**1. Seção "Minhas filas"** (`app/templates/atendimento/_redirecionar_busca.html`,
+renderizada ANTES da busca): um botão por fila do turno ativo do operador
+**para este Local**, na mesma ordem em que ele as organizou na tela "Iniciar
+Turno". Cada botão mostra o nome da fila + um indicador `●` verde
+("Atendendo agora") ou cinza ("Fora do horário") — mesmo `Fila.aberta_em()`
+já usado pela busca. Clique seleciona aquela fila como destino imediatamente
+(substitui a seleção atual, se houver) — sem submeter o form (`type="button"`).
+Grade responsiva (`display: flex; flex-wrap: wrap`), cada botão do tamanho do
+próprio texto (sem largura fixa) — não polui a tela mesmo com 15+ filas.
+Alvos de toque ≥ 44px, sem interação hover-only (seleção é só por clique).
+
+**2. Fonte dos dados — `filas_rapidas_redirecionar()`**
+(`app/atendimento/helpers.py`): SEMPRE um subconjunto de `filas_destino()` —
+nunca amplia quem pode ser destino do redirecionamento (mesmo isolamento
+multi-tenant e mesma restrição opcional de `Local.filas_destino_permitidas`
+já aplicados por `filas_destino()`); só reordena/destaca, pra acesso de um
+clique, as filas que o próprio operador já escolheu no turno ativo daquele
+Local especificamente (`TurnoAtivo.local_id == local.id` — turno de OUTRO
+Local não aparece). Uma fila do turno que não seja mais um destino válido
+(ex.: desativada, ou fora de `filas_destino_permitidas`) simplesmente não
+vira botão — sem erro.
+
+**3. Busca livre — inalterada** (adendo 10.10, mesmo componente/lógica):
+continua listando TODAS as filas de `filas_destino()`, com o mesmo filtro
+100% local em JS e agrupamento "atendendo agora" primeiro.
+
+**4. Estado de seleção único e compartilhado:** os dois modos escrevem no
+MESMO `#fila-destino-id` (campo que o backend do Realocar já lia, sem
+mudança nenhuma). Selecionar via busca desmarca o botão rápido ativo (se
+houver) e vice-versa — uma função `selecionar(fila)` central, chamada pelos
+dois modos, mantém os dois lados sincronizados
+(`sincronizarBotoesRapidos()`). O indicador de seleção atual (reaproveita o
+`#selecionado-redirecionar` já existente, texto mudado pra "→
+Redirecionando para: **[fila]**") aparece igual não importa qual modo foi
+usado pra chegar ali.
+
+**5. Degradação elegante:** operador sem turno ativo (ou com turno de outro
+Local) — `filas_rapidas` vem vazia, a seção "Minhas filas" e o separador
+visual simplesmente não renderizam (`{% if filas_rapidas %}`); só a busca
+livre aparece, comportamento idêntico ao de antes desta seção.
+
+**6. Backend do Realocar — sem nenhuma mudança:** `realocar`/`realocar_local`
+(`app/atendimento/chamada.py`) continuam lendo `fila_destino_id` do form e
+validando contra `filas_destino()`, exatamente como antes — só a UI de
+seleção ganhou um segundo modo de preencher o mesmo campo.
+
+**Testes:** `tests/test_regressao_redirecionar_minhas_filas.py` (13 casos)
+cobre: botões na ordem do turno, indicador ativa/inativa por fila, fila fora
+do turno não vira botão (mas continua na busca), turno de outro Local não
+vaza, degradação sem turno ativo, Realocar funcionando de ponta a ponta com
+o campo produzido pelos botões rápidos, e — confirmação explícita pedida
+pelo cliente — um turno com 18 filas configuradas renderiza as 18 como
+botão, sem nenhuma omitida, sem nenhum link "ver todas"/"mostrar mais", com
+a grade `flex-wrap` presente e cada botão sem largura fixa (`flex: 0 0
+auto`). Suíte completa de `test_regressao_redirecionar_busca.py` (13 casos,
+adendo 10.10) revalidada sem nenhuma quebra.
+
+> Nota: um botão de acesso rápido só existe pra uma fila se ela estiver no
+> `filas_config` do turno ATIVO daquele operador (seção 10.19) — uma fila
+> que apareça na busca livre mas não no turno configurado não é omissão/bug,
+> é o "Minhas filas" refletindo fielmente o que o próprio operador escolheu
+> ao iniciar (ou reconfigurar) o turno. Pra uma fila aparecer como botão
+> rápido, ela precisa ser adicionada na tela "Iniciar Turno"/link
+> "Reconfigurar turno".
+
+---
+
+## 10.21. ADENDO — Renome dos perfis "recepcao"/"coleta" para "atendente"/"executor"
+
+> Pedido do cliente: renomear a NOMENCLATURA do perfil `coleta` para
+> `executor` e do perfil `recepcao` para `atendente`. Confirmado com o
+> cliente (pergunta de esclarecimento) que o escopo é só o **Perfil**
+> (papel/RBAC do usuário) — o **setor** (área de trabalho usada nas URLs
+> `/atendimento/recepcao|coleta/...`, em `Local.tipo` e em `Senha.setor`,
+> todos ENUM no banco) permanece `recepcao`/`coleta`, sem nenhuma mudança —
+> são conceitos distintos que só coincidiam de nome por convenção. O perfil
+> combinado `recepcao_coleta` também foi renomeado, para
+> `atendente_executor` (confirmado com o cliente).
+
+**1. Migration de dados** (`f4900d785aee`, revisa `d53cf46b3068`) —
+`perfis.nome` é um `VARCHAR(30)` simples (não ENUM), então é um `UPDATE`
+de dados, não uma alteração de schema — as associações `usuario_perfil`
+(por ID, não por nome) permanecem intactas, nenhum usuário perde acesso:
+```sql
+UPDATE perfis SET nome = 'atendente' WHERE nome = 'recepcao';
+UPDATE perfis SET nome = 'executor' WHERE nome = 'coleta';
+UPDATE perfis SET nome = 'atendente_executor' WHERE nome = 'recepcao_coleta';
+```
+(+ atualização da coluna `descricao` dos três, com `downgrade()` simétrico.)
+
+**2. `seeds/seed_inicial.py`** — `PERFIS_PADRAO` atualizado com os novos
+nomes, para que uma instalação nova (sem a migration acima ter rodado antes)
+já nasça com a nomenclatura certa.
+
+**3. RBAC no app** — todo `tem_perfil(...)`/`roles_required(...)` que
+comparava contra os nomes antigos foi atualizado para os novos:
+`app/atendimento/helpers.py` (`PERFIS_POR_SETOR` — só os VALORES, as
+CHAVES continuam sendo o setor `"recepcao"`/`"coleta"`),
+`app/atendimento/filas.py` (`PERFIS_OPERACIONAIS`),
+`app/atendimento/local.py` (`_tem_acesso_operacional`),
+`app/auth/routes.py` (`_deve_ir_direto_para_turno`, seção 10.19),
+`app/templates/core/index.html`, `app/templates/atendimento/listar_filas.html`.
+Nenhuma rota, URL, `Local.tipo` ou `Senha.setor` mudou — confirmado que
+`app/admin/usuarios.py` já seleciona perfis por ID (não por nome), então a
+tela administrativa de usuários não precisou de nenhuma mudança.
+
+**4. Tela "Iniciar Turno" como inicial pro login de atendente/executor**
+(reconfirmação do que já valia desde a seção 10.19): login de um usuário
+com perfil puramente `atendente`/`executor`/`atendente_executor` (sem
+`admin`/`gerencial`) já redirecionava direto para `/atendimento/iniciar-turno`
+em todo logon — comportamento preexistente, só validado de novo com os
+nomes de perfil atualizados (`tests/test_regressao_turno_ativo.py`, caso A).
+
+**Testes:** todos os ~30 arquivos de teste que criavam
+`Perfil(nome="recepcao"/"coleta"/"recepcao_coleta")` foram atualizados para
+os novos nomes (perfil apenas — nenhuma URL/setor/`Local.tipo`/`Senha.setor`
+tocado). Suíte completa revalidada sem nenhuma quebra.
+
+---
+
+## 10.22. ADENDO — UX de contexto multi-unidade no painel admin
+
+> Pedido do cliente: super admin enfrentava confusão visual em múltiplas telas
+> por ver locais/filas/botões de unidades diferentes misturados em listas
+> planas, sem indicação de qual unidade cada item pertence.
+
+**1. `Unidade.sigla`** (migration `0685df7c3a3d`, `VARCHAR(4)`, opcional):
+prefixo curto pra distinguir itens de unidades diferentes. `Unidade.
+sigla_exibicao` (property, só Python — nenhuma lógica no banco) cai nos 3
+primeiros caracteres do nome, maiúsculas, quando a sigla não foi cadastrada —
+nunca obrigatório preencher.
+
+**2. Barra de contexto** (`app/templates/admin/_layout.html`, logo abaixo do
+menu principal, só quando `empresa` está no contexto da página): dois selects
+encadeados — **Empresa** (só super admin — admin de empresa nunca vê esse
+select, já está implicitamente restrito à própria) e **Unidade** (opcional,
+"Todas as unidades" = sem filtro, sempre visível pros dois papéis). Mudar a
+seleção reenvia a MESMA página atual (`request.path`) com `empresa_id`/
+`unidade_id` na querystring — reload leve, sem duplicar uma camada de filtro
+em JavaScript por cima de cada listagem já renderizada no servidor.
+
+**3. Persistência em sessão** (`app/admin/helpers.py::resolver_empresa_
+contexto`/`resolver_unidade_contexto`, chaves `admin_contexto_empresa_id`/
+`admin_contexto_unidade_id`): a escolha feita na barra de contexto vale pras
+próximas páginas sem precisar reselecionar — só `empresa_id`/`unidade_id`
+explícitos na querystring (vindos da própria barra, ou de qualquer link que
+já os carregasse) atualizam a sessão; sem eles, a última escolha é
+reaproveitada. Trocar de empresa limpa a unidade salva (uma unidade de uma
+empresa não faz sentido pra outra). Um `unidade_id` que não pertence à
+empresa atual (manipulação de querystring, ou resquício de sessão após trocar
+de empresa) é **sempre ignorado com segurança** — cai em "sem filtro", nunca
+filtra/vaza dado de outro tenant (`resolver_unidade_contexto` sempre valida
+`Unidade.empresa_id == empresa.id`). Isolamento multi-tenant nas QUERIES em
+si nunca mudou — o filtro de contexto é só um `WHERE unidade_id = X`
+adicional, opcional, por cima do `WHERE empresa_id = Y` que já existia.
+
+**4. Filtro por unidade nas listagens**: `locais`, `filas`, `usuários`
+(`Usuario.unidades.any(...)`, já que é M:N), `totens` e `TVs` passam a
+respeitar a unidade de contexto. `tipos_senha` (não tem `unidade_id` -
+conceito de empresa inteira) e `unidades` (não faz sentido filtrar a própria
+listagem por uma unidade) não são afetadas — a barra de contexto continua
+aparecendo nelas (pro breadcrumb/navegação), só sem efeito de filtro.
+`Botões do totem` já agrupava por unidade (tabela por unidade, com `<h2>`) -
+a unidade de contexto agora só restringe esse agrupamento a uma única
+unidade, quando escolhida.
+
+**5. Breadcrumb "Empresa › Unidade › Nome da tela"** (`app/templates/admin/
+_breadcrumb.html`, `{% include %}`): padronizado em TODA tela admin que tenha
+`empresa` no contexto, substituindo os ~18 `<p class="empresa-tag">Empresa:
+X</p>` duplicados que existiam antes (um por template). Reaproveita
+`self.titulo()` do próprio `{% block titulo %}` de cada template — mas como
+`self` dentro de um `{% include %}` referencia o PARTIAL incluído, não quem
+inclui, cada template calcula `{% set nome_tela = self.titulo() %}` uma
+linha antes do `{% include %}` (bug descoberto e corrigido durante esta
+mesma implementação — sem esse `{% set %}`, `self.titulo()` dentro do
+partial sempre lança `UndefinedError`).
+
+**6. Prefixo "[SIGLA] Nome" + `<optgroup>` nos selects multi-unidade**: tela
+"Iniciar Turno" (seção 10.19, filas e locais), Totem/TV no cadastro de Fila
+(admin), Fila no cadastro de Botão do totem (admin), e o bloco Redirecionar
+(seção 10.2/10.10/10.20, via JSON embutido — campo `nome_exibicao`, mantendo
+`nome` intacto pra não quebrar o filtro de busca por texto digitado). Usa o
+`groupby` nativo do Jinja (já ordena pela chave internamente) — nenhuma
+lógica de agrupamento nova em Python. Selects que apenas ESCOLHEM uma única
+unidade (ex.: "Unidade" no cadastro de Local/Totem/TV) não precisam de
+prefixo/optgroup — o problema é só quando o select lista itens DE múltiplas
+unidades ao mesmo tempo.
+
+**Testes:** `tests/test_regressao_contexto_multi_unidade.py` (21 casos)
+cobre: fallback de `sigla_exibicao`, persistência em sessão entre páginas,
+filtro por unidade nas 5 listagens afetadas, troca de empresa limpando a
+unidade salva, `unidade_id` de outra empresa nunca filtrando/vazando dado
+(isolamento multi-tenant confirmado), admin de empresa vendo só o seletor de
+Unidade (nunca o de Empresa), breadcrumb, e optgroup/prefixo nos 4 pontos
+listados no item 6. Suíte completa (40 arquivos) revalidada sem quebras.
+
+---
+
+## 10.23. ADENDO — "Iniciar Turno" padronizada como tela de todo login (atendente/executor)
+
+> Pedido do cliente: a tela "Iniciar Turno" (seção 10.19) deve ser SEMPRE a
+> tela de entrada em todo login dos perfis `atendente`/`executor` (e
+> `atendente_executor`) — reverte o "pular direto pra tela de atendimento
+> quando já há turno ativo" da seção 10.19/item 3.
+
+**O que muda:** `GET /atendimento/iniciar-turno` (`app/atendimento/turno.py::
+iniciar_turno`) não redireciona mais direto pra `painel_local` quando o
+operador já tem um `TurnoAtivo`. Passa a SEMPRE renderizar o formulário —
+pré-populado com a configuração atual (filas + peso + Local) quando há turno
+ativo, vazio quando não há. O operador confirma "Iniciar atendimento" pra
+seguir adiante, mesmo que não vá mudar nada.
+
+**O que NÃO muda:**
+- O login continua redirecionando esses perfis pra `/atendimento/iniciar-turno`
+  automaticamente (`auth/routes.py::_deve_ir_direto_para_turno`, inalterado).
+- `TurnoAtivo`/recuperação de estado (adendo 10.11) continuam funcionando -
+  é justamente o pré-preenchimento do formulário que "recupera" a
+  configuração salva, agora sempre visível em vez de pulada silenciosamente.
+- `POST /atendimento/iniciar-turno` (salvar/confirmar o turno) e
+  `POST /atendimento/turno/encerrar` não mudaram.
+
+**Limpeza:** o parâmetro `?reconfigurar=1` (que antes contornava o pulo
+automático) deixou de ter qualquer efeito - removido do link "Reconfigurar
+turno" (`painel_fila.html`/`painel_local.html`) e da rota, já que agora um
+GET simples em `/atendimento/iniciar-turno` sempre mostra o formulário
+pré-populado, comportamento idêntico ao que esse link já buscava.
+
+**Testes:** `tests/test_regressao_turno_ativo.py` atualizado (seções F/G) -
+GET sempre retorna 200 com o formulário (nunca mais 302), pré-populado com a
+fila/local do turno ativo quando existente; recuperação após reload
+confirmada pelo mesmo mecanismo. Suíte completa (40 arquivos) revalidada.
+
+> **BUG CORRIGIDO** (mesma sessão de trabalho, uso real): deslogar ("Sair")
+> não encerrava o turno - `TurnoAtivo.ativo` continuava `True`, então o
+> PRÓXIMO login pré-populava "Iniciar Turno" com as filas/Local do turno
+> ANTERIOR (parecia que o sistema "guardava" a configuração de um acesso pro
+> outro). `auth/routes.py::logout()` passou a marcar o `TurnoAtivo` do
+> usuário como inativo antes de derrubar a sessão - mesmo efeito do botão
+> "Encerrar turno" (`turno.py::encerrar_turno`), aplicado automaticamente a
+> todo logout explícito. Login volta a mostrar o formulário zerado depois de
+> um "Sair" de propósito; a recuperação de estado (item acima) continua
+> valendo normalmente pra reload/crash DENTRO da mesma sessão (sem logout
+> explícito no meio). Teste novo em `test_regressao_turno_ativo.py` (seção
+> K) - 23 casos no arquivo agora.
+
+> **AJUSTE DE UX** (mesma sessão, pedido direto): o botão "Encerrar turno"
+> (ao lado de "Reconfigurar turno", nas telas por-fila e por-Local) foi
+> removido da interface para TODOS os perfis - agora que "Sair" (item
+> acima) e todo login já cuidam de encerrar/zerar o turno automaticamente, o
+> botão dedicado deixou de ser necessário. A rota `POST /atendimento/turno/
+> encerrar` (`turno.py::encerrar_turno`) continua existindo no backend, sem
+> nenhuma mudança de comportamento - só o botão que a acionava saiu do HTML
+> (`painel_fila.html`/`painel_local.html`), junto com o CSS `.link-botao`
+> que só era usado por ele.
+
+---
+
+## 10.24. ADENDO — Identidade visual GESTFILA (rebrand completo)
+
+> Pedido do cliente: nova identidade visual completa - nome "GESTFILA",
+> subtítulo, slogan, paleta de cores vermelha/cinza-escuro, logo tipográfico
+> (sem imagem), aplicada em TODAS as telas (admin, atendimento, relatórios,
+> login, totem, painel de TV), sem alterar nenhuma lógica de backend.
+
+**1. Identidade:** nome **GESTFILA** ("GEST" em cinza escuro, "FILA" em
+vermelho, peso 700), subtítulo "Sistema de Gestão de Atendimento e Filas
+Virtuais", slogan "Atendimento organizado, rápido e inteligente." (visíveis
+só na tela de login, junto do logo grande).
+
+**2. Paleta como variáveis CSS globais** — `app/static/css/gestfila.css`
+(arquivo novo, primeiro CSS externo do projeto - até então cada layout tinha
+seu próprio `<style>` inline duplicado): `:root { --gf-primaria: #C0392B;
+--gf-primaria-escura: #922B21; --gf-primaria-clara: #FADBD8; --gf-cinza-
+escuro: #2C3E50; --gf-cinza-medio: #95A5A6; --gf-cinza-claro: #F4F6F7; --gf-
+branco: #FFFFFF; --gf-sucesso: #27AE60; --gf-alerta: #E67E22; --gf-info:
+#2980B9; }`. Todo `<style>` inline de cada layout passou a referenciar essas
+variáveis em vez de cores soltas — manutenção futura da paleta num único
+lugar, sem precisar caçar hex espalhado.
+
+**3. Logo tipográfico** (`.gf-logo`/`.gf-logo-gest`/`.gf-logo-fila` em
+`gestfila.css`) — puro HTML/CSS, sem imagem/arquivo externo, fonte sistema
+(sem Google Fonts). Variante `.gf-logo--claro` troca "GEST" pra branco,
+usada sempre que o logo aparece sobre fundo escuro (navbar dos painéis
+admin/atendimento/relatórios, watermark do painel de TV) - sem essa
+variante "GEST" (cinza escuro) ficaria invisível sobre um fundo da MESMA cor
+(a navbar usa exatamente `--gf-cinza-escuro` de fundo).
+
+**4. Favicon** — letra "G" vermelha sobre fundo branco, `<svg>` inline via
+`data:image/svg+xml,...` (percent-encoded), sem arquivo externo. Presente em
+todo `<head>` (`base.html`, `admin/_layout.html`, `atendimento/_layout.html`,
+`relatorios/_layout.html`, `totem/_layout.html`, `painel/_layout.html`).
+
+**5. Layout geral:** navbars (admin/atendimento/relatórios) com fundo
+`--gf-cinza-escuro`, logo à esquerda, hover dos links em vermelho (borda
+inferior). Botões primários vermelhos (hover vermelho escuro); secundários
+brancos com borda cinza (hover cinza claro); ações destrutivas
+(`button.link-perigo` - Excluir) em laranja (`--gf-alerta`), diferenciadas
+do vermelho primário; toggles não-destrutivos (`button.link` - Ativar/
+Desativar) em azul-info. Cards com borda sutil cinza-claro + sombra leve.
+Tabelas: cabeçalho `--gf-cinza-claro`, linha em hover `--gf-primaria-clara`
+(vermelho bem claro). Badges: Ativo=verde, Inativo=cinza, Em atendimento/
+Prioridade=vermelho, Aguardando=azul, Finalizado=cinza escuro (`.badge.
+aguardando`/`.badge.finalizado` definidas em `gestfila.css` mesmo sem uso
+atual em nenhuma tela, pra já existir quando algum status futuro precisar).
+Campos de formulário com borda vermelha + halo suave ao focar, em todo
+layout (admin/atendimento/relatórios/base/totem).
+
+**6. Ícones no menu** (Unicode/emoji, sem novo icon set): 🏠 Painel de
+Senhas, 📊 Dashboard, 🎫 Filas/Tipos de senha, 🖥 Locais, 👨‍💼 Usuários, ⚙
+Empresas/Unidades/Perfis, 🎯 Totens/Botões do totem, 🔔 Painel de Chamadas
+(mapeado pro link já existente de "TVs" — cada TV É o painel de chamadas da
+sua unidade, não existe uma rota "listar todos os paineis" separada),
+📈 Relatórios.
+
+**7. Login** (`base.html` + `auth/login.html`): novo bloco
+`{% block cabecalho_marca %}{% endblock %}` em `base.html` (vazio por
+padrão, só a tela de login o preenche) com logo grande + subtítulo + slogan
+centralizados acima do formulário. Campos com foco vermelho, botão "Entrar"
+vermelho full-width (já era o comportamento padrão de `button` em
+`base.html`, sem precisar de CSS extra).
+
+**8. Painel de TV** (`painel/_layout.html`) — mantido o fundo escuro
+original (dark mode, adequado pra TV): `.linha-recente` (destaque da senha
+recém-chamada) trocado de um vermelho solto (`#9c1f1f`) pra
+`--gf-primaria`, o vermelho oficial da marca. Watermark "GESTFILA" discreto
+(`.gf-watermark`, opacidade .35, canto inferior direito, `pointer-events:
+none` - nunca compete com a informação real da tela nem intercepta clique/
+toque).
+
+**9. Totem** (`totem/_layout.html` + `totem/confirmar_acompanhantes.html`)
+— trocado do tema escuro original pro gradiente claro branco→cinza-claro
+pedido. Botões do totem vermelhos com `border-radius: 12px` e sombra leve;
+variante `.navegacao` (submenus) em cinza escuro pra distinguir de "gera
+senha"; `.botao-voltar` discreto (fundo cinza-claro, texto cinza escuro).
+Logo GESTFILA centralizado no topo de toda tela do totem. Código da senha
+gerada (`.senha-codigo`) em card branco com borda vermelha, número em
+vermelho - troca do antigo amarelo (`#ffd166`) sobre fundo escuro.
+
+**10. Templates alterados** (só CSS/HTML - nenhuma rota, query, formulário
+ou lógica de backend tocada):
+`app/static/css/gestfila.css` (novo), `app/templates/base.html`,
+`app/templates/auth/login.html`, `app/templates/core/index.html`,
+`app/templates/admin/_layout.html`, `app/templates/atendimento/_layout.html`,
+`app/templates/atendimento/painel_fila.html`,
+`app/templates/atendimento/painel_local.html`,
+`app/templates/atendimento/iniciar_turno.html`,
+`app/templates/atendimento/escolher_local.html`,
+`app/templates/atendimento/_redirecionar_busca.html`,
+`app/templates/relatorios/_layout.html`, `app/templates/totem/_layout.html`,
+`app/templates/totem/confirmar_acompanhantes.html`,
+`app/templates/painel/_layout.html`.
+
+**Confirmação:** suíte completa (40 arquivos de teste, cobrindo rotas,
+formulários, WebSocket/Socket.IO, isolamento multi-tenant, RBAC) revalidada
+sem NENHUMA quebra - as mudanças são puramente visuais (CSS/HTML), a
+lógica de negócio nunca foi tocada. `GET /static/css/gestfila.css` confirmado
+servindo 200 com as variáveis corretas.
+
+---
+
+## 10.25. ADENDO — Hardening de segurança (Fase 10): CSRF, rate limit, proxy confiável, páginas de erro
+
+> Registro de funcionalidade que já estava implementada no código
+> (`app/extensions.py`, `app/__init__.py`, `app/config.py`, `app/errors.py`)
+> mas nunca tinha sido escrita como adendo — a Fase 10 da seção 9 só listava
+> isso como entrega planejada ("Hardening: rate limit, logs de auditoria,
+> testes, deploy"), sem confirmar o que de fato foi construído nem os
+> detalhes de implementação.
+
+**1. CSRF (Flask-WTF `CSRFProtect`)** — ativo globalmente
+(`app/extensions.py::csrf`, `init_app` em `app/__init__.py`). Todo formulário
+POST do painel administrativo/atendimento carrega
+`<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">`.
+`WTF_CSRF_TIME_LIMIT = None` (sem expiração do token) é proposital: as telas
+de Atendimento (`painel_fila`/`painel_local`) ficam abertas um turno inteiro
+sem reload (seção 10.2/10.19) — o default de 1h do Flask-WTF expirava o
+token renderizado no load da página e qualquer clique em
+Chamar/Tocar/Realocar/Finalizar/Aguardar virava um "Bad Request" cru no meio
+do turno. Sem limite de tempo o token só perde validade quando a sessão de
+login termina (logout/expiração/logout remoto da seção 10.15) — a
+`SECRET_KEY` + a sessão já bastam pra invalidar um token vazado de outra
+sessão.
+
+**2. Rate limit (Flask-Limiter, por IP)** — só no `totem_bp` (endpoint
+público, sem login, alvo do "ataque de toque repetido" da seção 8):
+`GET /totem/*` (navegação: seleção de serviço, confirmação de acompanhantes)
+limitado a **60/min**; `POST /totem/*/gerar/<botao_id>` (geração da senha em
+si, a operação sensível) limitado a **20/min**. Estoura o limite → página
+429 própria (`errors/429.html`, "Muitas tentativas... aguarde um instante").
+Nenhuma outra rota (admin/atendimento/relatórios, todas atrás de login) tem
+rate limit — a superfície de risco real é só o totem público.
+
+**3. `ProxyFix` + `TRUST_PROXY_HEADERS`** — pré-requisito pro item 2
+funcionar corretamente atrás do Apache2/Nginx do deploy (seção 10): sem
+confiar em `X-Forwarded-For`, `request.remote_addr` seria sempre o IP
+loopback do proxy reverso, e todo cliente cairia no "mesmo IP" pro rate
+limit (o limite viraria global, não por visitante). `TRUST_PROXY_HEADERS`
+é `False` em `DevelopmentConfig`/`TestingConfig` (não há proxy na frente,
+confiar nesses cabeçalhos sem um proxy real permitiria forjar o IP e burlar
+o limite) e `True` só em `ProductionConfig`, com `ProxyFix(x_for=1, x_proto=1)`
+(exatamente 1 hop confiável entre cliente e Gunicorn).
+
+**4. Páginas de erro customizadas** (`app/errors.py`,
+`app/templates/errors/{403,404,429}.html`, todas estendendo `base.html`):
+403 (Proibido — RBAC/`tem_perfil`/tenant), 404 (Não encontrado) e 429
+(rate limit do totem, item 2). Não há handler próprio pra 500 — cai no
+comportamento padrão do Flask/proxy.
+
+**5. Outros detalhes de sessão já ativos junto com o resto do hardening**:
+`SESSION_COOKIE_HTTPONLY = True` e `SESSION_COOKIE_SAMESITE = "Lax"` em
+todo ambiente; `SESSION_COOKIE_SECURE = True` só em produção (exige HTTPS,
+inviável em dev local sem certificado); senha de usuário sempre com hash
+via `werkzeug.security` (nunca texto puro), como já prescrito na seção 8.
+
+**Nota para quem for escrever teste novo**: `TestingConfig` desliga CSRF
+(`WTF_CSRF_ENABLED = False`) e rate limit (`RATELIMIT_ENABLED = False`) —
+sem isso, testes de formulário/totem falhariam por token ausente ou 429
+prematuro, não por bug real. Um teste que precise validar especificamente o
+comportamento de CSRF/429 tem que sobrescrever essas duas flags no próprio
+teste.
+
+---
+
+## 10.26. ADENDO — Redesign do painel de chamada (TV): card central, identidade visual, animação
+
+> Pedido do cliente: modernizar o LAYOUT e a HIERARQUIA VISUAL do painel de
+> chamadas (estilo aeroporto/atendimento hospitalar premium), SEM alterar
+> nenhuma regra de negócio, endpoint ou lógica de tempo real já validada
+> (WebSocket, salas, payload, TTS). Conduzido em duas sessões: Sessão A só
+> diagnóstico (nenhum arquivo alterado); Sessão B em 5 partes incrementais
+> (estrutura HTML/JS → identidade visual → animação → revisão de áudio/
+> estado → testes), cada uma validada antes da próxima.
+
+**Rota real confirmada (Sessão A):** `GET /painel/tv/<slug>` — a rota por
+`<int:tv_id>` é só um redirect 302 legado, preservada sem mudança.
+
+**1. Estrutura nova** (`app/templates/painel/tv.html`, reescrito): a tabela
+de 2 colunas (Local | Senha) da especificação original (seção 6) foi
+substituída por um card central "Chamando agora" (senha ou nome, `clamp()`
+120–260px, limitado também por `vh` além de `vw` para não estourar em telas
+mais baixas como 1366×768) + "Dirija-se ao" + local (`clamp()` 60–130px) +
+lista lateral "Últimas chamadas" (até 5 itens, nunca duplicando a chamada em
+destaque) + cabeçalho compacto com relógio/data client-side (nunca
+formatado no servidor, mesma convenção das seções 10.11/10.12.2) e
+indicador de conexão com 3 estados (verde=conectado, laranja/`--gf-alerta`
+=reconectando, vermelho/`--gf-primaria-escura`=desconectado — a paleta
+oficial não tem amarelo, por isso o laranja já existente foi reaproveitado
+para esse estado).
+
+**2. Chamada por múltiplas filas na mesma TV (decisão explícita, Sessão A):**
+não existe (e continua não existindo) um conceito de "fila de exibição" —
+cada fila da TV tem sua própria sala (`fila_<id>`); se duas filas chamam
+quase ao mesmo tempo, chegam dois eventos `chamada` independentes e a
+chamada mais recente sempre substitui a anterior no card (mesmo
+comportamento de antes, decisão confirmada com o cliente: não implementar
+uma fila client-side de exibição/áudio).
+
+**3. Chamada por nome (`tipo: 'nome'`):** usa o MESMO card "Chamando
+agora", só troca o conteúdo central (`valorPrincipal()` decide entre
+`dados.senha` e `dados.nome_paciente`) — decisão explícita, sem variação
+visual própria.
+
+**4. `tipos_senha.cor` (seção 10.4):** no card em destaque, continua
+preenchendo o fundo inteiro (`elChamadaAtual.style.backgroundColor`, igual
+ao comportamento anterior). Na lista "Últimas chamadas" virou um indicador
+discreto — borda esquerda colorida (`item.style.borderLeftColor`) em vez de
+preencher o item inteiro, para manter o menor destaque visual pedido para
+essa lista.
+
+**5. Identidade visual — paleta 100% reaproveitada de `gestfila.css`**
+(nenhuma cor nova introduzida): `--gf-primaria` (vermelho) é o destaque do
+card ativo (borda + glow + selo do rótulo), mas o **número em si é branco**
+— decisão de legibilidade a distância (número vermelho sobre fundo escuro
+testa pior que branco puro numa TV vista de longe); `--gf-info` (azul) no
+rótulo secundário "Dirija-se ao"; `--gf-alerta`/`--gf-sucesso`/
+`--gf-primaria-escura` seguem exclusivos do indicador de conexão. Os tons de
+fundo escuro do painel (nunca fizeram parte de `gestfila.css`, que é a
+paleta do sistema administrativo) foram formalizados como variáveis próprias
+(`--painel-fundo`, `--painel-fundo-header`, `--painel-fundo-elemento`,
+`--painel-texto-secundario`) dentro do próprio `painel/_layout.html`, mesmos
+valores de antes.
+
+**6. Animação de nova chamada:** fade + leve zoom na entrada (450ms) +
+glow/borda relaxando ao longo de ~3s até o estado de repouso — roda uma vez
+só por chamada (nova ou "Tocar"), nunca em loop, e respeita
+`prefers-reduced-motion`. Disparada **só** dentro de `inserirChamada()`
+(evento `chamada` ao vivo) — nunca em `recarregarHistorico()` (reconexão/
+reload), pelo mesmo princípio já validado para o áudio na seção 10.13 (nada
+de efeito "de chamada nova" só porque a TV recarregou).
+
+**7. As 3 correções da seção 10.13, preservadas e testadas sob a estrutura
+nova:** `repetir: true` (Tocar) só re-renderiza o card, nunca duplica na
+lista; `historico_chamadas_tv`/`entrar_tv` continuam reconstruindo o
+histórico do banco a cada (re)conexão, sem nenhuma mudança de contrato;
+`vozPtPreferida()` copiada sem alteração de lógica.
+
+**8. `painel/indisponivel.html` (TV desativada) não foi tocado** — o novo
+`border-bottom` vermelho do cabeçalho foi aplicado só à classe `.cabecalho`
+(exclusiva de `tv.html`), nunca ao seletor genérico `<header>` que essa tela
+também usa.
+
+**9. Decisões sinalizadas, não implementadas nesta rodada** (ver
+transcript da Sessão A/B para o contexto completo):
+- Horário na lista "Últimas chamadas": o payload do WebSocket
+  (`_payload_chamada`) não carrega timestamp hoje; mudar esse contrato
+  ficou fora do escopo aprovado (só CSS/HTML/JS). A lista mostra só
+  senha/nome + local, sem horário.
+- Mensagem institucional do rodapé: texto fixo no template (sem campo novo
+  no banco) — torná-la configurável por empresa exigiria uma coluna nova +
+  tela admin.
+- `Tv.layout` (campo de texto livre já existente no cadastro da TV, achado
+  no diagnóstico da Sessão A, nunca lido em lugar nenhum antes nem depois
+  deste redesign): decisão explícita de NÃO usá-lo como flag de rollout —
+  o layout novo substitui o antigo direto, para todas as TVs.
+
+**Arquivos alterados:** `app/templates/painel/tv.html` (reescrito),
+`app/templates/painel/_layout.html` (CSS novo + variáveis de fundo
+formalizadas). Nenhuma mudança em `app/painel/routes.py`,
+`app/sockets/painel.py`, `app/atendimento/helpers.py`, models, ou
+`painel/indisponivel.html`.
+
+**Backup/rollback:** cópia dos dois arquivos originais (pré-redesign) em
+`backups/painel_tv_20260727/` (`tv.html.bak`, `_layout.html.bak`) — restaurar
+é copiar os dois de volta para `app/templates/painel/`.
+
+**Testes:** `tests/test_regressao_painel_tv_redesign.py` (novo, 15 casos) —
+cobre estrutura servida, não-disparo de áudio/animação em
+reconexão/reload, não-duplicação no "Tocar", chamada por código/nome/tipo
+prioritário via WebSocket real (payload intocado), múltiplas filas na
+mesma TV, `prefers-reduced-motion`, `indisponivel.html` intocado, e ausência
+de `innerHTML` com dado dinâmico. Suíte completa (38 arquivos
+`test_regressao_*.py`) revalidada a cada parte da Sessão B, sem nenhuma
+falha.
+
+---
+
+## 10.27. ADENDO — Correções pós-homologação do redesign do painel de TV (10.26)
+
+> Teste manual em produção local (`/painel/tv/<slug>`) achou 4 problemas
+> reais no redesign da seção 10.26, com evidência em screenshot. Corrigidos
+> um de cada vez, cada um validado antes do próximo - mesmo princípio
+> incremental já usado no resto do projeto.
+
+**1. Card ficava vermelho em chamada comum (causa raiz confirmada por
+consulta ao banco local, não suposição - nome do paciente omitido deste
+registro por ser dado pessoal real, seção 8 do BLUEPRINT):** a senha do
+teste (`id=70`) tinha `tipo_senha_id` apontando pro tipo
+**"Normal"** (`peso_prioridade=0`, `Senha.prioridade=False`) - mas esse tipo
+estava cadastrado com `cor='#FF0000'`. **Não era bug de código puro** - o
+código sempre fez exatamente o que `_payload_chamada()` mandava (enviar
+`cor` de qualquer `TipoSenha` que tivesse uma, sem checar prioridade); o
+problema era o CADASTRO: alguém colocou vermelho num tipo que é o padrão
+não-prioritário da clínica. Efeito prático idêntico a "vermelho virou
+padrão", mas a causa era dado, não lógica solta.
+
+Gate corrigido em `app/atendimento/helpers.py::_payload_chamada()`:
+```python
+if senha.prioridade and senha.tipo_senha is not None and senha.tipo_senha.cor:
+    payload["cor"] = senha.tipo_senha.cor
+```
+**Gate definitivo: `Senha.prioridade == True`, sozinho - sem
+`peso_prioridade` como condição alternativa.**
+
+**Opção avaliada e descartada:** cogitou-se, no pedido original, um gate
+`peso_prioridade > 0 OU Senha.prioridade == True`. **Descartada
+deliberadamente** - não é uma pendência, não deve ser reaberta numa sessão
+futura sem uma razão de negócio nova. Motivo: `peso_prioridade` (`TipoSenha`,
+seção 10.4) é **peso de rotação/desempate**, não urgência da visita
+individual - investigando `selecionar_proxima_senha()`, ele só é consultado
+para decidir a ORDEM entre senhas que já são `prioridade=True` (ex.: "Idoso"
+antes de "Gestante" quando os dois estão na fila prioritária ao mesmo
+tempo). Nunca foi, em lugar nenhum do sistema, um sinalizador independente
+de "esta chamada é prioritária" - usá-lo como critério alternativo (`OR`)
+reintroduziria exatamente o bug do item 1 acima: um `TipoSenha` com
+`peso_prioridade` configurado por engano (ou pra outro fim que não
+prioridade) voltaria a pintar o card de uma senha `Senha.prioridade=False`.
+`Senha.prioridade` é a única fonte de verdade sobre "esta chamada específica
+é prioritária" hoje - a mesma flag que já decide FIFO-vs-rodízio.
+
+Efeito colateral (aceito, não uma regressão): como `_payload_chamada()` é
+reaproveitada por `historico_chamadas_tv()` e `registrar_toque()`, o gate
+vale igual pra chamada ao vivo, "Tocar" e o histórico reconstruído por
+reconexão - consistente nos três caminhos.
+
+**2. Chamada por nome sem tratamento próprio:** usava o mesmo `clamp()` da
+senha (120-260px), estourando a tela com nomes de 2+ palavras. Corrigido com
+`tamanhoFonteNome()` (`painel/tv.html`) - 4 faixas de tamanho por
+quantidade de caracteres do nome (não só o caso do teste manual), aplicadas
+via `elChamadaValor.style.fontSize` + classe `.chamada-atual-valor--nome`
+(permite quebra de linha, `word-break`/`hyphens`, que o modo "senha" não
+usa). A capitalização "estranha" do nome real usado no teste manual (omitido
+deste registro, dado pessoal - seção 8) **não era bug de CSS** - confirmado
+que já vem gravada assim em `Senha.nome_paciente`
+(texto livre digitado pelo operador, sem validação de capitalização - por
+design, seção 10.2); não havia nenhum `text-transform` no código a
+remover. Texto continua inserido via `textContent` (nunca `innerHTML`).
+
+**3. Lista "Últimas chamadas" vazia com "1 chamada hoje" no rodapé:** não
+era bug de integração com `historico_chamadas_tv()` - é o resultado
+matemático esperado do design da 10.26 (a única chamada do dia ocupa o
+card, a lista mostra só as OUTRAS, e com 1 chamada não sobra nenhuma outra).
+Comportamento confirmado: uma chamada em andamento não deve aparecer
+duplicada na lista. O bug real era a ausência de qualquer mensagem pra esse
+estado especificamente - `atualizarMensagemListaVazia()` (`painel/tv.html`)
+agora distingue "nada aconteceu hoje" ("Aguardando chamadas…") de "só teve
+a de agora" ("Nenhuma chamada anterior hoje."), chamada nos dois fluxos
+(chamada ao vivo e reconexão).
+
+**4. Rodapé sobreposto pelo watermark:** `.gf-watermark` (`gestfila.css`,
+`position: fixed; bottom: .75rem; right: 1rem`) ocupava o mesmo canto
+inferior direito do texto "Última atualização" do rodapé. Corrigido com uma
+sobrescrita só de `bottom` (`3.5rem`, acima da barra do rodapé) dentro do
+próprio `painel/_layout.html` - **não** em `gestfila.css`, que é
+compartilhado com o resto do sistema (`.gf-watermark` hoje só é usado nesta
+página, mas a correção evita depender disso continuar verdade no futuro).
+
+**Arquivos alterados:** `app/atendimento/helpers.py` (só o gate do item 1 -
+primeira mudança deste redesign fora de `app/templates/painel/`),
+`app/templates/painel/tv.html`, `app/templates/painel/_layout.html`.
+
+**Backup/rollback deste round:** `backups/painel_tv_bugfix_20260727_193907/`
+(`helpers.py.bak`, `tv.html.bak`, `_layout.html.bak`) - estado pós-correção
+dos 3 arquivos. Distinto do backup da 10.26 (`backups/painel_tv_20260727/`),
+que é do estado ANTES do redesign inteiro - não serve pra reverter só estas
+4 correções sem perder o redesign todo junto.
+
+**Testes:** `tests/test_regressao_painel_tv_redesign.py` foi de 15 para 25
+casos - acrescenta cobertura específica dos 4 problemas (tipo não-prioritário
+com cor cadastrada não pinta o card; nomes de 1 palavra/composto
+acentuado/capitalização "como gravada"; histórico com 1 e com 3 chamadas
+sequenciais; ordem de cascade do CSS do watermark). Suíte completa (38
+arquivos) revalidada a cada correção, sem nenhuma falha.
+
+**Limitação registrada:** confirmação visual final (tamanho de fonte do
+nome em tela cheia, posição exata do watermark) não foi feita por
+screenshot - sem acesso a navegador/renderização neste ambiente, só
+validação via HTML/CSS servido + contrato de dado real (mesmo padrão de
+teste do resto do projeto). Verificação visual em 1920×1080/1366×768 segue
+pendente de confirmação manual.
+
+---
+
+## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
+
+- Impressão física da senha: impressora térmica local no totem (ESC/POS) ou só exibição em tela?
+- Padding numérico definitivo (3 dígitos como `BR009` é fixo ou configurável por serviço?).
+- Texto exato do áudio de chamada (modelo de frase).
+- Lista real de unidades/serviços/siglas da clínica (para popular o seed inicial).
+- **Perfil `medico` separado de `recepcao`/`coleta`** (avaliado em sessão de
+  trabalho, não implementado): hoje médicos usam `coleta`/`recepcao_coleta`
+  pra acessar a tela de atendimento, já que `exigir_acesso_setor`
+  (`app/atendimento/helpers.py`) só reconhece os setores `recepcao`/`coleta`
+  na URL (`<any(recepcao,coleta):setor>`). Um perfil "medico" isolado, por si
+  só, não daria acesso a nada — exigiria estender `PERFIS_POR_SETOR` e,
+  possivelmente, um terceiro `setor` de verdade (migration no `ENUM` de
+  `senhas.setor`/`logs_atendimento.setor`, mudança nos templates e nos
+  relatórios que agrupam por setor). Não implementar sem demanda real
+  identificada (ex.: precisar restringir médico a só a própria fila/
+  consultório, diferente de um operador de coleta genérico).

@@ -1,0 +1,32 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}Usuários{% endblock %}
+
+{% block conteudo %}
+  <h1>Usuários</h1>
+  {% set nome_tela = self.titulo() %}
+  {% include "admin/_breadcrumb.html" %}
+  <p class="subtitulo"><a class="botao" href="{{ url_for('admin.novo_usuario', empresa_id=empresa.id) }}">+ Novo usuário</a></p>
+  <table>
+    <thead><tr><th>Nome</th><th>Login</th><th>Perfis</th><th>Status</th><th>Ações</th></tr></thead>
+    <tbody>
+      {% for usuario in usuarios %}
+        <tr>
+          <td>{{ usuario.nome }}</td>
+          <td>{{ usuario.login }}</td>
+          <td>{{ usuario.perfis | map(attribute='nome') | join(', ') or '-' }}</td>
+          <td><span class="badge {{ 'ativo' if usuario.ativo else 'inativo' }}">{{ 'Ativo' if usuario.ativo else 'Inativo' }}</span></td>
+          <td class="acoes">
+            <a href="{{ url_for('admin.editar_usuario', usuario_id=usuario.id) }}">Editar</a>
+            <form class="inline" method="post" action="{{ url_for('admin.alternar_usuario', usuario_id=usuario.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="link" type="submit">{{ 'Desativar' if usuario.ativo else 'Ativar' }}</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5">Nenhum usuário cadastrado.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

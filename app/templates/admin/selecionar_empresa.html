@@ -1,0 +1,50 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}Selecionar empresa{% endblock %}
+
+{% block conteudo %}
+  {% if super_admins is defined %}
+    <h1>Super admins (sem empresa)</h1>
+    <p class="subtitulo">Acesso completo a todas as empresas, sem vínculo com nenhuma empresa específica.</p>
+    <p class="subtitulo"><a class="botao" href="{{ url_for('admin.novo_usuario_global') }}">+ Novo super admin</a></p>
+    <table>
+      <thead><tr><th>Nome</th><th>Login</th><th>Tipo</th><th>Status</th><th>Ações</th></tr></thead>
+      <tbody>
+        {% for usuario in super_admins %}
+          <tr>
+            <td>{{ usuario.nome }}</td>
+            <td>{{ usuario.login }}</td>
+            <td><span class="badge super-admin">Super admin global</span></td>
+            <td><span class="badge {{ 'ativo' if usuario.ativo else 'inativo' }}">{{ 'Ativo' if usuario.ativo else 'Inativo' }}</span></td>
+            <td class="acoes">
+              <a href="{{ url_for('admin.editar_usuario', usuario_id=usuario.id) }}">Editar</a>
+              <form class="inline" method="post" action="{{ url_for('admin.alternar_usuario', usuario_id=usuario.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="link" type="submit">{{ 'Desativar' if usuario.ativo else 'Ativar' }}</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5">Nenhum super admin cadastrado ainda.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  <h1>Selecione uma empresa</h1>
+  <p class="subtitulo">Como super admin, escolha qual empresa deseja administrar{{ ' (usuários por empresa são gerenciados por empresa, não na lista acima)' if super_admins is defined else '' }}.</p>
+  <table>
+    <thead><tr><th>Empresa</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for empresa in empresas %}
+        <tr>
+          <td>{{ empresa.nome }}</td>
+          <td><span class="badge {{ 'ativo' if empresa.ativo else 'inativo' }}">{{ 'Ativa' if empresa.ativo else 'Inativa' }}</span></td>
+          <td><a class="botao secundario" href="{{ url_for(destino, empresa_id=empresa.id) }}">Administrar</a></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="3">Nenhuma empresa cadastrada ainda.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

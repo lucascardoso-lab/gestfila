@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+
+{% block titulo %}Acesso negado{% endblock %}
+
+{% block conteudo %}
+  <h1>403 — Acesso negado</h1>
+  <p>Você não tem permissão para acessar este recurso.</p>
+  <p><a href="{{ url_for('core.index') }}">Voltar ao início</a></p>
+{% endblock %}
