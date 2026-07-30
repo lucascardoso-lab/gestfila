@@ -1,0 +1,43 @@
+name: Testes
+
+# Roda a cada push e a cada pull request, em qualquer branch - a suíte é
+# rápida (SQLite em memória, sem banco externo) e o projeto não tem mais de
+# uma pessoa contribuindo hoje, então não há motivo pra restringir a branches
+# específicas.
+on:
+  push:
+  pull_request:
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      # Sem banco de dados externo (nem MySQL como service container): a
+      # suíte de testes (tests/test_regressao_*.py) sempre roda com
+      # create_app("testing"), e TestingConfig (app/config.py) usa SQLite em
+      # memória por padrão - não é uma limitação do CI, é assim que a suíte
+      # já roda localmente. Cada arquivo é um script standalone com asserts
+      # (não pytest) - mesmo padrão de execução usado no dia a dia do projeto.
+      - name: Rodar suíte de testes
+        run: |
+          falhou=0
+          for f in tests/test_regressao_*.py; do
+            modulo="tests.$(basename "$f" .py)"
+            echo "::group::$modulo"
+            if ! python -m "$modulo"; then
+              echo "::error::FALHOU: $modulo"
+              falhou=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $falhou

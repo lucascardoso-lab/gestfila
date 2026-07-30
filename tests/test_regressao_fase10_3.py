@@ -67,12 +67,22 @@ with app.app_context():
     # locais pré-existentes: 1 ativo e 1 inativo na unidade A1, 1 na unidade A2
     # (outra unidade da MESMA empresa, usado para testar isolamento por unidade),
     # 1 na empresa B (usado para testar isolamento por empresa).
-    local_a1_ativo = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="rec1-01", tipo="recepcao")
-    local_a1_inativo = Local(
-        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="rec1-02 (desativado)", ativo=False
+    local_a1_ativo = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="rec1-01", tipo="recepcao",
+        nome_exibicao="rec1-01", identificador_admin="[UNI] rec1-01",
     )
-    local_a2 = Local(empresa_id=empresa_a.id, unidade_id=unidade_a2.id, nome="rec2-01")
-    local_b = Local(empresa_id=empresa_b.id, unidade_id=unidade_b1.id, nome="recB-01")
+    local_a1_inativo = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="rec1-02 (desativado)", ativo=False,
+        nome_exibicao="rec1-02 (desativado)", identificador_admin="[UNI] rec1-02 (desativado)",
+    )
+    local_a2 = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a2.id, nome="rec2-01",
+        nome_exibicao="rec2-01", identificador_admin="[UNI] rec2-01",
+    )
+    local_b = Local(
+        empresa_id=empresa_b.id, unidade_id=unidade_b1.id, nome="recB-01",
+        nome_exibicao="recB-01", identificador_admin="[UNI] recB-01",
+    )
     db.session.add_all([local_a1_ativo, local_a1_inativo, local_a2, local_b])
     db.session.commit()
 
@@ -120,18 +130,21 @@ assert "rec1-01" in texto and "rec1-02" in texto and "rec2-01" in texto
 assert "recB-01" not in texto
 ok("Listagem: admin da empresa A vê automaticamente todos os locais da própria empresa, e nenhum da B")
 
-# Criação: nome obrigatório.
+# Criação: nome de exibição obrigatório.
 resp = c_admin_a.post(
     f"/admin/locais/novo?empresa_id={ids['empresa_a']}",
-    data={"nome": "", "unidade_id": ids["unidade_a1"], "tipo": "outro"},
+    data={"nome_exibicao": "", "identificador_admin": "", "unidade_id": ids["unidade_a1"], "tipo": "outro"},
 )
-assert "Informe o nome do local".encode("utf-8") in resp.data
-ok("Criação: nome vazio é rejeitado")
+assert "Informe o nome de exibição do local".encode("utf-8") in resp.data
+ok("Criação: nome de exibição vazio é rejeitado")
 
 # Criação: unidade de outra empresa é rejeitada (não está entre as opções válidas).
 resp = c_admin_a.post(
     f"/admin/locais/novo?empresa_id={ids['empresa_a']}",
-    data={"nome": "Tentativa cross-tenant", "unidade_id": ids["unidade_b1"], "tipo": "outro"},
+    data={
+        "nome_exibicao": "Tentativa cross-tenant", "identificador_admin": "Tentativa cross-tenant",
+        "unidade_id": ids["unidade_b1"], "tipo": "outro",
+    },
 )
 assert "Selecione uma unidade válida".encode("utf-8") in resp.data
 with app.app_context():
@@ -141,13 +154,14 @@ ok("Criação: unidade de outra empresa é rejeitada, nenhum local é criado")
 # Criação: caminho feliz.
 resp = c_admin_a.post(
     f"/admin/locais/novo?empresa_id={ids['empresa_a']}",
-    data={"nome": "rec1-03", "unidade_id": ids["unidade_a1"], "tipo": "recepcao"},
+    data={"nome_exibicao": "rec1-03", "identificador_admin": "rec1-03", "unidade_id": ids["unidade_a1"], "tipo": "recepcao"},
     follow_redirects=True,
 )
 assert resp.status_code == 200
 with app.app_context():
     novo = Local.query.filter_by(nome="rec1-03", empresa_id=ids["empresa_a"]).first()
     assert novo is not None and novo.unidade_id == ids["unidade_a1"] and novo.tipo == "recepcao" and novo.ativo
+    assert novo.nome_exibicao == "rec1-03" and novo.identificador_admin == "rec1-03"
     id_novo_local = novo.id
 ok("Criação: local novo é gravado com empresa/unidade/tipo corretos e ativo=True por padrão")
 
@@ -158,7 +172,7 @@ ok("Isolamento: admin de outra empresa recebe 404 ao tentar EDITAR local da empr
 
 resp = c_admin_b.post(
     f"/admin/locais/{ids['local_a1_ativo']}/editar",
-    data={"nome": "hackeado", "unidade_id": ids["unidade_a1"], "tipo": ""},
+    data={"nome_exibicao": "hackeado", "identificador_admin": "hackeado", "unidade_id": ids["unidade_a1"], "tipo": ""},
 )
 assert resp.status_code == 404
 with app.app_context():
@@ -174,13 +188,17 @@ ok("Isolamento: admin de outra empresa recebe 404 ao tentar ativar/desativar loc
 # Edição: caminho feliz (admin da própria empresa).
 resp = c_admin_a.post(
     f"/admin/locais/{id_novo_local}/editar",
-    data={"nome": "rec1-03-renomeado", "unidade_id": ids["unidade_a2"], "tipo": ""},
+    data={
+        "nome_exibicao": "rec1-03-renomeado", "identificador_admin": "rec1-03-renomeado",
+        "unidade_id": ids["unidade_a2"], "tipo": "",
+    },
     follow_redirects=True,
 )
 assert resp.status_code == 200
 with app.app_context():
     editado = db.session.get(Local, id_novo_local)
     assert editado.nome == "rec1-03-renomeado" and editado.unidade_id == ids["unidade_a2"] and editado.tipo is None
+    assert editado.nome_exibicao == "rec1-03-renomeado" and editado.identificador_admin == "rec1-03-renomeado"
 ok("Edição: admin da própria empresa atualiza nome/unidade/tipo do local")
 
 # Toggle ativo/inativo: caminho feliz.
@@ -252,7 +270,10 @@ ok("Escolher local: local de outra empresa é rejeitado")
 
 # Trocar local: novo POST sobrescreve a escolha anterior (sem precisar deslogar).
 with app.app_context():
-    local_extra = Local(empresa_id=ids["empresa_a"], unidade_id=ids["unidade_a1"], nome="rec1-04")
+    local_extra = Local(
+        empresa_id=ids["empresa_a"], unidade_id=ids["unidade_a1"], nome="rec1-04",
+        nome_exibicao="rec1-04", identificador_admin="[UNI] rec1-04",
+    )
     db.session.add(local_extra)
     db.session.commit()
     id_local_extra = local_extra.id

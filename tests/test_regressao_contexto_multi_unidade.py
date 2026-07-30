@@ -66,8 +66,14 @@ with app.app_context():
     db.session.add_all([fila_matriz, fila_anexo])
     db.session.commit()
 
-    local_matriz = Local(empresa_id=empresa_a.id, unidade_id=matriz.id, nome="Guiche 01", tipo="recepcao")
-    local_anexo = Local(empresa_id=empresa_a.id, unidade_id=anexo.id, nome="Guiche 01", tipo="recepcao")
+    local_matriz = Local(
+        empresa_id=empresa_a.id, unidade_id=matriz.id, nome="Guiche 01", tipo="recepcao",
+        nome_exibicao="Guiche 01", identificador_admin="[MAT] Guiche 01",
+    )
+    local_anexo = Local(
+        empresa_id=empresa_a.id, unidade_id=anexo.id, nome="Guiche 01", tipo="recepcao",
+        nome_exibicao="Guiche 01", identificador_admin="[ANE] Guiche 01",
+    )
     db.session.add_all([local_matriz, local_anexo])
     db.session.commit()
 

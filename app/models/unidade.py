@@ -11,6 +11,15 @@ class Unidade(db.Model):
     sigla = db.Column(db.String(4), nullable=True)
     ativo = db.Column(db.Boolean, default=True, nullable=False)
 
+    # Impressão do cupom via window.print() (adendo que substitui a 10.6) - endereço/
+    # telefone ficam em Unidade, não em Empresa, porque cada unidade é um local físico
+    # distinto (uma mesma empresa pode ter várias unidades em endereços diferentes) -
+    # o cupom impresso no totem de uma unidade deve mostrar o endereço DAQUELA unidade,
+    # não um endereço genérico da empresa toda. Opcionais: cadastro existente não
+    # quebra, cupom simplesmente omite o que não tiver.
+    endereco = db.Column(db.Text, nullable=True)
+    telefone = db.Column(db.String(30), nullable=True)
+
     empresa = db.relationship("Empresa", back_populates="unidades")
     usuarios = db.relationship("Usuario", secondary=usuario_unidade, back_populates="unidades")
 

@@ -1,15 +1,19 @@
 """
-Teste de regressão da seção 10.6 do BLUEPRINT (Impressão física da senha):
+Teste de regressão da seção 10.6 do BLUEPRINT (Impressão física da senha via
+win32print/ESC-POS) - SUPERSEDIDA pelo adendo que troca pra impressão via
+window.print() do navegador (ver tests/test_regressao_cupom_impressao_navegador.py
+pra cobertura do mecanismo atual).
 
-- montagem dos bytes ESC/POS do cupom (python-escpos, perfil Dummy - nunca abre
-  conexão de verdade);
-- envio desses bytes via win32print (fila de impressão nativa do Windows),
-  mockado nestes testes (a impressão real depende de hardware físico);
-- totem sem impressora configurada pula a impressão silenciosamente;
-- falha de impressão (mockada) não bloqueia nem desfaz a geração da senha,
-  que continua seu fluxo normal;
-- fluxo completo via totem (POST /gerar) com impressora configurada, e com
-  falha simulada, confirmando que a senha é gerada normalmente em ambos os casos.
+app/totem/impressao.py continua existindo no repositório (código legado, não
+apagado - decisão registrada no BLUEPRINT), mas app/totem/routes.py::gerar_senha()
+não chama mais nada dele. Este arquivo cobre duas coisas:
+
+- unitário: as funções de app/totem/impressao.py continuam funcionando
+  corretamente se algum dia forem chamadas de novo (montagem dos bytes ESC/POS,
+  envio via win32print mockado, tolerância a falha sem propagar exceção);
+- integração: confirma que o fluxo real do totem (POST /gerar) NÃO toca mais
+  em win32print - a prova de que a Fase 3 (desativação) de fato tirou a
+  chamada do caminho de geração de senha, não só documentou a intenção.
 
 Execução: python -m tests.test_regressao_fase10_6 (a partir da raiz do projeto,
 com o virtualenv ativado).
@@ -183,23 +187,13 @@ ok("Falha de impressão (mockada): não propaga exceção, e é registrada via l
 print()
 
 # ===========================================================================
-# F) Fluxo completo via totem (POST /gerar) - com impressora configurada e
-#    sem falha: a senha é gerada normalmente e a impressão é, de fato, chamada.
+# F) Fase 3 (desativação): POST /gerar via totem COM nome_impressora_windows
+#    configurado NÃO toca em win32print - prova de que a chamada foi
+#    realmente removida de gerar_senha(), não só documentada. Antes desta
+#    mudança este mesmo cenário (totem_com, impressora configurada) chamava
+#    win32print.OpenPrinter automaticamente; agora não chama mais nada.
 # ===========================================================================
-threads_capturadas = []
-impressao_real = impressao.imprimir_senha_se_configurado
-
-
-def _capturar_thread(*args, **kwargs):
-    t = impressao_real(*args, **kwargs)
-    if t is not None:
-        threads_capturadas.append(t)
-    return t
-
-
-with patch.object(impressao, "win32print") as mock_win32print, \
-     patch("app.totem.routes.imprimir_senha_se_configurado", side_effect=_capturar_thread):
-    mock_win32print.OpenPrinter.return_value = object()
+with patch.object(impressao, "win32print") as mock_win32print:
     resp = c_totem.post(
         f"/totem/{ids['unidade']}/{ids['totem_com']}/gerar/{ids['botao']}",
         data={"qtd_acompanhantes": "0"},
@@ -207,72 +201,12 @@ with patch.object(impressao, "win32print") as mock_win32print, \
     )
     assert resp.status_code == 200
     assert "LAB001" in resp.data.decode("utf-8")
-
-    for t in threads_capturadas:
-        t.join(timeout=5)
-
-    mock_win32print.OpenPrinter.assert_called_once_with("Bematech MP-4200 TH")
-    args_write = mock_win32print.WritePrinter.call_args[0]
-    assert b"LAB001" in args_write[1]
-
-with app.app_context():
-    senha_impressa = Senha.query.filter_by(codigo="LAB001").first()
-    assert senha_impressa is not None and senha_impressa.status == "aguardando"
-ok("Fluxo completo: POST /gerar com impressora configurada gera a senha e envia o cupom correto via win32print")
-
-# ===========================================================================
-# G) Fluxo completo via totem - impressão falha (mockada): a senha é gerada e
-#    salva normalmente mesmo assim (não é bloqueada nem revertida).
-# ===========================================================================
-threads_capturadas_falha = []
-
-
-def _capturar_thread_falha(*args, **kwargs):
-    t = impressao_real(*args, **kwargs)
-    if t is not None:
-        threads_capturadas_falha.append(t)
-    return t
-
-
-with patch.object(impressao, "win32print") as mock_win32print, \
-     patch.object(impressao, "logger") as mock_logger, \
-     patch("app.totem.routes.imprimir_senha_se_configurado", side_effect=_capturar_thread_falha):
-    mock_win32print.OpenPrinter.side_effect = RuntimeError("sem papel (simulado)")
-    resp = c_totem.post(
-        f"/totem/{ids['unidade']}/{ids['totem_com']}/gerar/{ids['botao']}",
-        data={"qtd_acompanhantes": "2"},
-        follow_redirects=True,
-    )
-    assert resp.status_code == 200
-    assert "LAB002" in resp.data.decode("utf-8")
-
-    for t in threads_capturadas_falha:
-        t.join(timeout=5)
-    mock_logger.exception.assert_called_once()
-
-with app.app_context():
-    senha_apesar_da_falha = Senha.query.filter_by(codigo="LAB002").first()
-    assert senha_apesar_da_falha is not None and senha_apesar_da_falha.status == "aguardando"
-ok("Fluxo completo: falha de impressão (mockada) não bloqueia nem desfaz a geração da senha (LAB002 salva normalmente)")
-
-# ===========================================================================
-# H) Fluxo completo via totem - totem sem impressora configurada: gera normal,
-#    sem qualquer tentativa de tocar no win32print.
-# ===========================================================================
-with patch.object(impressao, "win32print") as mock_win32print:
-    resp = c_totem.post(
-        f"/totem/{ids['unidade']}/{ids['totem_sem']}/gerar/{ids['botao']}",
-        data={"qtd_acompanhantes": "0"},
-        follow_redirects=True,
-    )
-    assert resp.status_code == 200
-    assert "LAB003" in resp.data.decode("utf-8")
     mock_win32print.OpenPrinter.assert_not_called()
 
 with app.app_context():
-    senha_sem_impressora = Senha.query.filter_by(codigo="LAB003").first()
-    assert senha_sem_impressora is not None and senha_sem_impressora.status == "aguardando"
-ok("Fluxo completo: totem sem impressora configurada gera a senha normalmente, sem tentar imprimir")
+    senha_gerada = Senha.query.filter_by(codigo="LAB001").first()
+    assert senha_gerada is not None and senha_gerada.status == "aguardando"
+ok("POST /gerar via totem COM impressora configurada não toca mais em win32print (Fase 3: chamada removida da rota)")
 
 print()
-print(f"TODOS OS {len(passos)} TESTES DA SEÇÃO 10.6 (IMPRESSÃO FÍSICA DA SENHA) PASSARAM")
+print(f"TODOS OS {len(passos)} TESTES DA SEÇÃO 10.6 (LEGADO - IMPRESSÃO VIA WIN32PRINT) PASSARAM")

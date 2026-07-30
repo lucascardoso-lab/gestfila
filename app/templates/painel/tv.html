@@ -52,6 +52,10 @@
       const TV_ID = {{ tv.id }};
       const TV_SOM_ATIVO = {{ tv.som_ativo | tojson }};
       const TV_VOLUME = {{ tv.volume | tojson }};
+      // Fallback de áudio pré-gravado (BLUEPRINT.md): quando ligado, esta TV NÃO
+      // usa speechSynthesis - monta a chamada concatenando clipes .wav gravados.
+      const TV_USA_AUDIO_PREGRAVADO = {{ tv.usa_audio_pregravado | tojson }};
+      const AUDIO_BASE = {{ url_for('static', filename='audio/') | tojson }};
       const TEXTO_CHAMADA_SENHA_TEMPLATE = {{ empresa.texto_chamada_senha_template | tojson }};
       const TEXTO_CHAMADA_NOME_TEMPLATE = {{ empresa.texto_chamada_nome_template | tojson }};
       const MAX_ITENS_HISTORICO = 5;
@@ -118,9 +122,91 @@
         return [...vozes].sort((a, b) => pontuar(b) - pontuar(a))[0];
       }
 
+      // ==========================================================================
+      // Fallback de áudio pré-gravado (BLUEPRINT.md, adendo do áudio pré-gravado).
+      // Ligado por TV (usa_audio_pregravado): monta a chamada concatenando clipes
+      // .wav gravados, para Smart TVs cujo speechSynthesis "finge funcionar"
+      // (aceita speak(), dispara onend, mas nenhum som sai). O slug do local vem
+      // PRONTO do servidor (dados.local_audio_slug) - o JS nunca calcula slug.
+      // ==========================================================================
+      let audioPregravadoAtual = null;   // clipe tocando agora (para pausar ao chegar chamada nova)
+      let sequenciaPregravadaId = 0;      // invalida uma sequência anterior ainda em andamento
+
+      function urlAudio(nome) {
+        return AUDIO_BASE + nome + ".wav";
+      }
+
+      // Ordem: frase fixa -> letras/números do código -> (frase "dirija-se a" +
+      // local) OU genérico. Chamada por nome não fala o nome do paciente (não dá
+      // pra pré-gravar texto livre) - só a frase de local (opção (i) do adendo).
+      function segmentosChamadaPregravada(dados) {
+        const seg = [];
+        if (dados.tipo !== "nome") {
+          seg.push("frase_atencao_senha");
+          for (const ch of (dados.senha || "")) {
+            if (/[a-z]/i.test(ch)) seg.push("letra_" + ch.toLowerCase());
+            else if (/[0-9]/.test(ch)) seg.push("numero_" + ch);
+            // qualquer outro caractere é ignorado (códigos só têm letra+dígito)
+          }
+        }
+        if (dados.local_audio_slug) {
+          seg.push("frase_dirija_se");
+          seg.push("local_" + dados.local_audio_slug);
+        } else {
+          // sem slug (arquivo do local ausente no disco, confirmado no servidor):
+          // genérico já é a frase completa, substitui o par "dirija-se a" + local.
+          seg.push("local_generico");
+        }
+        return seg;
+      }
+
+      function falarChamadaPregravada(dados) {
+        const segmentos = segmentosChamadaPregravada(dados);
+        const meuId = ++sequenciaPregravadaId;   // qualquer sequência anterior vira no-op
+        const volume = Math.max(0, Math.min(1, TV_VOLUME / 100));
+        if (audioPregravadoAtual) { audioPregravadoAtual.pause(); audioPregravadoAtual = null; }
+
+        function tocar(indice, nomeOverride) {
+          if (meuId !== sequenciaPregravadaId) return;   // chamada mais nova assumiu
+          if (indice >= segmentos.length) { audioPregravadoAtual = null; return; }
+          const nome = nomeOverride || segmentos[indice];
+          const audio = new Audio(urlAudio(nome));
+          audio.volume = volume;
+          audioPregravadoAtual = audio;
+          let feito = false;
+          const avancar = () => { if (feito) return; feito = true; tocar(indice + 1); };
+          audio.addEventListener("ended", avancar);
+          audio.addEventListener("error", () => {
+            if (feito || meuId !== sequenciaPregravadaId) return;
+            // rede de segurança: arquivo do LOCAL não carregou (existia no disco
+            // quando o servidor montou o payload, mas falhou aqui) -> genérico no
+            // lugar dele. Demais clipes ausentes só pulam, pra não travar tudo.
+            if (!nomeOverride && nome.indexOf("local_") === 0 && nome !== "local_generico") {
+              feito = true;
+              tocar(indice, "local_generico");
+            } else {
+              avancar();
+            }
+          });
+          // play() pode ser rejeitado por política de autoplay (sem gesto do
+          // usuário) - nesse caso o 'ended' não vem, então avança na mão pra não
+          // travar a sequência.
+          audio.play().catch(() => avancar());
+        }
+        tocar(0);
+      }
+
       function falarChamada(dados) {
-        if (!TV_SOM_ATIVO) return; // som desativado para esta TV (cadastro admin)
-        if (!("speechSynthesis" in window)) return; // sem suporte a TTS - degrada graciosamente
+        if (!TV_SOM_ATIVO) {
+          return; // som desativado para esta TV (cadastro admin)
+        }
+        if (TV_USA_AUDIO_PREGRAVADO) {
+          falarChamadaPregravada(dados);
+          return; // esta TV não usa speechSynthesis
+        }
+        if (!("speechSynthesis" in window)) {
+          return; // sem suporte a TTS - degrada graciosamente
+        }
 
         const fala = new SpeechSynthesisUtterance(montarTextoChamada(dados));
         const voz = vozPtPreferida();

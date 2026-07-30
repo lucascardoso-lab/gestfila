@@ -6,10 +6,13 @@ Teste de regressão das seções 10.4 (Tipos de senha configuráveis) e 10.5
 - geração de senha com tipo selecionado (regra de composição do código,
   peso_prioridade alimentando o rodízio de prioridade já existente);
 - navegação em 3 níveis no totem (raiz -> submenu -> submenu -> folha);
-- geração de senha com qtd_acompanhantes capturado;
-- fluxo combinado completo (tipo + acompanhantes) na ordem correta:
-  botão-folha -> [escolha de tipo, se a fila tiver 2+ tipos ativos] -> modal de
-  acompanhantes -> geração.
+- geração de senha ainda aceita/valida qtd_acompanhantes no back-end (campo
+  informativo, seção 10.5), mesmo com a pergunta removida da tela do totem;
+- fluxo combinado completo, sem toque extra de confirmação (pedido do cliente):
+  botão-folha já gera direto quando a fila tem 0 ou 1 tipo ativo; com 2+ tipos,
+  a escolha do tipo já gera direto - a tela "Confirmar atendimento" continua
+  existindo só como fallback de rota (link antigo/bookmarked), não faz mais
+  parte do caminho normal da UI.
 
 Execução: python -m tests.test_regressao_fase10_4_5 (a partir da raiz do projeto,
 com o virtualenv ativado).
@@ -219,9 +222,22 @@ print()
 # ===========================================================================
 resp = c_totem.get(f"/totem/totem-a1")
 assert resp.status_code == 200
-assert "CONSULTORIOS" in resp.data.decode("utf-8")
-assert "ADMINISTRACAO M1" not in resp.data.decode("utf-8")
+texto_raiz = resp.data.decode("utf-8")
+assert "CONSULTORIOS" in texto_raiz
+assert "ADMINISTRACAO M1" not in texto_raiz
 ok("Nível 1 (raiz): mostra o menu CONSULTORIOS, não revela folhas de níveis mais profundos")
+
+# Pedido do cliente: tirar o toque extra de "confirmar" do fluxo do totem.
+# Botão-folha de fila com 1 único tipo ativo (Exame Unico -> fila_unico,
+# só "Gestante") já gera direto (POST pra gerar_senha, com o tipo fixado
+# como hidden input) - nunca mais linka pra /confirmar/.
+assert f'action="/totem/totem-a1/gerar/{ids["botao_unico"]}"' in texto_raiz
+assert f'value="{ids["tipo_gestante"]}"' in texto_raiz
+assert f'/totem/totem-a1/confirmar/{ids["botao_unico"]}' not in texto_raiz
+# Botão-folha de fila com 2+ tipos ativos (Atendimento Geral -> fila_consulta)
+# continua linkando pra /confirmar/ - aí SIM precisa de uma escolha real.
+assert f'href="/totem/totem-a1/confirmar/{ids["botao_consulta"]}"' in texto_raiz
+ok("Menu raiz: botão de fila com 1 tipo já gera direto (form POST); botão com 2+ tipos continua linkando pra escolha")
 
 resp = c_totem.get(f"/totem/totem-a1/menu/{ids['nivel1']}")
 assert resp.status_code == 200
@@ -234,18 +250,25 @@ texto = resp.data.decode("utf-8")
 assert "ADMINISTRACAO M1" in texto
 ok("Nível 3 (submenu de submenu): mostra o botão-folha ADMINISTRACAO M1")
 
+# fila_lab não tem NENHUM tipo de senha vinculado - botão também já gera direto
+# (form POST, sem hidden de tipo_senha_id nenhum) - sem tela de confirmação.
+assert f'action="/totem/totem-a1/gerar/{ids["nivel3_folha"]}"' in texto
+assert f'/totem/totem-a1/confirmar/{ids["nivel3_folha"]}' not in texto
+ok("Botão de fila sem tipo de senha algum também já gera direto (form POST), sem tela de confirmação")
+
 print()
 
 # ===========================================================================
-# C) Fluxo simples (fila sem tipo de senha) - pula direto para o modal de
-#    acompanhantes, sem tela de escolha de tipo.
+# C) Fluxo simples (fila sem tipo de senha) - a rota /confirmar/ (fallback,
+#    ver seção B acima pro caminho normal via form POST) continua resolvendo
+#    sem tela de escolha de tipo.
 # ===========================================================================
 resp = c_totem.get(f"/totem/totem-a1/confirmar/{ids['nivel3_folha']}")
 assert resp.status_code == 200
 texto = resp.data.decode("utf-8")
-assert "Quantidade de acompanhantes" in texto
+assert "Confirmar atendimento" in texto
 assert "Escolha o tipo" not in texto.replace("Escolha o tipo de atendimento", "")
-ok("Fila sem tipo de senha vinculado: pula direto para o modal de acompanhantes")
+ok("Fallback /confirmar/: fila sem tipo de senha vinculado também resolve direto, sem tela de escolha")
 
 resp = c_totem.post(
     f"/totem/totem-a1/gerar/{ids['nivel3_folha']}",
@@ -274,9 +297,9 @@ print()
 resp = c_totem.get(f"/totem/totem-a1/confirmar/{ids['botao_unico']}")
 assert resp.status_code == 200
 texto = resp.data.decode("utf-8")
-assert "Quantidade de acompanhantes" in texto
+assert "Confirmar atendimento" in texto
 assert "Gestante" in texto  # tipo único já é mostrado/confirmado automaticamente
-ok("Fila com 1 único tipo ativo: pula a tela de escolha, mostra direto o modal já com o tipo atribuído")
+ok("Fallback /confirmar/: fila com 1 único tipo ativo também resolve direto, com o tipo já atribuído")
 
 resp = c_totem.post(
     f"/totem/totem-a1/gerar/{ids['botao_unico']}",
@@ -296,25 +319,37 @@ print()
 
 # ===========================================================================
 # E) Fluxo combinado completo - fila com 2+ tipos ativos (mostra a tela de
-#    escolha ANTES do modal de acompanhantes - ordem correta do fluxo).
+#    escolha; escolher o tipo já gera a senha direto, sem tela de confirmação
+#    - pedido do cliente pra tirar o toque extra do fluxo do totem).
 # ===========================================================================
 resp = c_totem.get(f"/totem/totem-a1/confirmar/{ids['botao_consulta']}")
 assert resp.status_code == 200
 texto = resp.data.decode("utf-8")
 assert "Escolha o tipo de atendimento" in texto or "tipo de atendimento" in texto
 assert "Idoso" in texto and "Gestante" in texto and "Normal" in texto
-assert "Quantidade de acompanhantes" not in texto
-ok("Fila com 2+ tipos ativos: mostra a tela de escolha de tipo, NÃO o modal de acompanhantes ainda")
+assert "Confirmar atendimento" not in texto
+ok("Fila com 2+ tipos ativos: mostra a tela de escolha de tipo, NÃO a confirmação ainda")
 
-# escolhe "Idoso" (link da tela de escolha) -> agora sim cai no modal de acompanhantes.
+# cada tipo, na tela de escolha, é um form POST direto pra gerar_senha (com o
+# tipo já fixado como hidden input) - nunca mais um link pra /confirmar/.
+assert f'action="/totem/totem-a1/gerar/{ids["botao_consulta"]}"' in texto
+assert texto.count(f'action="/totem/totem-a1/gerar/{ids["botao_consulta"]}"') == 3  # Idoso, Gestante, Normal
+assert f'value="{ids["tipo_idoso"]}"' in texto
+assert f'value="{ids["tipo_gestante"]}"' in texto
+assert f'value="{ids["tipo_normal"]}"' in texto
+assert f'/totem/totem-a1/confirmar/{ids["botao_consulta"]}?tipo_senha_id=' not in texto
+ok("Tela de escolha de tipo: cada opção já é um form POST direto pra gerar_senha, sem link pra /confirmar/")
+
+# a rota /confirmar/ com ?tipo_senha_id= continua funcionando (fallback/robustez -
+# ex. link antigo salvo/favoritado), mesmo não sendo mais o caminho que a UI usa.
 resp = c_totem.get(
     f"/totem/totem-a1/confirmar/{ids['botao_consulta']}?tipo_senha_id={ids['tipo_idoso']}"
 )
 assert resp.status_code == 200
 texto = resp.data.decode("utf-8")
-assert "Quantidade de acompanhantes" in texto
+assert "Confirmar atendimento" in texto
 assert "Idoso" in texto
-ok("Ao escolher 'Idoso', a próxima tela é o modal de acompanhantes, com o tipo já fixado")
+ok("Ao escolher 'Idoso', a próxima tela é a confirmação, com o tipo já fixado")
 
 resp = c_totem.post(
     f"/totem/totem-a1/gerar/{ids['botao_consulta']}",

@@ -1,11 +1,13 @@
+import os
 from datetime import datetime
 
-from flask import abort, g, session
+from flask import abort, current_app, g, session
 from flask_login import current_user
 from sqlalchemy import func, update
 
 from app.extensions import db, socketio
 from app.models import Fila, Local, LogAtendimento, Senha, TipoSenha, TurnoAtivo, Usuario
+from app.utils.slug import gerar_slug_audio_local
 
 PERFIS_POR_SETOR = {
     "recepcao": ("atendente", "atendente_executor", "admin"),
@@ -79,7 +81,9 @@ def locais_acessiveis():
     query = Local.query.filter_by(empresa_id=g.empresa_id, ativo=True)
     if g.unidades_permitidas is not None:
         query = query.filter(Local.unidade_id.in_(g.unidades_permitidas))
-    return query.order_by(Local.nome).all()
+    # ordenado por identificador_admin - é o campo exibido nas telas que consomem
+    # esta função (Iniciar Turno, escolher_local.html - BLUEPRINT.md, seção 10.32).
+    return query.order_by(Local.identificador_admin).all()
 
 
 def local_atual():
@@ -172,7 +176,7 @@ def usuarios_ativos_por_local(unidade_id):
     usuarios = (
         Usuario.query.join(Local, Usuario.local_atual_id == Local.id)
         .filter(Local.unidade_id == unidade_id)
-        .order_by(Local.nome, Usuario.nome)
+        .order_by(Local.identificador_admin, Usuario.nome)
         .all()
     )
     return [
@@ -189,7 +193,7 @@ def usuarios_ativos_da_empresa(empresa_id):
     usuarios = (
         Usuario.query.join(Local, Usuario.local_atual_id == Local.id)
         .filter(Local.empresa_id == empresa_id)
-        .order_by(Local.nome, Usuario.nome)
+        .order_by(Local.identificador_admin, Usuario.nome)
         .all()
     )
     return [
@@ -561,7 +565,30 @@ def historico_chamadas_tv(tv, limite=8):
 
 
 def _nome_local(senha):
-    return senha.local.nome if senha.local is not None else "—"
+    # nome_exibicao - usado no painel de TV (chamada ao vivo e histórico) e na
+    # tela de Atendimento, contexto de paciente/operador (BLUEPRINT.md, seção
+    # 10.32) - não identificador_admin, que é só pra telas administrativas.
+    return senha.local.nome_exibicao if senha.local is not None else "—"
+
+
+def caminho_audio_local(slug):
+    """Caminho absoluto do arquivo de áudio pré-gravado de um Local
+    (app/static/audio/local_<slug>.wav) - um único ponto que resolve a pasta,
+    reusado pelo payload da chamada e pelo aviso do cadastro de Local."""
+    return os.path.join(current_app.static_folder, "audio", f"local_{slug}.wav")
+
+
+def _slug_audio_local_se_existe(senha):
+    """Slug de áudio do Local da senha, mas SÓ se o arquivo local_<slug>.wav de
+    fato existir no disco - senão None. Assim o painel de TV (fallback pré-gravado)
+    sabe, sem precisar sondar o arquivo no cliente, se toca 'dirija-se a <local>'
+    ou cai direto no genérico ('local indicado no painel') sem a redundância de
+    tocar a preposição duas vezes (BLUEPRINT.md, adendo do áudio pré-gravado).
+    O slug é calculado só aqui (servidor) - o JS nunca recalcula."""
+    if senha.local is None:
+        return None
+    slug = gerar_slug_audio_local(senha.local.nome_exibicao)
+    return slug if os.path.exists(caminho_audio_local(slug)) else None
 
 
 def _payload_chamada(senha):
@@ -569,6 +596,10 @@ def _payload_chamada(senha):
         payload = {"tipo": "nome", "local": _nome_local(senha), "nome_paciente": senha.nome_paciente}
     else:
         payload = {"tipo": "senha", "local": _nome_local(senha), "senha": senha.codigo}
+
+    # slug do áudio pré-gravado do Local (None se o arquivo não existir) - só é
+    # consumido pelas TVs com usa_audio_pregravado; as demais ignoram este campo.
+    payload["local_audio_slug"] = _slug_audio_local_se_existe(senha)
 
     # seção 10.4: a cor do tipo de senha (quando houver) viaja no payload para o
     # painel/TV destacar visualmente a chamada (ex.: prioritárias com fundo

@@ -57,7 +57,10 @@ with app.app_context():
     db.session.add_all([fila_coleta, fila_pcd, fila_a2, fila_b])
     db.session.commit()
 
-    local = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche 01")
+    local = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche 01",
+        nome_exibicao="Guiche 01", identificador_admin="[UNI] Guiche 01",
+    )
     db.session.add(local)
     db.session.commit()
 

@@ -138,5 +138,9 @@ def mapas_nomes(empresa):
     filas = {f.id: f.nome for f in Fila.query.filter_by(empresa_id=empresa.id).all()}
     unidades = {u.id: u.nome for u in Unidade.query.filter_by(empresa_id=empresa.id).all()}
     operadores = {u.id: u.nome for u in Usuario.query.filter_by(empresa_id=empresa.id).all()}
-    locais = {l.id: l.nome for l in Local.query.filter_by(empresa_id=empresa.id).all()}
+    # identificador_admin (não nome_exibicao) - telas gerenciais/relatórios usam
+    # o identificador administrativo, combinado com o nome da fila pelo chamador
+    # quando o formato "[fila] · [identificador_admin]" for aplicável (adendo
+    # "Separação nome de exibição/identificador administrativo", BLUEPRINT.md).
+    locais = {l.id: l.identificador_admin for l in Local.query.filter_by(empresa_id=empresa.id).all()}
     return filas, unidades, operadores, locais

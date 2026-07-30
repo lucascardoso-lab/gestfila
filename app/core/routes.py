@@ -100,6 +100,11 @@ def _ultimos_atendimentos_enriquecidos(empresa, unidades_visiveis, limite=15):
     filas_nomes, _, _, locais_nomes = mapas_nomes(empresa)
     for chamada in chamadas:
         chamada["fila"] = filas_nomes.get(chamada["fila_id"], "—")
+        # Só identificador_admin - a coluna "Fila" já existe ao lado (BLUEPRINT.md
+        # seção 10.32); um formato combinado "[fila] · [identificador_admin]" foi
+        # tentado e descartado depois de conferência visual real: repetia o nome
+        # da fila (já mostrado na coluna vizinha) e quebrava em 2 linhas na
+        # maioria das linhas da tabela.
         chamada["local"] = locais_nomes.get(chamada["local_id"], "—") if chamada["local_id"] else "—"
         chamada["nome_paciente"] = primeiro_nome(chamada["nome_paciente"])
     return chamadas

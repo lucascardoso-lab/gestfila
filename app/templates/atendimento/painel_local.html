@@ -1,10 +1,10 @@
 {% extends "atendimento/_layout.html" %}
 
-{% block titulo %}{{ local.nome }} - {{ 'Recepção' if setor == 'recepcao' else 'Coleta' }}{% endblock %}
+{% block titulo %}{{ local.nome_exibicao }} - {{ 'Atendente' if setor == 'recepcao' else 'Executor' }}{% endblock %}
 
 {% block conteudo %}
-  <h1>Atendimento por Local — {{ local.nome }}</h1>
-  <p class="subtitulo">{{ local.unidade.nome }} ({{ 'Recepção' if setor == 'recepcao' else 'Coleta' }}) · rodízio automático entre múltiplas filas (adendo 10.8)</p>
+  <h1>Atendimento por Local — {{ local.nome_exibicao }}</h1>
+  <p class="subtitulo">{{ local.unidade.nome }} ({{ 'Atendente' if setor == 'recepcao' else 'Executor' }}) · rodízio automático entre múltiplas filas (adendo 10.8)</p>
 
   <form id="form-acoes" method="post" action="{{ url_for('atendimento.chamar_local', setor=setor, local_id=local.id) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -14,7 +14,7 @@
         <div>
           <label>Local</label>
           <div class="senha-chamada">
-            <strong>{{ local.nome }}</strong>
+            <strong>{{ local.nome_exibicao }}</strong>
             <span class="links-turno">
               <a href="{{ url_for('atendimento.iniciar_turno') }}" class="link-trocar-local">Reconfigurar turno</a>
             </span>

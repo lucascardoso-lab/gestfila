@@ -95,7 +95,7 @@ def escolher_local():
         ).first()
         if ocupante is not None:
             flash(
-                f"O local '{escolhido.nome}' já está em uso por {ocupante.nome}. Peça a um "
+                f"O local '{escolhido.identificador_admin}' já está em uso por {ocupante.nome}. Peça a um "
                 "administrador para desconectá-lo (tela de ocupação de locais), ou escolha outro local.",
                 "error",
             )
@@ -107,7 +107,7 @@ def escolher_local():
         current_user.local_atual_id = escolhido.id
         current_user.local_desde = datetime.utcnow()
         db.session.commit()
-        flash(f"Local de atendimento: {escolhido.nome}.", "info")
+        flash(f"Local de atendimento: {escolhido.identificador_admin}.", "info")
 
         destino_padrao = url_for("atendimento.listar_filas")
         if escolhido.rodizio_ordenado and _tem_acesso_operacional():

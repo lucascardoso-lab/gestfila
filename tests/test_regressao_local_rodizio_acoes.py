@@ -75,8 +75,14 @@ with app.app_context():
     db.session.add_all([fila_x, fila_y, fila_z, fila_outra_empresa])
     db.session.commit()
 
-    local = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Local Rodizio")
-    local_outra_empresa = Local(empresa_id=empresa_b.id, unidade_id=unidade_b1.id, nome="Local B")
+    local = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Local Rodizio",
+        nome_exibicao="Local Rodizio", identificador_admin="[UNI] Local Rodizio",
+    )
+    local_outra_empresa = Local(
+        empresa_id=empresa_b.id, unidade_id=unidade_b1.id, nome="Local B",
+        nome_exibicao="Local B", identificador_admin="[UNI] Local B",
+    )
     db.session.add_all([local, local_outra_empresa])
     db.session.commit()
 
@@ -393,7 +399,10 @@ with app.app_context():
     db.session.add_all([fila_x2, fila_y2])
     db.session.commit()
 
-    local2 = Local(empresa_id=ids["empresa_a"], unidade_id=ids["unidade_a1"], nome="Local Rodizio 2")
+    local2 = Local(
+        empresa_id=ids["empresa_a"], unidade_id=ids["unidade_a1"], nome="Local Rodizio 2",
+        nome_exibicao="Local Rodizio 2", identificador_admin="[UNI] Local Rodizio 2",
+    )
     db.session.add(local2)
     db.session.commit()
 
@@ -473,7 +482,10 @@ with app.app_context():
     db.session.add(fila_misto)
     db.session.commit()
 
-    local_misto = Local(empresa_id=ids["empresa_a"], unidade_id=ids["unidade_a1"], nome="Local Misto")
+    local_misto = Local(
+        empresa_id=ids["empresa_a"], unidade_id=ids["unidade_a1"], nome="Local Misto",
+        nome_exibicao="Local Misto", identificador_admin="[UNI] Local Misto",
+    )
     db.session.add(local_misto)
     db.session.commit()
 

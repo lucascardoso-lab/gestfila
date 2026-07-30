@@ -1,9 +1,9 @@
 {% extends "admin/_layout.html" %}
 
-{% block titulo %}Configurar rodízio — {{ local.nome }}{% endblock %}
+{% block titulo %}Configurar rodízio — {{ local.identificador_admin }}{% endblock %}
 
 {% block conteudo %}
-  <h1>Configurar rodízio — {{ local.nome }}</h1>
+  <h1>Configurar rodízio — {{ local.identificador_admin }}</h1>
   {% set nome_tela = self.titulo() %}
   {% include "admin/_breadcrumb.html" %}
 

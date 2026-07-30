@@ -110,7 +110,10 @@ def totens_da_empresa(empresa):
 def locais_da_empresa(empresa):
     from app.models import Local
 
-    return Local.query.filter_by(empresa_id=empresa.id).order_by(Local.nome).all()
+    # identificador_admin (não nome_exibicao) - contexto administrativo, mesma
+    # convenção do resto das telas de Local (BLUEPRINT.md, seção 10.32). Função
+    # não tem chamador hoje (não removida - pode ser usada no futuro).
+    return Local.query.filter_by(empresa_id=empresa.id).order_by(Local.identificador_admin).all()
 
 
 def tipos_senha_da_empresa(empresa):

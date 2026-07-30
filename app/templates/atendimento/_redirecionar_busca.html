@@ -1,40 +1,21 @@
 {# Widget de seleção de destino para o bloco "Redirecionar" (seção 10.2 do
-   BLUEPRINT) - dois modos de seleção com estado compartilhado. Incluído por
-   painel_fila.html e painel_local.html - único lugar onde esse HTML/CSS/JS
-   existe, para não duplicar um componente interativo inteiro em duas telas.
+   BLUEPRINT) - busca livre por nome. Incluído por painel_fila.html e
+   painel_local.html - único lugar onde esse HTML/CSS/JS existe, para não
+   duplicar um componente interativo inteiro em duas telas.
 
    `filas_destino` (lista de Fila, já filtrada por empresa/unidade/local pelo
    helper atendimento/helpers.py::filas_destino - isolamento multi-tenant
    inalterado) é o universo completo de destinos válidos, usado pela busca livre.
 
-   `filas_rapidas` (subconjunto de `filas_destino` - helper
-   atendimento/helpers.py::filas_rapidas_redirecionar) são as filas do turno
-   ativo do operador (seção 10.19) para este Local, na ordem em que ele mesmo as
-   organizou - vazia sem turno ativo, degradando pra só a busca livre.
-
    `Fila.aberta_em()` (seção 10.1/10.5) já existe no model e é chamado aqui só
-   para render (server-side, fuso da clínica) - nenhuma lógica de horário nova. #}
-<div class="bloco-selecao-redirecionar">
-  {% if filas_rapidas %}
-    <div class="secao-filas-rapidas">
-      <span class="rotulo-secao-redirecionar">Minhas filas</span>
-      <div class="grade-filas-rapidas" id="grade-filas-rapidas">
-        {% for f in filas_rapidas %}
-          <button
-            type="button"
-            class="botao-fila-rapida"
-            data-fila-id="{{ f.id }}"
-            data-fila-nome-exibicao="[{{ f.unidade.sigla_exibicao }}] {{ f.nome }}"
-          >
-            <span class="ponto-fila-rapida {{ 'ativa' if f.aberta_em() else 'inativa' }}" title="{{ 'Atendendo agora' if f.aberta_em() else 'Fora do horário' }}">●</span>
-            [{{ f.unidade.sigla_exibicao }}] {{ f.nome }}
-          </button>
-        {% endfor %}
-      </div>
-    </div>
-    <div class="divisor-secoes-redirecionar"><span>Buscar outra fila</span></div>
-  {% endif %}
+   para render (server-side, fuso da clínica) - nenhuma lógica de horário nova.
 
+   O atalho "Minhas filas" (acesso rápido às filas do turno ativo do operador)
+   existiu aqui (adendo 10.20) e foi removido a pedido do cliente - ver
+   BLUEPRINT.md. filas_rapidas_redirecionar() (atendimento/helpers.py) foi
+   mantida sem uso, código legado não apagado, mesma convenção adotada para
+   app/totem/impressao.py. #}
+<div class="bloco-selecao-redirecionar">
   <div class="campo-busca-redirecionar">
     <input
       type="text"
@@ -62,28 +43,6 @@
 
 <style>
   .bloco-selecao-redirecionar { margin-top: .5rem; }
-  .rotulo-secao-redirecionar { display: block; font-size: .8rem; color: #666; margin-bottom: .45rem; }
-
-  .grade-filas-rapidas { display: flex; flex-wrap: wrap; gap: .5rem; }
-  .botao-fila-rapida {
-    display: inline-flex; align-items: center; gap: .4rem;
-    min-height: 44px; padding: .5rem .9rem; font-size: .95rem;
-    border: 1px solid #d0d4dc; border-radius: 999px; background: #fff;
-    color: var(--gf-cinza-escuro); cursor: pointer; white-space: nowrap; flex: 0 0 auto;
-  }
-  .botao-fila-rapida:focus-visible { outline: 2px solid var(--gf-primaria); outline-offset: 1px; }
-  .botao-fila-rapida.selecionado { border-color: var(--gf-primaria); background: var(--gf-primaria-clara); font-weight: 600; }
-  .ponto-fila-rapida { font-size: .7rem; line-height: 1; }
-  .ponto-fila-rapida.ativa { color: #1d7a3a; }
-  .ponto-fila-rapida.inativa { color: #bbb; }
-
-  .divisor-secoes-redirecionar {
-    display: flex; align-items: center; gap: .6rem; margin: 1rem 0 .6rem;
-    color: #999; font-size: .78rem; text-transform: uppercase; letter-spacing: .03em;
-  }
-  .divisor-secoes-redirecionar::before, .divisor-secoes-redirecionar::after {
-    content: ""; flex: 1; border-top: 1px solid #eceef2;
-  }
 
   .campo-busca-redirecionar { position: relative; max-width: 420px; }
   .busca-redirecionar {
@@ -126,7 +85,6 @@
     const elSelecionado = document.getElementById("selecionado-redirecionar");
     const elSelecionadoNome = document.getElementById("selecionado-redirecionar-nome");
     const elLimpar = document.getElementById("limpar-redirecionar");
-    const elGradeRapidas = document.getElementById("grade-filas-rapidas");
 
     function escapeHtml(texto) {
       return (texto || "").replace(/[&<>"']/g, (c) => ({
@@ -140,22 +98,11 @@
       elBusca.setAttribute("aria-expanded", "false");
     }
 
-    // Reflete no grid de acesso rápido qual fila (se alguma) está selecionada
-    // agora - a mesma seleção pode ter vindo de lá (clique direto) ou da busca
-    // livre, então este é o único ponto que decide o destaque visual.
-    function sincronizarBotoesRapidos(filaIdSelecionado) {
-      if (!elGradeRapidas) return;
-      elGradeRapidas.querySelectorAll(".botao-fila-rapida").forEach((botao) => {
-        botao.classList.toggle("selecionado", botao.dataset.filaId === String(filaIdSelecionado || ""));
-      });
-    }
-
     function limparSelecao() {
       elHiddenId.value = "";
       elSelecionado.hidden = true;
       elBusca.value = "";
       elBusca.hidden = false;
-      sincronizarBotoesRapidos(null);
       elBusca.focus();
     }
 
@@ -166,7 +113,6 @@
       elBusca.value = "";
       elBusca.hidden = true;
       fecharDropdown();
-      sincronizarBotoesRapidos(fila.id);
     }
 
     function itemHtml(fila) {
@@ -244,16 +190,5 @@
         if (fila) selecionar(fila);
       }
     });
-
-    // Acesso rápido às filas do turno (seção 10.19): clique já seleciona - mesmo
-    // estado compartilhado da busca livre (mesmo #fila-destino-id, mesmo
-    // indicador "→ Redirecionando para"), substitui a seleção atual se houver.
-    if (elGradeRapidas) {
-      elGradeRapidas.addEventListener("click", (ev) => {
-        const botao = ev.target.closest(".botao-fila-rapida");
-        if (!botao) return;
-        selecionar({ id: Number(botao.dataset.filaId), nome_exibicao: botao.dataset.filaNomeExibicao });
-      });
-    }
   })();
 </script>

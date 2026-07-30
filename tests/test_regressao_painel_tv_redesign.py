@@ -46,6 +46,13 @@ def ok(msg):
     print("OK:", msg)
 
 
+def _sem_slug_audio(payload):
+    """Ignora local_audio_slug (adendo do áudio pré-gravado) nos asserts de payload
+    deste teste, que são sobre tipo/local/senha - o valor do slug depende de quais
+    .wav estão no repo e é coberto por test_regressao_audio_pregravado.py."""
+    return {k: v for k, v in payload.items() if k != "local_audio_slug"}
+
+
 NAMESPACE = "/painel"
 
 with app.app_context():
@@ -68,7 +75,10 @@ with app.app_context():
     db.session.add_all([fila_a, fila_b])
     db.session.commit()
 
-    local = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Guiche 01")
+    local = Local(
+        empresa_id=empresa.id, unidade_id=unidade.id, nome="Guiche 01",
+        nome_exibicao="Guiche 01", identificador_admin="[UNI] Guiche 01",
+    )
     db.session.add(local)
     db.session.commit()
 
@@ -258,7 +268,7 @@ resp = c.post(f"/atendimento/recepcao/filas/{ids['fila_a']}/chamar", data={"codi
 assert resp.status_code == 200
 recebidos = ws.get_received(NAMESPACE)
 evento = next(ev for ev in recebidos if ev["name"] == "chamada")
-assert evento["args"][0] == {"tipo": "senha", "local": "Guiche 01", "senha": "FA001"}
+assert _sem_slug_audio(evento["args"][0]) == {"tipo": "senha", "local": "Guiche 01", "senha": "FA001"}
 ok("Chamada por código emite {tipo: 'senha', local, senha} - contrato do payload intocado")
 
 ws2 = socketio.test_client(app, namespace=NAMESPACE)
@@ -267,7 +277,7 @@ ws2.emit("entrar_tv", {"tv_id": ids["tv"]}, namespace=NAMESPACE)
 recebidos = ws2.get_received(NAMESPACE)
 ev_entrou = next(ev for ev in recebidos if ev["name"] == "entrou")
 assert ev_entrou["args"][0]["total_hoje"] == 1
-assert ev_entrou["args"][0]["historico"] == [{"tipo": "senha", "local": "Guiche 01", "senha": "FA001"}]
+assert [_sem_slug_audio(x) for x in ev_entrou["args"][0]["historico"]] == [{"tipo": "senha", "local": "Guiche 01", "senha": "FA001"}]
 ok("Reconectar reconstrói o histórico 'de hoje' a partir do banco (10.13 preservada)")
 
 # ===========================================================================
@@ -296,7 +306,7 @@ resp = c.post(f"/atendimento/recepcao/filas/{ids['fila_a']}/chamar", data={"codi
 assert resp.status_code == 200
 recebidos = ws.get_received(NAMESPACE)
 evento_nome = next(ev for ev in recebidos if ev["name"] == "chamada")
-assert evento_nome["args"][0] == {"tipo": "nome", "local": "Guiche 01", "nome_paciente": "Carlos Andrade"}
+assert _sem_slug_audio(evento_nome["args"][0]) == {"tipo": "nome", "local": "Guiche 01", "nome_paciente": "Carlos Andrade"}
 ok("Chamada por nome emite {tipo: 'nome', local, nome_paciente} - payload intocado")
 
 corpo_valor_principal = corpo_da_funcao(html, "valorPrincipal")
@@ -399,7 +409,7 @@ resp = c.post(f"/atendimento/recepcao/filas/{ids['fila_b']}/chamar", data={"codi
 assert resp.status_code == 200
 recebidos = ws.get_received(NAMESPACE)
 evento_fila_b = next(ev for ev in recebidos if ev["name"] == "chamada")
-assert evento_fila_b["args"][0] == {"tipo": "senha", "local": "Guiche 01", "senha": "FB001"}
+assert _sem_slug_audio(evento_fila_b["args"][0]) == {"tipo": "senha", "local": "Guiche 01", "senha": "FB001"}
 ok("Segunda fila da mesma TV emite seu próprio evento 'chamada', independente da primeira (sem fila de exibição)")
 
 # ===========================================================================
@@ -461,7 +471,7 @@ ws_p3.emit("entrar_tv", {"tv_id": ids["tv_p3"]}, namespace=NAMESPACE)
 recebidos = ws_p3.get_received(NAMESPACE)
 ev_entrou = next(ev for ev in recebidos if ev["name"] == "entrou")
 assert ev_entrou["args"][0]["total_hoje"] == 1
-assert ev_entrou["args"][0]["historico"] == [{"tipo": "senha", "local": "Guiche 01", "senha": "FC001"}]
+assert [_sem_slug_audio(x) for x in ev_entrou["args"][0]["historico"]] == [{"tipo": "senha", "local": "Guiche 01", "senha": "FC001"}]
 ok("Com 1 chamada hoje, o histórico tem exatamente 1 item - vira o card; lista sem itens 'de sobra' é o esperado, não bug")
 
 resp = c.post(f"/atendimento/recepcao/filas/{ids['fila_c']}/finalizar", data={}, follow_redirects=True)

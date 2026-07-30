@@ -42,6 +42,13 @@ def ok(msg):
     print("OK:", msg)
 
 
+def _sem_slug_audio(payload):
+    """Ignora local_audio_slug (adendo do áudio pré-gravado) nos asserts de payload
+    deste teste, que são sobre tipo/local/senha - o valor do slug depende de quais
+    .wav estão no repo e é coberto por test_regressao_audio_pregravado.py."""
+    return {k: v for k, v in payload.items() if k != "local_audio_slug"}
+
+
 with app.app_context():
     db.create_all()
 
@@ -104,8 +111,14 @@ with app.app_context():
     db.session.commit()
 
     # locais (seção 10.3) - cada posto físico é cadastrado, não digitado livremente
-    local_guiche01 = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche 01")
-    local_coleta01 = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Coleta 01")
+    local_guiche01 = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche 01",
+        nome_exibicao="Guiche 01", identificador_admin="[UNI] Guiche 01",
+    )
+    local_coleta01 = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Coleta 01",
+        nome_exibicao="Coleta 01", identificador_admin="[UNI] Coleta 01",
+    )
     db.session.add_all([local_guiche01, local_coleta01])
     db.session.commit()
 
@@ -212,7 +225,7 @@ ok("Etapa 2: log 'chamada_senha' gravado corretamente")
 
 recebidos = ws.get_received(NAMESPACE)
 evento_chamada = next(ev for ev in recebidos if ev["name"] == "chamada")
-assert evento_chamada["args"][0] == {"tipo": "senha", "local": "Guiche 01", "senha": "LB001"}
+assert _sem_slug_audio(evento_chamada["args"][0]) == {"tipo": "senha", "local": "Guiche 01", "senha": "LB001"}
 ok("Etapa 2: WebSocket emite 'chamada' na sala da fila com o payload correto")
 
 # ---------------------------------------------------------------------------
@@ -281,7 +294,7 @@ ok("Etapa 4: 'Chamar' por Código encontra a senha realocada na nova fila e a ch
 
 recebidos = ws.get_received(NAMESPACE)
 evento_nome_ws = next(ev for ev in recebidos if ev["name"] == "chamada")
-assert evento_nome_ws["args"][0] == {"tipo": "nome", "local": "Coleta 01", "nome_paciente": "Maria Souza"}
+assert _sem_slug_audio(evento_nome_ws["args"][0]) == {"tipo": "nome", "local": "Coleta 01", "nome_paciente": "Maria Souza"}
 ok("Etapa 4: como a senha já tem Nome gravado, o WebSocket anuncia pelo nome, não pelo código")
 
 resp = c_coleta.post(f"/atendimento/coleta/filas/{ids['fila_a2']}/tocar", data={})

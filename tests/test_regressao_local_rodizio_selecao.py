@@ -72,13 +72,34 @@ with app.app_context():
     fila_h1 = nova_fila("H1", "H1")
     fila_h2 = nova_fila("H2", "H2")
 
-    local_a = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Local A")
-    local_b = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Local B")
-    local_e = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Local E (fallback)")
-    local_f = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Local F (horario/inativo)")
-    local_g = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Local G (sem candidatas)")
-    local_h = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Local H (consultas gerais)")
-    local_sem_rodizio = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Local Sem Rodizio")
+    local_a = Local(
+        empresa_id=empresa.id, unidade_id=unidade.id, nome="Local A",
+        nome_exibicao="Local A", identificador_admin="[UNI] Local A",
+    )
+    local_b = Local(
+        empresa_id=empresa.id, unidade_id=unidade.id, nome="Local B",
+        nome_exibicao="Local B", identificador_admin="[UNI] Local B",
+    )
+    local_e = Local(
+        empresa_id=empresa.id, unidade_id=unidade.id, nome="Local E (fallback)",
+        nome_exibicao="Local E (fallback)", identificador_admin="[UNI] Local E (fallback)",
+    )
+    local_f = Local(
+        empresa_id=empresa.id, unidade_id=unidade.id, nome="Local F (horario/inativo)",
+        nome_exibicao="Local F (horario/inativo)", identificador_admin="[UNI] Local F (horario/inativo)",
+    )
+    local_g = Local(
+        empresa_id=empresa.id, unidade_id=unidade.id, nome="Local G (sem candidatas)",
+        nome_exibicao="Local G (sem candidatas)", identificador_admin="[UNI] Local G (sem candidatas)",
+    )
+    local_h = Local(
+        empresa_id=empresa.id, unidade_id=unidade.id, nome="Local H (consultas gerais)",
+        nome_exibicao="Local H (consultas gerais)", identificador_admin="[UNI] Local H (consultas gerais)",
+    )
+    local_sem_rodizio = Local(
+        empresa_id=empresa.id, unidade_id=unidade.id, nome="Local Sem Rodizio",
+        nome_exibicao="Local Sem Rodizio", identificador_admin="[UNI] Local Sem Rodizio",
+    )
     db.session.add_all([local_a, local_b, local_e, local_f, local_g, local_h, local_sem_rodizio])
     db.session.commit()
 

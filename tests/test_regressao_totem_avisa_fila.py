@@ -68,7 +68,10 @@ with app.app_context():
     db.session.commit()
     botao_recepcao_id = botao_recepcao.id
 
-    local_coleta = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Guiche Coleta", tipo="coleta")
+    local_coleta = Local(
+        empresa_id=empresa.id, unidade_id=unidade.id, nome="Guiche Coleta", tipo="coleta",
+        nome_exibicao="Guiche Coleta", identificador_admin="[UNI] Guiche Coleta",
+    )
     db.session.add(local_coleta)
     db.session.commit()
     db.session.add(LocalRodizioFila(local_id=local_coleta.id, fila_id=fila_coleta.id, ordem=0, chamadas_seguidas=1))

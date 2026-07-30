@@ -419,11 +419,12 @@ def coletar_alertas(filas, totens, tvs):
                     "mensagem": f"Fila '{fila.nome}' fora do horário de funcionamento agora.",
                 }
             )
-    for totem in totens:
-        if totem.ativo and not (totem.nome_impressora_windows or "").strip():
-            alertas.append(
-                {"tipo": "totem_sem_impressora", "mensagem": f"Totem '{totem.nome}' sem impressora configurada."}
-            )
+    # Alerta "totem sem impressora configurada" removido (adendo que substitui a
+    # 10.6): a impressão passou a ser via window.print() do navegador, usando a
+    # impressora padrão já configurada no Windows de cada totem - nome_impressora_
+    # windows não é mais o que decide se a impressão funciona, então o alerta
+    # baseado só nesse campo ficaria incorreto (um totem pode imprimir bem sem
+    # nunca ter preenchido esse campo, que continua no banco só como legado).
     for tv in tvs:
         if tv.ativo and not tv.filas:
             alertas.append({"tipo": "tv_sem_filas", "mensagem": f"TV '{tv.nome}' sem filas vinculadas."})

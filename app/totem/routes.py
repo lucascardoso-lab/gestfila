@@ -8,7 +8,12 @@ from app.extensions import db, limiter
 from app.models import Fila, LogAtendimento, Senha, Totem, TotemBotao
 
 from . import totem_bp
-from .impressao import imprimir_senha_se_configurado
+
+# app/totem/impressao.py (win32print/ESC-POS, adendo 10.6) não é mais chamado
+# a partir daqui - substituído por prévia + window.print() do navegador na
+# própria tela totem/senha_gerada.html (ver adendo que supersede a 10.6 no
+# BLUEPRINT). O módulo continua existindo no repositório (não apagado, código
+# legado) até a nova abordagem estar validada em produção real.
 
 QTD_ACOMPANHANTES_MAXIMO = 6
 
@@ -35,15 +40,32 @@ def _validar_botao(botao_id, unidade):
 
 
 def _decorar_botoes(botoes):
-    """Classifica cada botão para o template: gera senha, abre submenu ou é um beco sem saída."""
+    """Classifica cada botão para o template: gera senha, abre submenu ou é um beco sem saída.
+
+    Para os que geram senha, já resolve se a fila precisa de uma tela de escolha de
+    tipo (2+ tipos ativos) ou não - permite ao menu.html decidir, sem tela
+    intermediária nenhuma, entre linkar para a escolha de tipo ou já disparar a
+    geração direto (POST) com o único tipo possível (ou nenhum) - pedido do
+    cliente pra tirar o toque extra de "confirmar" do fluxo do totem. A validação
+    de verdade (fila aberta, pertence à unidade, etc.) continua só em
+    _fila_do_botao_ou_404/gerar_senha - isto aqui é só decisão de UI.
+    """
     decorados = []
     for botao in botoes:
         tem_filhos_ativos = any(filho.ativo for filho in botao.filhos)
+        gera_senha = botao.fila_id is not None
+        tipos_ativos = []
+        if gera_senha:
+            fila = Fila.query.get(botao.fila_id)
+            if fila is not None:
+                tipos_ativos = _tipos_ativos(fila)
         decorados.append(
             {
                 "botao": botao,
-                "gera_senha": botao.fila_id is not None,
+                "gera_senha": gera_senha,
                 "tem_filhos": tem_filhos_ativos,
+                "precisa_escolher_tipo": len(tipos_ativos) >= 2,
+                "tipo_unico": tipos_ativos[0] if len(tipos_ativos) == 1 else None,
             }
         )
     return decorados
@@ -156,8 +178,11 @@ def confirmar_geracao(slug, botao_id):
     1) se a fila tiver 2+ tipos de senha ativos configurados e nenhum ainda escolhido,
        mostra a tela de escolha de tipo;
     2) senão (0 tipos, ou só 1 - escolhido automaticamente -, ou tipo já escolhido na
-       etapa 1), mostra o modal de quantidade de acompanhantes, que efetivamente gera
-       a senha ao confirmar.
+       etapa 1), mostra a tela de confirmação, que efetivamente gera a senha ao
+       confirmar (pergunta de quantidade de acompanhantes removida do fluxo do totem -
+       o campo Senha.qtd_acompanhantes/QTD_ACOMPANHANTES_MAXIMO continua existindo e
+       sendo validado em gerar_senha(), só não é mais perguntado ao paciente aqui;
+       toda geração passa a gravar 0).
     """
     totem, unidade = _totem_por_slug_ou_404(slug)
     if not unidade.ativo:
@@ -191,9 +216,8 @@ def confirmar_geracao(slug, botao_id):
         )
 
     return render_template(
-        "totem/confirmar_acompanhantes.html",
+        "totem/confirmar_geracao.html",
         unidade=unidade, totem=totem, botao=botao, tipo_escolhido=tipo_escolhido,
-        opcoes_acompanhantes=range(QTD_ACOMPANHANTES_MAXIMO + 1),
     )
 
 
@@ -229,13 +253,13 @@ def gerar_senha(slug, botao_id):
 
     senha = _emitir_senha(fila, unidade, tipo_senha=tipo_escolhido, qtd_acompanhantes=qtd_acompanhantes)
 
-    # seção 10.6: impressão física roda em background (thread separada) - a senha já
-    # está gravada e válida acima; sucesso/falha da impressão não tem efeito sobre o
-    # fluxo nem sobre esta resposta (a tela já reforça o código em destaque, com ou
-    # sem impressora configurada).
-    imprimir_senha_se_configurado(totem, unidade.empresa.nome, senha.codigo)
+    # Impressão física (antes: win32print/ESC-POS em background, seção 10.6) -
+    # agora é responsabilidade da própria tela (totem/senha_gerada.html), via
+    # prévia + window.print() do navegador, disparada só quando o usuário toca
+    # em "Imprimir". A senha já está gravada e válida acima, independente de
+    # alguém confirmar a impressão ou não.
 
-    return render_template("totem/senha_gerada.html", unidade=unidade, totem=totem, senha=senha)
+    return render_template("totem/senha_gerada.html", unidade=unidade, totem=totem, senha=senha, fila=fila)
 
 
 def _compor_codigo(fila, tipo_senha, proximo_sequencial):

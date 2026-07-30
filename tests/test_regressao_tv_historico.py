@@ -43,6 +43,13 @@ def ok(msg):
     print("OK:", msg)
 
 
+def _sem_slug_audio(payload):
+    """Ignora local_audio_slug (adendo do áudio pré-gravado) nos asserts de payload
+    deste teste, que são sobre tipo/local/senha - o valor do slug depende de quais
+    .wav estão no repo e é coberto por test_regressao_audio_pregravado.py."""
+    return {k: v for k, v in payload.items() if k != "local_audio_slug"}
+
+
 NAMESPACE = "/painel"
 
 with app.app_context():
@@ -68,7 +75,10 @@ with app.app_context():
     db.session.add_all([fila_a, fila_a2, fila_b])
     db.session.commit()
 
-    local_a = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche 01")
+    local_a = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche 01",
+        nome_exibicao="Guiche 01", identificador_admin="[UNI] Guiche 01",
+    )
     db.session.add(local_a)
     db.session.commit()
 
@@ -166,7 +176,7 @@ ws2.emit("entrar_tv", {"tv_id": ids["tv_a"]}, namespace=NAMESPACE)
 recebidos = ws2.get_received(NAMESPACE)
 ev_entrou2 = next(ev for ev in recebidos if ev["name"] == "entrou")
 assert ev_entrou2["args"][0]["total_hoje"] == 1
-assert ev_entrou2["args"][0]["historico"] == [{"tipo": "senha", "local": "Guiche 01", "senha": "FA001"}]
+assert [_sem_slug_audio(x) for x in ev_entrou2["args"][0]["historico"]] == [{"tipo": "senha", "local": "Guiche 01", "senha": "FA001"}]
 ok("Reconectar após 'Chamar' reconstrói o histórico/contador a partir do banco (sobrevive a reload)")
 
 # ===========================================================================

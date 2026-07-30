@@ -1,10 +1,10 @@
 {% extends "atendimento/_layout.html" %}
 
-{% block titulo %}{{ fila.nome }} - {{ 'Recepção' if setor == 'recepcao' else 'Coleta' }}{% endblock %}
+{% block titulo %}{{ fila.nome }} - {{ 'Atendente' if setor == 'recepcao' else 'Executor' }}{% endblock %}
 
 {% block conteudo %}
   <h1>Atendimento — {{ fila.nome }}</h1>
-  <p class="subtitulo">{{ fila.unidade.nome }} ({{ 'Recepção' if setor == 'recepcao' else 'Coleta' }})</p>
+  <p class="subtitulo">{{ fila.unidade.nome }} ({{ 'Atendente' if setor == 'recepcao' else 'Executor' }})</p>
 
   <form id="form-acoes" method="post" action="{{ url_for('atendimento.chamar', setor=setor, fila_id=fila.id) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -14,7 +14,7 @@
         <div>
           <label>Local</label>
           <div class="senha-chamada">
-            <strong>{{ local.nome }}</strong>
+            <strong>{{ local.nome_exibicao }}</strong>
             <span class="links-turno">
               <a href="{{ url_for('atendimento.iniciar_turno') }}" class="link-trocar-local">Reconfigurar turno</a>
             </span>
@@ -122,7 +122,7 @@
               {{ "%02d:%02d:%02d"|format(((s.chamada_em - s.criada_em).total_seconds())//3600, (((s.chamada_em - s.criada_em).total_seconds())%3600)//60, ((s.chamada_em - s.criada_em).total_seconds())%60) }}
               <span class="hora-relogio" data-hora-de="{{ s.chamada_em.isoformat() }}" title="Horário em que a senha foi chamada"></span>
             </td>
-            <td>{{ s.local.nome if s.local else '' }}</td>
+            <td>{{ s.local.nome_exibicao if s.local else '' }}</td>
           </tr>
         {% else %}
           <tr><td colspan="3">Nenhuma senha atendida neste local ainda.</td></tr>

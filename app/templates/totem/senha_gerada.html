@@ -3,14 +3,140 @@
 {% block titulo %}Senha gerada - Totem{% endblock %}
 
 {% block conteudo %}
-  <meta http-equiv="refresh" content="10;url={{ url_for('totem.tela_raiz', slug=totem.slug) }}">
-  <header>
-    <h1>Sua senha</h1>
-    <p>{{ unidade.nome }}</p>
-  </header>
+  {# Adendo que substitui a impressão silenciosa via win32print/ESC-POS (10.6):
+     prévia visual do cupom + impressão via window.print() do navegador,
+     disparada automaticamente ao carregar a tela (reduz fricção - pedido do
+     cliente), com botão "Imprimir comprovante" mantido como fallback manual.
+     O retorno automático ao início não usa mais <meta refresh> - ver
+     justificativa no <script> abaixo. #}
 
-  <div class="senha-codigo">{{ senha.codigo }}</div>
-  <p class="mensagem">Aguarde ser chamado no painel. Esta tela voltará ao início em alguns segundos.</p>
+  <div class="tela-pos-geracao">
+    <header>
+      <h1>Sua senha</h1>
+      <p>{{ unidade.nome }}</p>
+    </header>
 
-  <a class="botao-totem navegacao" href="{{ url_for('totem.tela_raiz', slug=totem.slug) }}" style="margin-top:2rem; max-width:320px;">Novo atendimento</a>
+    <div class="senha-codigo">{{ senha.codigo }}</div>
+    <p class="mensagem">Aguarde ser chamado no painel. Esta tela voltará ao início em alguns segundos.</p>
+
+    <div class="area-cupom">
+      <div class="cupom" id="cupom">
+        <p class="cupom-empresa">{{ unidade.empresa.nome }}</p>
+        {% if unidade.endereco %}<p class="cupom-linha">{{ unidade.endereco }}</p>{% endif %}
+        {% if unidade.telefone %}<p class="cupom-linha">{{ unidade.telefone }}</p>{% endif %}
+        <p class="cupom-separador">- - - - - - - - - - - - - - - -</p>
+        <p class="cupom-linha">{{ fila.nome }}</p>
+        <p class="cupom-codigo">{{ senha.codigo }}</p>
+        <p class="cupom-separador">- - - - - - - - - - - - - - - -</p>
+        <p class="cupom-linha" id="cupom-data-hora" data-momento="{{ senha.criada_em.isoformat() }}Z">--/--/---- --:--</p>
+      </div>
+      <button type="button" class="botao-totem" id="botao-imprimir">🖨️ Imprimir comprovante de novo</button>
+    </div>
+
+    <a class="botao-totem navegacao" href="{{ url_for('totem.tela_raiz', slug=totem.slug) }}" style="margin-top:1.5rem; max-width:320px;">Novo atendimento</a>
+  </div>
+
+  <script>
+    (function () {
+      var URL_RETORNO = {{ url_for('totem.tela_raiz', slug=totem.slug) | tojson }};
+      var SEGUNDOS_RETORNO = 20;
+      // sessionStorage (não localStorage) de propósito: sobrevive a um F5/
+      // reconexão de rede na MESMA aba (não reabre o diálogo pra senha já
+      // processada), mas não persiste entre sessões/abas novas - cada chave é
+      // por senha.id, então uma senha NOVA (próximo atendimento) sempre
+      // dispara de novo; só a MESMA senha nunca dispara duas vezes.
+      var CHAVE_JA_IMPRESSO = "gestfila_totem_impresso_{{ senha.id }}";
+
+      // data/hora nunca formatada no servidor (mesma convenção do resto do
+      // projeto) - "Z" força interpretação UTC antes de converter pro fuso
+      // local de quem está vendo a tela (aqui, o próprio totem). Formatado
+      // ANTES do print automático abaixo, pra o cupom impresso já sair com a
+      // data certa, não o placeholder "--/--/---- --:--".
+      var elDataHora = document.getElementById("cupom-data-hora");
+      var momento = new Date(elDataHora.dataset.momento);
+      elDataHora.textContent =
+        momento.toLocaleDateString("pt-BR") + "  " + momento.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+      // Retorno automático via setTimeout próprio, NÃO <meta refresh>: um
+      // meta refresh é 100% nativo do navegador, sem nenhum gancho de JS -
+      // continuaria contando por baixo do diálogo de impressão em qualquer
+      // navegador, podendo trocar de tela COM o diálogo ainda aberto. Um
+      // timer em JS dá pra pausar/retomar nos eventos padronizados
+      // beforeprint/afterprint (suportados desde o IE10 - não varia entre
+      // Chrome/Edge/Firefox modernos).
+      var timerRetorno = null;
+      function agendarRetorno() {
+        cancelarRetorno();
+        timerRetorno = setTimeout(function () {
+          window.location.href = URL_RETORNO;
+        }, SEGUNDOS_RETORNO * 1000);
+      }
+      function cancelarRetorno() {
+        if (timerRetorno) {
+          clearTimeout(timerRetorno);
+          timerRetorno = null;
+        }
+      }
+      window.addEventListener("beforeprint", cancelarRetorno);
+      window.addEventListener("afterprint", agendarRetorno);
+
+      function imprimirComprovante() {
+        window.print();
+      }
+      document.getElementById("botao-imprimir").addEventListener("click", imprimirComprovante);
+
+      agendarRetorno();
+
+      // Dispara a impressão automaticamente ao carregar (reduz fricção,
+      // pedido do cliente) - só se esta senha específica ainda não tiver
+      // disparado nesta aba. O botão "Imprimir comprovante de novo" continua
+      // como fallback manual, sempre disponível, pra quem fechar/cancelar o
+      // diálogo automático sem imprimir.
+      if (!sessionStorage.getItem(CHAVE_JA_IMPRESSO)) {
+        sessionStorage.setItem(CHAVE_JA_IMPRESSO, "1");
+        imprimirComprovante();
+      }
+    })();
+  </script>
+
+  <style>
+    .tela-pos-geracao { display: flex; flex-direction: column; align-items: center; width: 100%; }
+
+    .area-cupom { display: flex; flex-direction: column; align-items: center; margin-top: 1.5rem; }
+
+    /* Prévia na tela: só uma referência visual de "isto é um cupom", largura
+       fixa aqui é só estética da prévia - não tem relação com o tamanho real
+       de impressão (ver regra @media print abaixo, que é intencionalmente
+       flexível). */
+    .cupom {
+      width: 320px; max-width: 90vw; background: #fff; color: #111;
+      border: 1px dashed var(--gf-cinza-medio); border-radius: 4px;
+      padding: 1.25rem 1rem; font-family: "Courier New", monospace;
+      text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,.06);
+    }
+    .cupom p { margin: .25rem 0; }
+    .cupom-empresa { font-weight: 700; font-size: 1.05rem; }
+    .cupom-linha { font-size: .9rem; }
+    .cupom-separador { font-size: .9rem; color: var(--gf-cinza-medio); }
+    .cupom-codigo { font-weight: 800; font-size: 2rem; letter-spacing: .05em; margin: .5rem 0 !important; }
+
+    #botao-imprimir { margin-top: 1rem; max-width: 320px; min-height: auto; padding: .9rem 1rem; font-size: 1.2rem; }
+
+    /* Imprime só o cupom - sem cabeçalho do totem, sem os botões, sem o
+       watermark GESTFILA (evita o problema de cabeçalho/rodapé do próprio
+       site aparecendo na prévia de impressão do navegador). `size: auto` +
+       margin 0 deixa o navegador usar o tamanho de página já configurado no
+       driver da impressora (Windows) em vez de forçar A4/Carta - importante
+       pras impressoras térmicas estreitas dos totens/estações reais, que têm
+       larguras de mídia variadas. */
+    @media print {
+      body * { visibility: hidden; }
+      .cupom, .cupom * { visibility: visible; }
+      .cupom {
+        visibility: visible; position: absolute; top: 0; left: 0; width: 100%;
+        border: none; box-shadow: none; padding: 0;
+      }
+      @page { size: auto; margin: 0; }
+    }
+  </style>
 {% endblock %}

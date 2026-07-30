@@ -22,6 +22,14 @@ class Tv(db.Model):
     som_ativo = db.Column(db.Boolean, default=True, nullable=False)
     volume = db.Column(db.SmallInteger, default=100, nullable=False)  # 0-100
 
+    # Fallback de áudio pré-gravado (BLUEPRINT.md, adendo do áudio pré-gravado):
+    # ligado só nas TVs cujo navegador tem a Web Speech API "presente mas quebrada"
+    # (aceita speechSynthesis.speak() e dispara onend, mas nenhum som sai - caso
+    # real confirmado numa Smart TV física). TVs com esta flag DESLIGADA (padrão)
+    # seguem usando speechSynthesis normalmente, sem nenhuma regressão. Por TV
+    # (não global) de propósito: TVs mais novas não precisam do fallback.
+    usa_audio_pregravado = db.Column(db.Boolean, default=False, nullable=False)
+
     empresa = db.relationship("Empresa")
     unidade = db.relationship("Unidade")
     filas = db.relationship("Fila", secondary=tv_filas, back_populates="tvs")

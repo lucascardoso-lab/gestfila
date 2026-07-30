@@ -33,10 +33,10 @@
             <td>{{ fila.prioridade_rodizio }}</td>
             <td class="acoes">
               {% if current_user.is_super_admin or current_user.tem_perfil('atendente', 'atendente_executor', 'admin') %}
-                <a href="{{ url_for('atendimento.painel_fila', setor='recepcao', fila_id=fila.id) }}">Recepção</a>
+                <a href="{{ url_for('atendimento.painel_fila', setor='recepcao', fila_id=fila.id) }}">Atendente</a>
               {% endif %}
               {% if current_user.is_super_admin or current_user.tem_perfil('executor', 'atendente_executor', 'admin') %}
-                <a href="{{ url_for('atendimento.painel_fila', setor='coleta', fila_id=fila.id) }}">Coleta</a>
+                <a href="{{ url_for('atendimento.painel_fila', setor='coleta', fila_id=fila.id) }}">Executor</a>
               {% endif %}
               <a href="{{ url_for('atendimento.alocar_fila', fila_id=fila.id) }}">Alocar fila</a>
             </td>

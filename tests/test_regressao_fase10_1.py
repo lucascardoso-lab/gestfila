@@ -83,7 +83,10 @@ with app.app_context():
     db.session.add(usuario)
     db.session.commit()
 
-    local = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Guichê 01")
+    local = Local(
+        empresa_id=empresa.id, unidade_id=unidade.id, nome="Guichê 01",
+        nome_exibicao="Guichê 01", identificador_admin="[UNI] Guichê 01",
+    )
     db.session.add(local)
     db.session.commit()
 

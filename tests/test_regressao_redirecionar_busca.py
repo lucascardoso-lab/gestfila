@@ -77,7 +77,10 @@ with app.app_context():
     db.session.add_all([fila_origem, fila_aberta, fila_fechada, fila_outra_empresa])
     db.session.commit()
 
-    local_guiche01 = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guichê 01")
+    local_guiche01 = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guichê 01",
+        nome_exibicao="Guichê 01", identificador_admin="[UNI] Guichê 01",
+    )
     db.session.add(local_guiche01)
     db.session.commit()
 

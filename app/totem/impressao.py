@@ -12,8 +12,27 @@ import logging
 import threading
 from datetime import datetime
 
-import win32print
 from escpos.printer import Dummy
+
+try:
+    # win32print (pywin32) só é instalado em Windows (ver requirements.txt,
+    # `sys_platform == "win32"`) - este módulo é importado por
+    # app/totem/routes.py -> create_app(), ou seja, TODA a aplicação
+    # (suíte de testes inteira, e o deploy real em Linux, seção 10 do
+    # BLUEPRINT) passa por aqui. Um import incondicional quebraria a
+    # aplicação inteira em qualquer ambiente não-Windows, mesmo em totens
+    # sem impressora configurada. `win32print = None` nesse caso: o único
+    # lugar que de fato usa o nome (enviar_para_impressora_windows) só é
+    # chamado quando um totem tem impressora configurada - cenário que já
+    # pressupõe Windows por natureza (fila de impressão nativa do SO) - e
+    # está dentro do try/except de _imprimir_sincrono, que já trata
+    # qualquer falha de impressão como não-fatal (nunca desfaz a senha).
+    # Continua um atributo de módulo de propósito (não import local dentro
+    # da função) - os testes (test_regressao_fase10_6.py) fazem
+    # `patch.object(impressao, "win32print")`, que exige isso.
+    import win32print
+except ImportError:
+    win32print = None
 
 logger = logging.getLogger(__name__)
 

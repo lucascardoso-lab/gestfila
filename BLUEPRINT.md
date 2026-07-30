@@ -684,6 +684,14 @@ definido. Não criar uma segunda tabela de tipos específica de Consultórios.
 > Bematech (modelo MP-4200 TH ou similar) conectada via USB, já instalada e
 > reconhecida pelo Windows em "Dispositivos e Impressoras".
 
+**⚠️ SUPERSEDIDO pelo adendo 10.28 — impressão silenciosa via `win32print`/ESC-POS
+substituída por impressão via diálogo nativo do navegador (`window.print()`),
+com prévia visual do cupom antes de imprimir.** Motivo: o cliente pediu uma
+prévia visual do comprovante antes da impressão efetiva, o que a abordagem
+silenciosa (envio direto pra fila de impressão do Windows, sem preview) não
+permite. O texto abaixo permanece como registro histórico da decisão
+original — ver o adendo 10.28 para o mecanismo vigente hoje.
+
 **Abordagem técnica escolhida:** em vez de comunicação USB raw (que exige
 drivers libusb/WinUSB e é frágil no Windows), enviar os comandos ESC/POS
 através da **fila de impressão nativa do Windows**, usando a biblioteca
@@ -1624,6 +1632,12 @@ num Local sem nenhum rodízio admin-configurado.
 
 ## 10.20. ADENDO — "Minhas filas" (acesso rápido) no bloco Redirecionar (seções 10.2/10.10/10.19)
 
+> **SUPERSEDIDO pela seção 10.29** — a seção "Minhas filas" descrita abaixo
+> foi removida a pedido do cliente (não é correção de bug). O restante desta
+> seção documenta a implementação original só para referência histórica; ver
+> 10.29 pra decisão/estado atual. A busca livre (item 3 abaixo, adendo 10.10)
+> continua existindo normalmente — não foi afetada pela remoção.
+
 > Pedido do cliente: combinar dois modos de seleção de destino no bloco
 > Redirecionar — botões de acesso rápido pras filas do turno ativo do
 > operador (seção 10.19), além da busca livre já existente (adendo 10.10) —
@@ -2268,6 +2282,542 @@ screenshot - sem acesso a navegador/renderização neste ambiente, só
 validação via HTML/CSS servido + contrato de dado real (mesmo padrão de
 teste do resto do projeto). Verificação visual em 1920×1080/1366×768 segue
 pendente de confirmação manual.
+
+---
+
+## 10.28. ADENDO — Impressão do totem via window.print() do navegador (substitui a 10.6)
+
+> Mudança de arquitetura consciente, não uma correção incremental: troca do
+> mecanismo de impressão silenciosa via `win32print`/ESC-POS (adendo 10.6)
+> por impressão via diálogo nativo do navegador (`window.print()`), com
+> prévia visual do cupom antes de imprimir - pedido explícito do cliente,
+> que queria poder ver o comprovante antes dele sair impresso.
+
+**1. Prévia + impressão** (`totem/senha_gerada.html`): a tela que já
+mostrava "Sua senha" (código em destaque) ganhou, abaixo, uma prévia visual
+do cupom (nome da empresa, endereço/telefone da unidade, fila, código,
+data/hora) e um botão explícito **"Imprimir comprovante"** - `window.print()`
+só é chamado no clique desse botão, nunca sozinho ao carregar a tela. CSS
+`@media print` isola só o cupom na hora de imprimir (`visibility: hidden`
+em tudo, `visibility: visible` só no cupom, reposicionado pra ocupar a
+página inteira) - evita o cabeçalho/rodapé do site aparecendo na folha
+impressa.
+
+**2. Largura do cupom - decisão deliberada de NÃO fixar em mm:** os totens
+reais usam impressoras térmicas estreitas (uma Zebra ZD220 e uma impressora
+de totem física), mas a largura de mídia instalada varia por equipamento/
+configuração (a ZD220 comum varia entre 2"/3"/4" dependendo do rolo
+instalado) - sem certeza de bater com os 58-80mm da Bematech usada como
+referência na 10.6. Em vez de arriscar um valor fixo errado (ou adicionar
+um campo novo de "largura do cupom" configurável por totem), o CSS do modo
+impressão usa `width: 100%` + `@page { size: auto; margin: 0; }` -
+quem decide o tamanho físico real da página é o **driver da impressora já
+configurado no Windows daquele totem**, não a CSS da página web. A única
+largura fixa no código (~320px) é só a da prévia NA TELA, puramente
+estética, sem relação nenhuma com o tamanho real de impressão.
+
+**3. Dados do cupom - novos campos em `Unidade`, não em `Empresa`:**
+`endereco` (`Text`, nullable) e `telefone` (`String(30)`, nullable),
+opcionais. Ficam em `unidades`, não em `empresas`, porque cada unidade é um
+local físico distinto - uma mesma empresa pode ter várias unidades em
+endereços diferentes - o cupom impresso no totem de uma unidade tem que
+mostrar o endereço DAQUELA unidade, não um endereço genérico da empresa toda.
+Migration `c53c321f3868` (`downgrade()` simétrico). Tela admin de Unidade
+(`admin/unidades/form.html`) ganhou os dois campos, opcionais, sem quebrar
+cadastro já existente.
+
+**4. Mudança de responsabilidade operacional (sinalizada explicitamente,
+não só um detalhe técnico):** antes, a impressora de cada totem era
+configurada **centralizadamente** no cadastro do Totem (`nome_impressora_
+windows`, editável por um admin de qualquer lugar pelo painel). Com
+`window.print()`, cada totem passa a depender da **impressora padrão
+configurada localmente no Windows daquela máquina específica** - ninguém
+mais troca isso remotamente pelo GESTFILA; quem for trocar a impressora
+física de um totem precisa mexer no Windows do PC daquele totem. Confirmado
+que hoje existem 2 totens físicos cadastrados, em unidades/máquinas
+diferentes.
+
+**5. Mecanismo antigo desativado, não removido:** `app/totem/routes.py::
+gerar_senha()` não chama mais `app/totem/impressao.py::
+imprimir_senha_se_configurado()`. O módulo inteiro (`montar_cupom`,
+`enviar_para_impressora_windows`, `win32print`/ESC-POS) continua existindo
+no repositório, sem alteração - só parou de ser chamado - até a nova
+abordagem estar validada em produção real. O campo `nome_impressora_windows`
+(model `Totem`) também **não foi removido** do banco nem do cadastro admin -
+fica documentado como não mais usado pela impressão em si (só resta como
+metadado legado), sem migration de remoção por enquanto.
+
+**6. Alerta obsoleto removido:** o dashboard gerencial (`relatorios/
+queries.py::coletar_alertas`) tinha um alerta "Totem sem impressora
+configurada" baseado em `nome_impressora_windows` estar vazio - removido,
+porque ficaria incorreto (um totem pode imprimir perfeitamente bem sem
+nunca ter preenchido esse campo, que não decide mais nada).
+
+**7. Não-bloqueio preservado (era o requisito mais crítico a não regredir):**
+a senha é gerada e commitada no banco pelo `POST /gerar` **antes** da tela
+com a prévia sequer aparecer - cancelar/fechar o diálogo de impressão do
+navegador, ou nunca tocar em "Imprimir", não tem como desfazer algo que já
+aconteceu no servidor. A garantia não depende de nenhum código de
+tratamento de falha (diferente da 10.6, que precisava de tolerância a falha
+explícita para o mesmo efeito) - é uma consequência direta de onde a
+prévia/impressão acontece no fluxo (depois, no client-side, não antes).
+Retorno automático à tela inicial (`meta refresh`) mantido, só alongado de
+10s pra 20s - dá espaço real pra abrir e fechar o diálogo nativo de
+impressão antes de a tela trocar sozinha.
+
+**Arquivos alterados:** `app/models/unidade.py` (+ migration
+`c53c321f3868`), `app/admin/unidades.py`, `app/templates/admin/unidades/
+form.html`, `app/templates/admin/_layout.html` (CSS de `textarea`),
+`app/templates/totem/senha_gerada.html` (reescrito), `app/totem/routes.py`
+(chamada removida + `fila` passada ao template), `app/relatorios/
+queries.py` (alerta removido). **Não alterados:** `app/totem/impressao.py`,
+model `Totem`/`nome_impressora_windows`, cadastro admin de Totem.
+
+**Testes:** `tests/test_regressao_fase10_6.py` reduzido a cobertura
+unitária do módulo legado + uma prova de que a rota não chama mais
+`win32print` (11 casos). Novo `tests/test_regressao_cupom_impressao_
+navegador.py` (7 casos) - conteúdo do cupom com/sem endereço-telefone,
+`window.print()` só no clique, `@media print` isolando o cupom, geração
+funcionando igual com/sem `nome_impressora_windows` preenchido, retorno
+automático preservado. `tests/test_regressao_dashboard.py` ajustado (alerta
+removido da lista esperada). Suíte completa (40 arquivos) sem falhas.
+
+---
+
+## 10.29. ADENDO — Remoção de "Minhas filas" no bloco Redirecionar (supersede 10.20)
+
+> Remoção de funcionalidade a pedido do cliente, não correção de bug: a
+> seção "Minhas filas" (adendo 10.20) — botões de acesso rápido às filas do
+> turno ativo do operador, no bloco Redirecionar — foi considerada
+> desnecessária tanto no fluxo do atendente quanto do executor e removida.
+
+**1. Diagnóstico prévio — acoplamento identificado e confirmado com o
+cliente antes da remoção:** `_redirecionar_busca.html` (o partial que
+continha "Minhas filas") é compartilhado por `painel_fila.html` (seção 10.2)
+**e** `painel_local.html` (adendo 10.8) — os dois route handlers
+(`painel_fila()`/`painel_local()`, `app/atendimento/chamada.py`) chamavam
+`filas_rapidas_redirecionar()` da mesma forma. O pedido original citava só
+`painel_local.html`, mas como a 10.20 já documentava o recurso como
+desenhado para as duas telas desde o início (título "seções
+10.2/10.10/10.19"), o cliente confirmou remover das duas ao ser
+apresentado o acoplamento, em vez de manter só numa tela via lógica
+condicional nova.
+
+**2. O que NÃO foi afetado (confirmado antes de remover, não presumido):**
+- **Tela "Iniciar Turno" (10.19):** continua existindo normalmente —
+  operador continua configurando filas/local do turno sem nenhuma mudança.
+- **Rodízio automático entre filas por Local (10.8):** lógica 100%
+  back-end (`selecionar_proxima_fila_e_senha()`/`_itens_rotacao()`,
+  `app/atendimento/helpers.py`), estruturalmente independente do bloco
+  Redirecionar — continua funcionando exatamente igual.
+- **Busca livre por nome (10.10):** único modo de seleção de destino que
+  resta no bloco Redirecionar, sem nenhuma mudança de comportamento —
+  continua consumindo `filas_destino()` normalmente.
+- **Atendente vs. executor:** `painel_local.html` é o mesmo template pros
+  dois perfis (`setor=recepcao`/`coleta` só muda texto de rótulo e URLs de
+  ação) — a remoção vale automaticamente para ambos.
+
+**3. O que foi removido:**
+- O bloco `{% if filas_rapidas %}...{% endif %}` (seção "Minhas filas" +
+  separador visual "Buscar outra fila") de
+  `app/templates/atendimento/_redirecionar_busca.html`, junto com o
+  CSS (`.rotulo-secao-redirecionar`, `.grade-filas-rapidas`,
+  `.botao-fila-rapida*`, `.divisor-secoes-redirecionar*`) e o JS
+  específico (`elGradeRapidas`, `sincronizarBotoesRapidos()`, listener de
+  clique da grade) exclusivos dela.
+- A passagem de `filas_rapidas=filas_rapidas_redirecionar(...)` nos dois
+  `render_template` (`painel_local()` e `painel_fila()`,
+  `app/atendimento/chamada.py`), e o import correspondente.
+
+**4. O que NÃO foi removido (código legado preservado, mesma convenção da
+10.28 para `app/totem/impressao.py`):** `filas_rapidas_redirecionar()`
+continua existindo em `app/atendimento/helpers.py`, funcional, só sem
+nenhum call site ativo.
+
+**Arquivos alterados:** `app/atendimento/chamada.py` (import + 2 chamadas
+de `filas_rapidas_redirecionar` removidas), `app/templates/atendimento/
+_redirecionar_busca.html` (seção "Minhas filas" + CSS/JS específicos
+removidos, comentário de topo atualizado). **Não alterados:**
+`app/atendimento/helpers.py` (função preservada), `painel_local.html`,
+`painel_fila.html` (só consomem o partial, sem lógica própria do bloco).
+
+**Testes:** `tests/test_regressao_redirecionar_minhas_filas.py`
+reescrito (7 casos) — confirma que a seção não aparece mais em nenhuma das
+duas telas mesmo com turno ativo configurado (cenário que antes a exibia),
+busca livre continua funcionando nas duas, Realocar continua de ponta a
+ponta via `fila_destino_id`, e `filas_rapidas_redirecionar()` continua
+importável/funcional mas sem uso em `chamada.py`. Suíte completa (40
+arquivos) sem falhas.
+
+---
+
+## 10.30. ADENDO — Escala responsiva de "Últimas chamadas" e rodapé no painel de TV
+
+> Reportado pelo cliente numa TV física real: o card "Chamando agora" e a
+> lista "Últimas chamadas"/rodapé ficavam desproporcionais entre si numa
+> tela grande de verdade — o card já escalava bem, o resto não.
+
+**Causa:** `.ultimas-chamadas h2`, `#lista-ultimas li`, `#lista-ultimas
+.item-local` e `footer` (`app/templates/painel/_layout.html`) usavam
+`font-size` fixo em `rem`, que não cresce com o tamanho físico da tela —
+diferente do card `.chamada-atual-valor`/`.chamada-atual-local`, que já
+usava `clamp()` com `vw`/`vh` desde o redesign (10.26). Numa TV grande
+vista de longe, texto em `rem` fixo fica desproporcionalmente pequeno.
+
+**Correção:** os quatro seletores acima passaram a usar `clamp()` com `vw`
+(mesmo padrão já usado no card), e depois recalibrados por pedido explícito
+do cliente: "Últimas chamadas" aumentada mais um pouco além do ajuste
+inicial, "Chamando agora" (`.chamada-atual-valor`/`.chamada-atual-local`)
+reduzido ~15-17% pra equilibrar a proporção entre os dois blocos.
+Verificado localmente (servidor real + Chrome headless, viewport
+1920×1080) — sem estouro de layout em nenhum dos ajustes. Confirmação
+final de proporção depende da TV física real, não reproduzível neste
+ambiente.
+
+**Arquivos alterados:** `app/templates/painel/_layout.html`. **Testes:**
+nenhum teste automatizado cobre valor exato de `font-size` (é ajuste visual
+fino, sem contrato de dado) — suíte completa (40 arquivos) revalidada sem
+quebras a cada rodada de ajuste.
+
+---
+
+## 10.31. ADENDO — Rótulos "Atendente"/"Executor" estendidos a `Local.tipo` e às telas de setor
+
+> Pedido do cliente: estender a nomenclatura adotada na 10.21 (perfis
+> `atendente`/`executor`) também aos rótulos visíveis de `Local.tipo` e das
+> telas de Atendimento por setor — que antes continuavam mostrando
+> "Recepção"/"Coleta" (decisão original da 10.21, que manteve *setor*
+> deliberadamente separado de *perfil*). O cliente optou por unificar a
+> terminologia visível ao usuário nessas telas também.
+
+**Mudança é só de rótulo (texto exibido), não de dado:** os valores
+internos `Local.tipo`/`setor` (`'recepcao'`/`'coleta'`, usados em URLs,
+`Senha.setor` e toda a lógica de RBAC/`PERFIS_POR_SETOR`) **não mudaram** —
+mesmo espírito da 10.21, sem migration, sem risco de rota quebrar. Só o
+texto visível ao usuário foi trocado, nos seguintes pontos:
+
+- `app/templates/admin/locais/listar.html` (coluna "Tipo" da listagem) e
+  `app/templates/admin/locais/form.html` (`<select id="tipo">`) — telas de
+  cadastro de Local.
+- `app/templates/atendimento/painel_local.html` e `.../painel_fila.html` —
+  título da página e subtítulo, que mostravam "Recepção"/"Coleta" derivado
+  do `setor` da URL.
+- `app/templates/atendimento/listar_filas.html` — links de acesso rápido ao
+  painel de cada fila por setor.
+
+**Nota de escopo:** o próprio `setor` continua `recepcao`/`coleta` nas URLs
+(`/atendimento/recepcao|coleta/...`) — só descoberto/confirmado como
+inalterado durante o pedido de remoção de "Minhas filas" (10.29), não
+tocado aqui de novo. Nenhuma rota, ENUM de banco ou lógica de
+autorização mudou.
+
+**Testes:** nenhum teste da suíte afirmava o texto "Recepção"/"Coleta"
+nesses pontos especificamente (os únicos usos de "Recepção"/"Coleta" em
+testes eram nomes de dado - `Fila.nome`, `TotemBotao.label` - não
+relacionados a este rótulo). Suíte completa (40 arquivos) revalidada sem
+quebras.
+
+---
+
+## 10.32. ADENDO — Separação `Local.nome` em `nome_exibicao`/`identificador_admin`
+
+> Pedido do cliente: separar o campo único `Local.nome` (guichês/postos,
+> seção 10.3) em dois, mesmo espírito de um cadastro de usuário (nome de
+> exibição vs. login) - motivado por ambiguidade real: nomes de Local podem
+> se repetir entre unidades diferentes (ex.: "Guichê 01" em duas unidades),
+> o que já causava confusão em telas administrativas onde o admin precisa
+> identificar sem dúvida QUAL "Guichê 01" está escolhendo/vendo.
+
+**Trabalho em 3 fases, todas concluídas na mesma sessão** (Fase 0 -
+diagnóstico de impacto - relatada na conversa/commits, não repetida aqui).
+
+### Fase 1 - Schema/migration
+
+**1. Dois campos novos em `Local`** (`app/models/local.py`, migration
+`5ba0cdce86cb`, revisa `c53c321f3868`):
+- `nome_exibicao` (`String(150)`, obrigatório) - o que aparece para
+  paciente/atendente (painel de TV, tela de Atendimento). Pode repetir
+  entre unidades diferentes, sem constraint de unicidade nenhuma.
+- `identificador_admin` (`String(200)`, obrigatório, **único por
+  `empresa_id`** - `UniqueConstraint uq_locais_empresa_identificador_admin`)
+  - usado só nas telas administrativas (listagem, Iniciar Turno, rodízio,
+  ocupação).
+- `nome` (campo antigo) **mantido intocado por enquanto** - será removido
+  numa fase futura, só depois que a Fase 3 migrar 100% dos pontos de
+  leitura mapeados (Fase 0, ver histórico da conversa/commits) - decisão
+  deliberada de não fazer o "big bang" (schema + todos os reads) numa
+  tacada só.
+
+**2. Migração de dados - convenção uniforme, não só nos casos que colidem:**
+valor inicial de `identificador_admin` = `"[SIGLA da Unidade] nome"` (usa a
+mesma lógica de `Unidade.sigla_exibicao` - `sigla` cadastrada, ou fallback
+pros 3 primeiros caracteres do nome da unidade em maiúsculas, adendo 10.22),
+aplicado a **TODOS** os Locais existentes, não só aos que colidiam sem o
+prefixo - decisão explícita do cliente, para nunca ter uma mistura de
+Locais com/sem prefixo no mesmo sistema (o que reabriria o mesmo tipo de
+confusão que a separação de campos tenta resolver). `nome_exibicao` recebe
+o valor de `nome` sem nenhuma alteração.
+
+**3. Desempate residual por id (defensivo - documentado aqui de propósito,
+não só como comentário no código, para não ser confundido com bug no
+futuro):** depois de aplicar o prefixo `"[SIGLA] nome"`, se AINDA sobrar
+colisão case-insensitive dentro da mesma empresa (cenário não observado nos
+dados reais nesta migration, mas matematicamente possível - ex.: duas
+unidades cujos 3 primeiros caracteres coincidem quando nenhuma tem
+`Unidade.sigla` cadastrada), o `id` do Local é anexado entre parênteses ao
+final de **todos** os membros do grupo colidente (ex.: `"[MAT] Guiche 01
+(7)"`) - nunca só nos "duplicados", pra o resultado ser simétrico e
+previsível. **Se esse sufixo aparecer num `identificador_admin` real no
+futuro, é o comportamento esperado deste script de migração, não um bug.**
+
+**4. Verificação real antes de aplicar no banco de desenvolvimento:**
+antes de rodar a migration no banco real (`painel_senha`), foi criada uma
+cópia completa (`painel_senha_teste_migracao`, via `CREATE TABLE ... LIKE`
++ `INSERT ... SELECT` de todas as 21 tabelas) e a migration rodou primeiro
+só nela. Achado real confirmado por consulta direta ao MySQL: a collation
+de `locais.nome` é `utf8mb4_0900_ai_ci` (case+accent-insensitive,
+confirmado com `SELECT 'Guiche 01' = 'GUICHE 01'` → `true`) - existiam 2
+pares de Locais com o mesmo nome ignorando maiúsculas/minúsculas na mesma
+empresa (`Guiche 01`/`GUICHE 01` e `Guiche 02`/`GUICHE 02`, cada par numa
+unidade diferente), que teriam quebrado a constraint de unicidade se o
+`nome` cru fosse copiado direto. O prefixo `[SIGLA]` resolveu os dois pares
+sozinho (`[MAT] Guiche 01` × `[FIL] GUICHE 01` não
+colidem mais) - conferido visualmente a lista completa dos 9
+`identificador_admin` resultantes (sem espaçamento estranho, sem prefixo
+duplicado) antes de considerar a estratégia validada. `downgrade()`
+também testado na cópia (remove as colunas/constraint de volta,
+simétrico). Cópia de teste removida depois da validação - a migration só
+foi então aplicada ao banco real (`flask db upgrade`, revisão
+`5ba0cdce86cb`).
+
+Imediatamente após a Fase 1, a suíte completa ficou vermelha (29 arquivos) -
+esperado e não revertido: qualquer `Local(...)` (produção ou fixture de
+teste) sem os dois campos novos passou a violar `NOT NULL`. Confirmado com o
+cliente antes de prosseguir: seguir direto para as Fases 2/3 na mesma sessão,
+em vez de estabilizar com um valor provisório e parar.
+
+### Fase 2 - Formulário de cadastro/edição (`app/admin/locais.py`,
+`app/templates/admin/locais/form.html`)
+
+**1. Dois campos no formulário**, substituindo o único "Nome" antigo:
+"Nome de exibição (aparece para o paciente/TV)" e "Identificador
+administrativo (único, usado só no cadastro)". `nome` (legado) é mantido em
+sincronia com `nome_exibicao` em toda gravação (`novo_local`/`editar_local`),
+não exposto no formulário.
+
+**2. Sugestão automática de `identificador_admin` via JS**
+(`_siglas_por_unidade()` no backend, mapa `unidade_id -> sigla_exibicao`
+embutido no template): ao digitar o nome de exibição ou trocar a unidade,
+o campo é preenchido com `"[SIGLA] nome de exibição"` - mas só enquanto o
+operador não editar esse campo à mão (`identificadorEditadoManualmente`,
+JS) e nunca em cima de um Local já existente sendo editado (evita
+sobrescrever um valor real já customizado). Verificado via Chrome headless
+simulando digitação: `"Guichê 05"` → sugestão `"[MAT] Guichê 05"`.
+
+**3. Validação de unicidade com mensagem clara** (`_validar_local()`):
+checagem case-insensitive de `identificador_admin` dentro da mesma empresa
+feita em Python (mesma semântica da collation real `utf8mb4_0900_ai_ci`),
+antes de qualquer INSERT/UPDATE - o erro de integridade do banco nunca
+chega a estourar cru na tela; a `UniqueConstraint` continua como rede de
+segurança.
+
+### Fase 3 - Atualização dos pontos de leitura mapeados na Fase 0
+
+Regra aplicada consistentemente: **contexto paciente/atendente** (painel de
+TV, tela de Atendimento) usa `nome_exibicao`; **contexto administrativo**
+(listagens, Iniciar Turno, rodízio, ocupação, mensagens flash de
+admin/turno) usa `identificador_admin`.
+
+- `nome_exibicao`: `_nome_local()`/`_payload_chamada()`/
+  `historico_chamadas_tv()` (painel de TV, ao vivo e histórico),
+  `_serializar_atendida()`/`_serializar_senha_atual()` (JSON de
+  atendidas/senha atual), cabeçalho "Local" e tabela de atendidas em
+  `painel_fila.html`/`painel_local.html`, flash "Senha X chamada para Y".
+- `identificador_admin`: dropdown "Local" em Iniciar Turno (não remonta
+  mais o prefixo no template - `identificador_admin` já vem pronto),
+  `escolher_local.html` (tela legada equivalente), flash "local já em
+  uso"/"Turno iniciado em"/"Local de atendimento" (`turno.py` e
+  `atendimento/local.py` - mesma tela/fluxo, coerência confirmada pelo
+  cliente), listagem admin de Locais (coluna primária, com
+  `nome_exibicao` como coluna extra de referência - não substitui),
+  formulário admin, tela de ocupação, título de "Configurar rodízio".
+  Ordenação (`order_by`) de todas as queries que alimentam essas telas
+  (`locais_acessiveis()`, `usuarios_ativos_por_local/da_empresa()`,
+  `admin/locais.py::listar_locais`, `admin/helpers.py::locais_da_empresa` -
+  esta última sem chamador hoje, mantida por consistência) passou a
+  acompanhar o mesmo campo exibido em cada tela.
+- **`identificador_admin` puro** (`relatorios/helpers.py::mapas_nomes()`,
+  consumido por `core/routes.py::_ultimos_atendimentos_enriquecidos` e
+  `relatorios/routes.py` - `dashboard`, `tempo_atendimento_view`): a
+  primeira versão combinava `"[fila] · [identificador_admin]"` na mesma
+  célula (motivo original: essas telas podem ser vistas por
+  atendente/executor também, não só admin/gerencial). **Revertido** depois
+  de conferência visual real (screenshot pedido explicitamente pelo
+  cliente antes de fechar o adendo) - as três tabelas (`core/dashboard.html`,
+  `relatorios/dashboard.html`, `relatorios/tempo_atendimento.html`) já têm
+  uma coluna "Fila" própria ao lado, então o formato combinado repetia o
+  nome da fila e quebrava em 2 linhas na maioria das linhas da tabela.
+  Voltou a mostrar só `identificador_admin` na coluna "Local", sem repetir
+  a fila (que já está na coluna vizinha).
+- **Cupom impresso do totem:** removido do escopo - engano do próprio
+  cliente na formulação do pedido original (queria dizer nome da FILA, não
+  `Local.nome`); confirmado que o cupom não referencia `Local` hoje
+  (`Senha.local_id` ainda é `None` no momento da impressão).
+
+**Testes:** os 29 arquivos com `Local(...)` sem os campos novos foram
+corrigidos - cada um recebeu `nome_exibicao`/`identificador_admin`
+computados com a MESMA convenção da produção (`identificador_admin`
+prefixado por `[SIGLA]` quando o teste dependia de multi-unidade/telas
+administrativas), não valores arbitrários - confirmado caso a caso contra
+assertions existentes (ex.: `test_regressao_contexto_multi_unidade.py` já
+esperava `"[MAT] Guiche 01"`/`"[ANE] Guiche 01"` no dropdown de Iniciar
+Turno, o que validou a convenção). Dois arquivos
+(`test_regressao_fase10_3.py`, `test_regressao_local_filas_destino.py`)
+tinham POSTs diretos ao formulário admin usando o campo antigo `nome` -
+atualizados para `nome_exibicao`/`identificador_admin`, com a mensagem de
+erro esperada também atualizada ("Informe o nome de exibição do local").
+Suíte completa (40 arquivos) sem falhas.
+
+**Arquivos alterados:** `app/models/local.py`,
+`migrations/versions/5ba0cdce86cb_*.py`, `app/admin/locais.py`,
+`app/admin/helpers.py`, `app/templates/admin/locais/{form,listar,ocupacao,
+rodizio}.html`, `app/atendimento/{helpers,chamada,turno,local}.py`,
+`app/templates/atendimento/{painel_fila,painel_local,iniciar_turno,
+escolher_local}.html`, `app/relatorios/helpers.py`, `app/relatorios/
+routes.py`, `app/core/routes.py`, 29 arquivos de teste.
+
+**Pendente (fase futura, não nesta sessão):** remover a coluna `nome`
+(legado) de `Local` - só depois de uma janela de confiança em produção com
+os campos novos, seguindo o mesmo princípio já usado para
+`app/totem/impressao.py` (10.28) de não remover código/dado no mesmo
+movimento em que a substituição é introduzida.
+
+---
+
+## 10.33. ADENDO — Fallback de áudio pré-gravado no painel de TV (Web Speech API quebrada em Smart TV)
+
+> **Causa raiz** (confirmada empiricamente, não presumida): no navegador
+> embarcado de uma Smart TV Samsung física, a Web Speech API
+> (`speechSynthesis`) **existe e "finge funcionar"** - aceita
+> `speechSynthesis.speak()`, dispara o evento `onend` sem erro - mas **nenhum
+> som sai**. O mesmo painel fala normalmente em navegador de computador
+> (Chrome/Firefox). Ou seja, o motor de TTS do sistema operacional da TV é
+> não-funcional apesar da API estar presente; não é bug de código nem de
+> escolha de voz (a correção de voz do adendo 10.13 não tem como ajudar).
+
+**Teste de isolamento que fechou o diagnóstico** (antes de decidir a solução):
+adicionado temporariamente um botão que toca um `.wav` estático via `<audio>`/
+`new Audio().play()` comum, **sem tocar em `speechSynthesis`**. Na TV real, o
+beep tocou perfeitamente (confirmado com cliques reais). Conclusão: a saída de
+áudio do navegador funciona; só a Web Speech API está quebrada. Portanto a
+solução é o fallback de áudio pré-gravado já previsto na **seção 6** do
+BLUEPRINT ("fallback para arquivos pré-gravados se a Smart TV não suportar TTS
+bem em PT-BR").
+
+**1. Configuração por TV, não global** (`Tv.usa_audio_pregravado`, boolean,
+default `False` - migration `f01b63e1bf65`, `server_default='0'`): só as TVs
+com o navegador quebrado ligam o fallback; TVs normais continuam no
+`speechSynthesis` **sem nenhuma regressão** (o caminho antigo é intocado, só
+ganhou um desvio no topo de `falarChamada()`). Exposto no cadastro admin de TV
+com um aviso explicando quando marcar.
+
+**2. Áudio montado por concatenação de clipes gravados** (`app/static/audio/`,
+46 arquivos `.wav` versionados no repo, PCM 44100 Hz/16-bit/mono):
+- **Frases fixas:** `frase_atencao_senha` ("Atenção, senha"), `frase_dirija_se`
+  ("Por favor, dirija-se a").
+- **26 letras** (`letra_a`…`letra_z`, alfabeto completo - as 16 usadas hoje
+  + 10 de seguro para siglas futuras) e **10 números** (`numero_0`…`numero_9`,
+  dígito a dígito - "003" vira "zero zero três").
+- **Locais:** um arquivo por nome de exibição distinto, `local_<slug>.wav`.
+- Ordem da chamada de senha: `frase_atencao_senha` → letras/números do código
+  (um clipe por caractere) → `frase_dirija_se` → `local_<slug>`. Cada `<audio>`
+  toca no `ended` do anterior, sem sobreposição
+  (`app/templates/painel/tv.html::falarChamadaPregravada`).
+
+> **⚠️ COMPORTAMENTO ESPERADO, NÃO BUG — chamada por nome no modo
+> pré-gravado NÃO fala o nome do paciente.** Na 2ª etapa da coleta (chamada
+> por nome), o áudio pré-gravado anuncia **apenas** "Por favor, dirija-se a
+> [local]" (`frase_dirija_se` → local), **sem o nome do paciente**. Motivo
+> técnico: o nome do paciente é texto livre arbitrário digitado no totem,
+> impossível de pré-gravar clipe por clipe (diferente do modo
+> `speechSynthesis`, que sintetiza qualquer texto). Isto é a **opção (i)**
+> decidida com o cliente ANTES da implementação, **testada ao vivo na TV
+> real e mantida como está por decisão explícita do cliente**. O paciente se
+> identifica vendo o nome na TELA (que mostra o nome normalmente); só o
+> ÁUDIO omite o nome. **Não tratar como defeito numa sessão futura.** (No
+> modo `speechSynthesis` normal, o nome continua sendo falado como sempre -
+> essa omissão é exclusiva do fallback pré-gravado.)
+
+**3. Slug canônico ÚNICO, no servidor** (`app/utils/slug.py::
+gerar_slug_audio_local`): separador **underscore** (`local_guiche_01.wav`),
+diferente de `gerar_slug_base` que usa hífen para URL. O slug é calculado só no
+Python e enviado PRONTO no payload da chamada (`local_audio_slug`, em
+`_payload_chamada`) - **o JS do painel nunca recalcula slug nenhum**. Decisão
+deliberada: eliminar a divergência entre "o que o cadastro salva" e "o que a TV
+busca no disco" **por construção** (uma implementação só), em vez de manter duas
+e tentar detectá-la por teste. Uma tabela dourada em Python
+(`tests/test_regressao_audio_pregravado.py`) trava o comportamento exato do
+algoritmo (acento, caixa, hífen, espaço, ordinal, vazio).
+
+**4. Rede de segurança para Local sem áudio gravado** (nunca fica mudo):
+- `local_audio_slug` só viaja no payload **quando o arquivo
+  `local_<slug>.wav` existe no disco** (checado no servidor, `os.path.exists`);
+  senão vem `None`. Com `None`, o painel toca `local_generico.wav` ("Por favor,
+  dirija-se ao local indicado no painel") **no lugar do par** `frase_dirija_se`
+  + local (não anexado depois - o genérico já é a frase completa, sem a
+  redundância "dirija-se a … dirija-se ao"). Rede adicional no cliente: se o
+  arquivo do local existir no disco mas falhar ao carregar na TV (`onerror`),
+  cai no genérico também.
+- **Aviso não-bloqueante no cadastro de Local** (Opção A): ao salvar um Local,
+  se `local_<slug>.wav` não existe **E** há ≥1 TV na MESMA unidade com
+  `usa_audio_pregravado` ligado, um flash avisa que aquele local será anunciado
+  com a frase genérica até o arquivo ser adicionado. Sem TV com o fallback
+  naquela unidade, não avisa (evita ruído/falso positivo).
+
+**Não-duplicação preservada (adendo 10.13):** o disparo de áudio continua
+saindo só do evento `chamada` ao vivo (`socket.on("chamada")`), nunca de
+`recarregarHistorico()` (reload/reconexão) - vale para os dois caminhos, já que
+ambos passam pelo mesmo `falarChamada()`. O botão "Tocar" (repetir) continua
+funcionando igual (reusa o mesmo evento `chamada` com `repetir:true`).
+
+**Processo para cadastrar um Local NOVO numa unidade com TV pré-gravada:**
+(a) cadastrar o Local normalmente; (b) gerar/gravar o áudio da pronúncia do
+`nome_exibicao`; (c) nomear `local_<slug>.wav` (o slug é o mesmo mostrado no
+aviso do cadastro) e colocar em `app/static/audio/`; (d) até isso, a TV usa o
+genérico automaticamente - nunca fica muda.
+
+**Áudio gravado:** os 46 clipes foram gravados manualmente pelo cliente (mesma
+voz), entregues a 24000 Hz e **reamostrados para 44100 Hz** (numpy, interpolação
+linear - transparente para voz já limitada a 12 kHz) por 44100 ser a única taxa
+comprovadamente tocável nesta TV (a do beep do teste de isolamento). Originais
+24000 preservados em backup.
+
+**Verificação FINAL na TV real (concluída):** o fallback foi confirmado
+funcionando de ponta a ponta na Smart TV física - a frase concatenada tocou
+**correta e automaticamente, sem gesto do usuário** (a preocupação com autoplay
+de `<audio>` sem interação NÃO se concretizou nesta TV). A chamada por nome no
+modo pré-gravado também foi testada ao vivo e confirmada tocando só o local (sem
+o nome), como esperado. Diagnóstico e desenvolvimento também cobertos por:
+tabela dourada do slug + payload (com/sem arquivo) + render TV com/sem flag +
+genérico + não-duplicação + aviso de cadastro
+(`tests/test_regressao_audio_pregravado.py`, 13 casos); os 7 clipes da sequência
+"EX003 → Guiche 01" decodificam sem erro num engine real (Chrome headless).
+
+**Instrumentação de debug removida após a confirmação:** os vestígios de debug
+usados no diagnóstico foram apagados depois do fallback confirmado na TV - o
+botão/overlay `?debug_audio_html5=1` (teste de isolamento do beep), o overlay
+`?debug_voz=1` (log de voz/sequência) e o arquivo `app/static/audio/debug_beep.wav`.
+O painel voltou ao estado limpo; render revalidado sem erro de JS. Suíte completa
+(41 arquivos) sem falhas após a limpeza.
+
+**Arquivos alterados:** `app/models/tv.py` (+ migration `f01b63e1bf65`),
+`app/utils/slug.py`, `app/atendimento/helpers.py` (`_payload_chamada` +
+`caminho_audio_local`/`_slug_audio_local_se_existe`), `app/admin/tvs.py` +
+`app/templates/admin/tvs/form.html` (campo), `app/admin/locais.py` (aviso),
+`app/templates/painel/tv.html` (concatenação + desvio em `falarChamada`),
+`app/static/audio/` (46 `.wav`). Testes: novo
+`test_regressao_audio_pregravado.py`; 4 testes de payload ajustados para
+ignorar `local_audio_slug` no match (helper `_sem_slug_audio`).
 
 ---
 

@@ -17,8 +17,7 @@
         {% for local in locais %}
           <label class="opcao-radio">
             <input type="radio" name="local_id" value="{{ local.id }}" required>
-            {{ local.nome }}
-            <span class="subtitulo" style="margin:0;">({{ local.unidade.nome }})</span>
+            {{ local.identificador_admin }}
           </label>
         {% endfor %}
 

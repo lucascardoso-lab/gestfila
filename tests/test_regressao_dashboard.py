@@ -209,10 +209,14 @@ with app.app_context():
     assert recursos_a1["tvs_ativas"] == 2
     ok("resumo_recursos escopado só à unidade A1: 3 filas ativas, 2/1 totens, 2 TVs")
 
+    # Alerta "totem_sem_impressora" removido (adendo que substitui a 10.6 -
+    # impressão via window.print(), sem depender mais de nome_impressora_windows
+    # pra funcionar) - totem_sem_impressora (fixture acima) continua existindo
+    # só pra contagem de totens_ativos==2 no assert anterior, não gera mais alerta.
     alertas_a1 = coletar_alertas(recursos_a1["filas"], recursos_a1["totens"], recursos_a1["tvs"])
     tipos_a1 = sorted(a["tipo"] for a in alertas_a1)
-    assert tipos_a1 == ["fila_fora_horario", "fila_sem_tipo_senha", "totem_sem_impressora", "tv_sem_filas"]
-    ok("coletar_alertas (unidade A1): exatamente os 4 tipos esperados, fila/totem inativos não geram alerta")
+    assert tipos_a1 == ["fila_fora_horario", "fila_sem_tipo_senha", "tv_sem_filas"]
+    ok("coletar_alertas (unidade A1): exatamente os 3 tipos esperados (totem sem impressora não alerta mais), fila/totem inativos não geram alerta")
 
     aguardando_a1 = senhas_aguardando_por_fila(empresa_a_db, {ids["unidade_a1"]})
     assert aguardando_a1 == {ids["fila_ok"]: 3}
@@ -224,9 +228,9 @@ with app.app_context():
     assert recursos_a_total["tvs_ativas"] == 2  # inalterado
 
     alertas_total = coletar_alertas(recursos_a_total["filas"], recursos_a_total["totens"], recursos_a_total["tvs"])
-    assert len(alertas_total) == 5  # os 4 de A1 + 'fila_sem_tipo_senha' da Fila Unidade A2
-    ok("Isolamento por unidade confirmado: admin (empresa inteira) vê 4 filas/5 alertas, "
-       "gerencial (só A1) vê 3 filas/4 alertas - a diferença é exatamente a Fila Unidade A2")
+    assert len(alertas_total) == 4  # os 3 de A1 + 'fila_sem_tipo_senha' da Fila Unidade A2
+    ok("Isolamento por unidade confirmado: admin (empresa inteira) vê 4 filas/4 alertas, "
+       "gerencial (só A1) vê 3 filas/3 alertas - a diferença é exatamente a Fila Unidade A2")
 
 # ---------------------------------------------------------------------------
 # 4) Conteúdo renderizado: gerencial (unidade A1) não vê 'Fila Unidade A2'; admin vê.

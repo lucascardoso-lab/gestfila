@@ -33,7 +33,12 @@ def nova_unidade():
             flash("Informe o nome da unidade.", "error")
             return render_template("admin/unidades/form.html", empresa=empresa, unidade=None)
 
-        unidade = Unidade(empresa_id=empresa.id, nome=nome)
+        unidade = Unidade(
+            empresa_id=empresa.id,
+            nome=nome,
+            endereco=request.form.get("endereco", "").strip() or None,
+            telefone=request.form.get("telefone", "").strip() or None,
+        )
         db.session.add(unidade)
         db.session.commit()
         flash(f"Unidade '{unidade.nome}' criada.", "info")
@@ -55,6 +60,8 @@ def editar_unidade(unidade_id):
             return render_template("admin/unidades/form.html", empresa=empresa, unidade=unidade)
 
         unidade.nome = nome
+        unidade.endereco = request.form.get("endereco", "").strip() or None
+        unidade.telefone = request.form.get("telefone", "").strip() or None
         db.session.commit()
         flash("Unidade atualizada.", "info")
         return redirect(url_for("admin.listar_unidades", empresa_id=empresa.id))

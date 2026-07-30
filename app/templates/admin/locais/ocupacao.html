@@ -13,11 +13,11 @@
       {% for item in ativos %}
         <tr>
           <td>{{ item.usuario.nome }}</td>
-          <td>{{ item.local.nome }}</td>
+          <td>{{ item.local.identificador_admin }}</td>
           <td>{{ item.local.unidade.nome }}</td>
           <td>{{ item.desde.strftime('%d/%m/%Y %H:%M') if item.desde else '—' }}</td>
           <td class="acoes">
-            <form class="inline" method="post" action="{{ url_for('admin.desconectar_usuario_local', usuario_id=item.usuario.id) }}" onsubmit="return confirm('Desconectar {{ item.usuario.nome }} do local \'{{ item.local.nome }}\'? Isso libera o local e encerra a sessão de login dele(a) imediatamente.');">
+            <form class="inline" method="post" action="{{ url_for('admin.desconectar_usuario_local', usuario_id=item.usuario.id) }}" onsubmit="return confirm('Desconectar {{ item.usuario.nome }} do local \'{{ item.local.identificador_admin }}\'? Isso libera o local e encerra a sessão de login dele(a) imediatamente.');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="link-perigo" type="submit">Desconectar</button>
             </form>

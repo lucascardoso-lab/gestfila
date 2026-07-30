@@ -138,8 +138,14 @@ with app.app_context():
 
     # ---- Locais: limpo (com usuário "local atual" apontando pra ele - deve limpar
     #      sozinho), bloqueado (senha histórica registrada nele) ----
-    local_limpo = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Local Limpo")
-    local_bloqueado = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Local Bloqueado")
+    local_limpo = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Local Limpo",
+        nome_exibicao="Local Limpo", identificador_admin="[UNI] Local Limpo",
+    )
+    local_bloqueado = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Local Bloqueado",
+        nome_exibicao="Local Bloqueado", identificador_admin="[UNI] Local Bloqueado",
+    )
     db.session.add_all([local_limpo, local_bloqueado])
     db.session.commit()
 

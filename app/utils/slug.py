@@ -33,3 +33,27 @@ def gerar_slug_unico(nome, ja_existe):
     while ja_existe(f"{base}-{n}"):
         n += 1
     return f"{base}-{n}"
+
+
+def gerar_slug_audio_local(nome):
+    """Slug para o nome do arquivo de áudio pré-gravado de um Local
+    (`app/static/audio/local_<slug>.wav`) - fallback de TTS para Smart TVs cujo
+    motor de voz do sistema não funciona (BLUEPRINT.md, adendo do áudio pré-gravado).
+
+    Diferente de `gerar_slug_base` (que usa HÍFEN, para URL): aqui o separador é
+    UNDERSCORE, para casar com a convenção de nome dos arquivos gravados
+    (`local_guiche_01.wav`, `local_recepcao_01.wav`, etc.).
+
+    FONTE ÚNICA DE VERDADE: este slug é calculado só aqui, no servidor, e enviado
+    pronto no payload da chamada (`local_audio_slug`); o JS do painel de TV nunca
+    recalcula slug nenhum - assim não há duas implementações para divergir (a
+    escolha foi eliminar a divergência por construção, não só detectá-la por teste).
+
+    Normalização: minúsculo, sem acento, ordinais º/ª removidos (mesmo motivo de
+    gerar_slug_base), qualquer sequência de não-alfanuméricos vira um único '_',
+    underscores das pontas removidos. Fallback 'local' se sobrar vazio - nunca
+    retorna string vazia."""
+    texto = nome.replace("º", "").replace("ª", "")
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+    texto = re.sub(r"[^a-zA-Z0-9]+", "_", texto).strip("_").lower()
+    return texto or "local"

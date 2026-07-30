@@ -14,9 +14,25 @@ class Local(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     empresa_id = db.Column(db.Integer, db.ForeignKey("empresas.id"), nullable=False)
     unidade_id = db.Column(db.Integer, db.ForeignKey("unidades.id"), nullable=False)
+    # `nome` legado - será removido numa fase posterior, depois que todos os pontos
+    # de leitura migrarem para nome_exibicao/identificador_admin (ver BLUEPRINT.md).
+    # Não usar em código novo.
     nome = db.Column(db.String(150), nullable=False)
+    # Separação nome de exibição / identificador administrativo (BLUEPRINT.md,
+    # mesmo espírito de um cadastro de usuário: nome de exibição vs. login):
+    # - nome_exibicao: mostrado ao paciente/atendente (painel de TV, tela de
+    #   Atendimento) - pode se repetir entre unidades diferentes sem problema.
+    # - identificador_admin: usado só nas telas administrativas (listagens,
+    #   Iniciar Turno, rodízio, ocupação) - único por empresa (não só por
+    #   unidade), convenção "[SIGLA da Unidade] nome_exibicao".
+    nome_exibicao = db.Column(db.String(150), nullable=False)
+    identificador_admin = db.Column(db.String(200), nullable=False)
     tipo = db.Column(db.Enum(*TIPO_LOCAL, name="tipo_local"), nullable=True)
     ativo = db.Column(db.Boolean, default=True, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint("empresa_id", "identificador_admin", name="uq_locais_empresa_identificador_admin"),
+    )
 
     empresa = db.relationship("Empresa")
     unidade = db.relationship("Unidade")

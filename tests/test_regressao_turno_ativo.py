@@ -47,8 +47,14 @@ with app.app_context():
     db.session.add_all([fila_a, fila_b])
     db.session.commit()
 
-    local_1 = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Guiche 01", tipo="recepcao")
-    local_2 = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Guiche 02", tipo="recepcao")
+    local_1 = Local(
+        empresa_id=empresa.id, unidade_id=unidade.id, nome="Guiche 01", tipo="recepcao",
+        nome_exibicao="Guiche 01", identificador_admin="[UNI] Guiche 01",
+    )
+    local_2 = Local(
+        empresa_id=empresa.id, unidade_id=unidade.id, nome="Guiche 02", tipo="recepcao",
+        nome_exibicao="Guiche 02", identificador_admin="[UNI] Guiche 02",
+    )
     db.session.add_all([local_1, local_2])
     db.session.commit()
 

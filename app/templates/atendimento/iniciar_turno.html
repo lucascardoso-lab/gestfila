@@ -35,7 +35,7 @@
           {% for unidade_nome, itens_unidade in locais_json|groupby('unidade') %}
             <optgroup label="{{ unidade_nome|upper }}">
               {% for local in itens_unidade %}
-                <option value="{{ local.id }}" {{ 'selected' if local.id == local_selecionado_id else '' }}>[{{ local.unidade_sigla }}] {{ local.nome }}</option>
+                <option value="{{ local.id }}" {{ 'selected' if local.id == local_selecionado_id else '' }}>{{ local.identificador_admin }}</option>
               {% endfor %}
             </optgroup>
           {% endfor %}

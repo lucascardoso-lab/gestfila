@@ -57,8 +57,14 @@ with app.app_context():
     db.session.add_all([unidade_a1, unidade_a2, unidade_b1])
     db.session.commit()
 
-    local1 = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche 01")
-    local_a2 = Local(empresa_id=empresa_a.id, unidade_id=unidade_a2.id, nome="Guiche A2-01")
+    local1 = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche 01",
+        nome_exibicao="Guiche 01", identificador_admin="[UNI] Guiche 01",
+    )
+    local_a2 = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a2.id, nome="Guiche A2-01",
+        nome_exibicao="Guiche A2-01", identificador_admin="[UNI] Guiche A2-01",
+    )
     db.session.add_all([local1, local_a2])
     db.session.commit()
 

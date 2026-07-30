@@ -58,9 +58,15 @@
 
     #mensagem-vazio { font-size: 1.6rem; color: var(--painel-texto-secundario); text-align: center; margin-top: 3rem; }
 
+    /* Correção: font-size fixo em rem não escala com o tamanho físico da tela
+       (diferente do card "Chamando agora", que usa vw/vh) - numa TV grande de
+       verdade fica ilegível a distância, mesmo proporcional num monitor comum.
+       clamp() com vw traz o mesmo comportamento adaptativo já usado no resto
+       da página. */
     footer {
       display: flex; justify-content: space-between; align-items: center;
-      padding: .75rem 2.5rem; background: var(--painel-fundo-header); font-size: 1rem;
+      padding: .75rem 2.5rem; background: var(--painel-fundo-header);
+      font-size: clamp(1rem, 1.6vw, 1.6rem);
       color: var(--painel-texto-secundario); flex-shrink: 0; border-top: 1px solid var(--painel-fundo-elemento);
     }
     .rodape-mensagem { font-style: italic; }
@@ -146,8 +152,10 @@
     }
     .chamada-atual-valor {
       /* limitado também por vh (não só vw) para não estourar a altura em
-         telas mais baixas/largas (1366x768) - item 9 do pedido. */
-      font-size: clamp(120px, min(14vw, 24vh), 260px);
+         telas mais baixas/largas (1366x768) - item 9 do pedido. Reduzido um
+         pouco (pedido do cliente) pra dar mais equilíbrio visual com
+         "Últimas chamadas", aumentada ao lado. */
+      font-size: clamp(100px, min(12vw, 20vh), 220px);
       font-weight: 800; line-height: 1; margin: 0; color: #fff;
     }
     /* Correção do Problema 2 (chamada por nome): nome de paciente é texto de
@@ -165,7 +173,9 @@
       color: var(--gf-info); margin: 1.5rem 0 .5rem; font-weight: 600;
     }
     .chamada-atual-local {
-      font-size: clamp(60px, min(6vw, 11vh), 130px); font-weight: 700; line-height: 1.1; margin: 0; color: #fff;
+      /* Reduzido na mesma proporção de .chamada-atual-valor acima (pedido do
+         cliente), pra manter o card coerente entre si. */
+      font-size: clamp(50px, min(5vw, 9vh), 110px); font-weight: 700; line-height: 1.1; margin: 0; color: #fff;
     }
 
     /* Correção do Bloco 1.2: com poucos itens, a lista ficava ancorada no
@@ -176,18 +186,21 @@
        acumulada só embaixo. Não adiciona conteúdo novo (isso é o Bloco 3,
        opcional) - só redistribui o espaço que já existe. */
     .ultimas-chamadas { display: flex; flex-direction: column; justify-content: center; height: 100%; min-height: 0; }
+    /* Mesma correção do rodapé acima: rem fixo não escala com o tamanho
+       físico da tela - clamp() com vw traz a lista pro mesmo comportamento
+       adaptativo já usado no card "Chamando agora". */
     .ultimas-chamadas h2 {
-      font-size: 1.2rem; color: var(--painel-texto-secundario); text-transform: uppercase;
+      font-size: clamp(1.3rem, 2.1vw, 2rem); color: var(--painel-texto-secundario); text-transform: uppercase;
       letter-spacing: .05em; margin: 0 0 1rem; font-weight: 600;
     }
     #lista-ultimas { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
     #lista-ultimas li {
       display: flex; justify-content: space-between; align-items: center; gap: 1rem;
       padding: .9rem 1rem; margin-bottom: .6rem; border-radius: 8px;
-      background: var(--painel-fundo-elemento); font-size: 1.3rem;
+      background: var(--painel-fundo-elemento); font-size: clamp(1.5rem, 2.6vw, 2.5rem);
       border-left: 4px solid transparent;
     }
-    #lista-ultimas .item-local { color: var(--painel-texto-secundario); font-size: 1rem; }
+    #lista-ultimas .item-local { color: var(--painel-texto-secundario); font-size: clamp(1.1rem, 1.7vw, 1.7rem); }
     #lista-ultimas .item-valor { font-weight: 700; }
 
     /* Correção do Problema 4: .gf-watermark (gestfila.css) fica fixo no

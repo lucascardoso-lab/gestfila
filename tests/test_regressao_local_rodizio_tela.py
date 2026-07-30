@@ -58,8 +58,14 @@ with app.app_context():
     db.session.add_all([fila_x, fila_y])
     db.session.commit()
 
-    local_com_rodizio = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Local Com Rodizio")
-    local_sem_rodizio = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Local Sem Rodizio")
+    local_com_rodizio = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Local Com Rodizio",
+        nome_exibicao="Local Com Rodizio", identificador_admin="[UNI] Local Com Rodizio",
+    )
+    local_sem_rodizio = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Local Sem Rodizio",
+        nome_exibicao="Local Sem Rodizio", identificador_admin="[UNI] Local Sem Rodizio",
+    )
     db.session.add_all([local_com_rodizio, local_sem_rodizio])
     db.session.commit()
 

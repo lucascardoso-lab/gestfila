@@ -11,7 +11,6 @@ from .helpers import (
     fila_acessivel_ou_404,
     fila_ids_do_local,
     filas_destino,
-    filas_rapidas_redirecionar,
     local_acessivel_ou_404,
     local_atual,
     registrar_chamada_senha,
@@ -61,7 +60,7 @@ def _serializar_atendida(senha):
         "codigo": senha.codigo,
         "tempo_espera_segundos": tempo_espera_segundos,
         "chamada_em": senha.chamada_em.isoformat() if senha.chamada_em else None,
-        "local": senha.local.nome if senha.local else None,
+        "local": senha.local.nome_exibicao if senha.local else None,
     }
 
 
@@ -72,7 +71,7 @@ def _serializar_senha_atual(senha):
         "id": senha.id,
         "codigo": senha.codigo,
         "nome_paciente": senha.nome_paciente,
-        "local": senha.local.nome if senha.local else None,
+        "local": senha.local.nome_exibicao if senha.local else None,
         "chamada_em": senha.chamada_em.isoformat() if senha.chamada_em else None,
     }
 
@@ -128,7 +127,6 @@ def painel_local(setor, local_id):
         local=local,
         senha_atual=senha_atual,
         filas_destino=filas_destino_atual,
-        filas_rapidas=filas_rapidas_redirecionar(local, current_user, filas_destino_atual),
         espera=senhas_aguardando_local(local, current_user),
         atendidas=senhas_atendidas_no_local(local),
         fila_ids=fila_ids_do_local(local, current_user),
@@ -190,7 +188,7 @@ def chamar_local(setor, local_id):
             return redirect(url_for("atendimento.painel_local", setor=setor, local_id=local.id))
 
     registrar_chamada_senha(senha, local, current_user, setor)
-    flash(f"Senha {senha.codigo} chamada para {local.nome}.", "info")
+    flash(f"Senha {senha.codigo} chamada para {local.nome_exibicao}.", "info")
     return redirect(url_for("atendimento.painel_local", setor=setor, local_id=local.id))
 
 
@@ -295,7 +293,6 @@ def painel_fila(setor, fila_id):
         local=local,
         senha_atual=senha_atual,
         filas_destino=filas_destino_atual,
-        filas_rapidas=filas_rapidas_redirecionar(local, current_user, filas_destino_atual),
         espera=senhas_aguardando(fila),
         atendidas=senhas_atendidas_no_local(local, [fila.id]),
     )
@@ -366,7 +363,7 @@ def chamar(setor, fila_id):
             return redirect(url_for("atendimento.painel_fila", setor=setor, fila_id=fila.id))
 
     registrar_chamada_senha(senha, local, current_user, setor)
-    flash(f"Senha {senha.codigo} chamada para {local.nome}.", "info")
+    flash(f"Senha {senha.codigo} chamada para {local.nome_exibicao}.", "info")
     return redirect(url_for("atendimento.painel_fila", setor=setor, fila_id=fila.id))
 
 

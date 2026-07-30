@@ -33,6 +33,13 @@ def ok(msg):
     print("OK:", msg)
 
 
+def _sem_slug_audio(payload):
+    """Ignora local_audio_slug (adendo do áudio pré-gravado) nos asserts de payload
+    deste teste, que são sobre tipo/local/senha - o valor do slug depende de quais
+    .wav estão no repo e é coberto por test_regressao_audio_pregravado.py."""
+    return {k: v for k, v in payload.items() if k != "local_audio_slug"}
+
+
 with app.app_context():
     db.create_all()
 
@@ -116,10 +123,22 @@ with app.app_context():
     # locais (seção 10.3) - cada posto físico cadastrado, escolhido na sessão do
     # operador (não mais texto livre por POST); local_vazio nunca recebe chamada,
     # usado para os testes de "nenhuma senha chamada neste local".
-    local1 = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche 01")
-    local2 = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche 02")
-    local3 = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche 03")
-    local_vazio = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche Vazio")
+    local1 = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche 01",
+        nome_exibicao="Guiche 01", identificador_admin="[UNI] Guiche 01",
+    )
+    local2 = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche 02",
+        nome_exibicao="Guiche 02", identificador_admin="[UNI] Guiche 02",
+    )
+    local3 = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche 03",
+        nome_exibicao="Guiche 03", identificador_admin="[UNI] Guiche 03",
+    )
+    local_vazio = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche Vazio",
+        nome_exibicao="Guiche Vazio", identificador_admin="[UNI] Guiche Vazio",
+    )
     db.session.add_all([local1, local2, local3, local_vazio])
     db.session.commit()
 
@@ -225,7 +244,7 @@ ok("'Chamar' sem código chama a próxima da fila (FIFO) - X001")
 
 recebidos = ws.get_received(NAMESPACE)
 ev_chamada = next(ev for ev in recebidos if ev["name"] == "chamada")
-assert ev_chamada["args"][0] == {"tipo": "senha", "local": "Guiche 01", "senha": "X001"}
+assert _sem_slug_audio(ev_chamada["args"][0]) == {"tipo": "senha", "local": "Guiche 01", "senha": "X001"}
 ev_atualizada = next(ev for ev in recebidos if ev["name"] == "fila_atualizada")
 assert ev_atualizada["args"][0] == {"fila_id": ids["fila_x"]}
 ok("'Chamar' emite 'chamada' (TV) e 'fila_atualizada' (tela) na sala da fila")
@@ -277,7 +296,7 @@ ev_toque = next(ev for ev in recebidos if ev["name"] == "chamada")
 # `repetir: True` (bug corrigido no painel/tv.html - antes ausente): sinaliza que isto
 # NÃO é uma chamada nova, é a mesma sendo reanunciada - sem isso, a TV duplicava a linha
 # na lista e inflava o contador de chamadas a cada "Tocar".
-assert ev_toque["args"][0] == {"tipo": "senha", "local": "Guiche 01", "senha": "X001", "repetir": True}
+assert _sem_slug_audio(ev_toque["args"][0]) == {"tipo": "senha", "local": "Guiche 01", "senha": "X001", "repetir": True}
 assert not any(ev["name"] == "fila_atualizada" for ev in recebidos)
 ok("'Tocar' emite 'chamada' de novo para a TV com repetir=True, e NÃO emite 'fila_atualizada'")
 

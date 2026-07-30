@@ -65,6 +65,9 @@ def dashboard():
     _, _, _, locais = mapas_nomes(empresa)
     for chamada in chamadas:
         chamada["fila"] = filas_nomes.get(chamada["fila_id"], "—")
+        # Só identificador_admin - mesmo motivo do dashboard operacional
+        # (core/routes.py), BLUEPRINT.md seção 10.32: a coluna "Fila" já existe
+        # ao lado, formato combinado descartado após conferência visual real.
         chamada["local"] = locais.get(chamada["local_id"], "—") if chamada["local_id"] else "—"
 
     return render_template(
@@ -117,6 +120,9 @@ def tempo_atendimento_view():
     for linha in linhas:
         linha["fila"] = filas.get(linha["fila_id"], "—")
         linha["operador"] = operadores.get(linha["operador_id"], "—") if linha["operador_id"] else "—"
+        # Só identificador_admin - mesmo motivo do dashboard operacional
+        # (core/routes.py), BLUEPRINT.md seção 10.32: a coluna "Fila" já existe
+        # ao lado, formato combinado descartado após conferência visual real.
         linha["local"] = locais.get(linha["local_id"], "—") if linha["local_id"] else "—"
 
     if request.args.get("formato") in ("csv", "xlsx"):

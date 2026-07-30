@@ -59,8 +59,14 @@ with app.app_context():
     db.session.add_all([fila_coleta, fila_pcd, fila_entrega, fila_consultorio, fila_a2, fila_b])
     db.session.commit()
 
-    local_aberto = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche Aberto")
-    local_restrito = Local(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche Restrito")
+    local_aberto = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche Aberto",
+        nome_exibicao="Guiche Aberto", identificador_admin="[UNI] Guiche Aberto",
+    )
+    local_restrito = Local(
+        empresa_id=empresa_a.id, unidade_id=unidade_a1.id, nome="Guiche Restrito",
+        nome_exibicao="Guiche Restrito", identificador_admin="[UNI] Guiche Restrito",
+    )
     db.session.add_all([local_aberto, local_restrito])
     db.session.commit()
 
@@ -153,7 +159,8 @@ ok("local=None: mesmo comportamento de 'sem configuração' (todas as filas ativ
 resp = c_admin_a.post(
     f"/admin/locais/{ids['local_restrito']}/editar",
     data={
-        "nome": "Guiche Restrito", "unidade_id": ids["unidade_a1"], "tipo": "",
+        "nome_exibicao": "Guiche Restrito", "identificador_admin": "Guiche Restrito",
+        "unidade_id": ids["unidade_a1"], "tipo": "",
         "filas_destino": [str(ids["fila_pcd"]), str(ids["fila_a2"])],
     },
 )
@@ -170,7 +177,8 @@ ok("Admin: configurar fila de outra unidade é rejeitado, configuração origina
 resp = c_admin_a.post(
     f"/admin/locais/{ids['local_aberto']}/editar",
     data={
-        "nome": "Guiche Aberto", "unidade_id": ids["unidade_a1"], "tipo": "",
+        "nome_exibicao": "Guiche Aberto", "identificador_admin": "Guiche Aberto",
+        "unidade_id": ids["unidade_a1"], "tipo": "",
         "filas_destino": [str(ids["fila_pcd"])],
     },
     follow_redirects=True,
@@ -198,7 +206,10 @@ ok("Isolamento: admin de outra empresa recebe 404 ao tentar configurar Local da 
 
 resp = c_admin_b.post(
     f"/admin/locais/{ids['local_restrito']}/editar",
-    data={"nome": "hack", "unidade_id": ids["unidade_a1"], "filas_destino": [str(ids["fila_pcd"])]},
+    data={
+        "nome_exibicao": "hack", "identificador_admin": "hack",
+        "unidade_id": ids["unidade_a1"], "filas_destino": [str(ids["fila_pcd"])],
+    },
 )
 assert resp.status_code == 404
 with app.app_context():

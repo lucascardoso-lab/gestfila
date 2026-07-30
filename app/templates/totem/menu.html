@@ -19,7 +19,18 @@
   <div class="grade">
     {% for item in botoes %}
       {% if item.gera_senha %}
-        <a class="botao-totem" href="{{ url_for('totem.confirmar_geracao', slug=totem.slug, botao_id=item.botao.id) }}">{{ item.botao.label }}</a>
+        {% if item.precisa_escolher_tipo %}
+          {# 2+ tipos ativos na fila - precisa de uma escolha real, não dá pra pular. #}
+          <a class="botao-totem" href="{{ url_for('totem.confirmar_geracao', slug=totem.slug, botao_id=item.botao.id) }}">{{ item.botao.label }}</a>
+        {% else %}
+          {# 0 ou 1 tipo ativo - nada a escolher, gera direto (sem tela de confirmação
+             extra, pedido do cliente) - mesmo POST que a rota de geração já usava. #}
+          <form method="post" action="{{ url_for('totem.gerar_senha', slug=totem.slug, botao_id=item.botao.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% if item.tipo_unico %}<input type="hidden" name="tipo_senha_id" value="{{ item.tipo_unico.id }}">{% endif %}
+            <button type="submit" class="botao-totem">{{ item.botao.label }}</button>
+          </form>
+        {% endif %}
       {% elif item.tem_filhos %}
         <a class="botao-totem navegacao" href="{{ url_for('totem.submenu', slug=totem.slug, botao_id=item.botao.id) }}">{{ item.botao.label }}</a>
       {% else %}

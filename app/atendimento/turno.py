@@ -38,14 +38,17 @@ def _contexto_formulario(filas_selecionadas_iniciais=None, local_selecionado_id=
     locais = locais_acessiveis()
     return {
         # `unidade`/`unidade_sigla` alimentam o <optgroup>/prefixo "[SIGLA] Nome" do
-        # select (UX de contexto multi-unidade) - filas_acessiveis()/locais_acessiveis()
-        # já podem abranger mais de uma unidade quando o operador tem acesso a várias.
+        # select de FILAS (UX de contexto multi-unidade) - filas_acessiveis()
+        # já pode abranger mais de uma unidade quando o operador tem acesso a
+        # várias. O select de LOCAIS usa identificador_admin diretamente (já
+        # vem com o prefixo "[SIGLA] nome" embutido - BLUEPRINT.md, seção
+        # 10.32), sem precisar remontar o prefixo aqui.
         "filas_json": [
             {"id": f.id, "nome": f.nome, "unidade": f.unidade.nome, "unidade_sigla": f.unidade.sigla_exibicao}
             for f in filas
         ],
         "locais_json": [
-            {"id": l.id, "nome": l.nome, "unidade": l.unidade.nome, "unidade_sigla": l.unidade.sigla_exibicao}
+            {"id": l.id, "identificador_admin": l.identificador_admin, "unidade": l.unidade.nome}
             for l in locais
         ],
         "filas_selecionadas_iniciais": filas_selecionadas_iniciais or [],
@@ -116,7 +119,7 @@ def iniciar_turno():
     ocupante = Usuario.query.filter(Usuario.local_atual_id == local.id, Usuario.id != current_user.id).first()
     if ocupante is not None:
         flash(
-            f"O local '{local.nome}' já está em uso por {ocupante.nome}. Peça a um "
+            f"O local '{local.identificador_admin}' já está em uso por {ocupante.nome}. Peça a um "
             "administrador para desconectá-lo (tela de ocupação de locais), ou escolha outro local.",
             "error",
         )
@@ -148,7 +151,7 @@ def iniciar_turno():
     current_user.local_desde = datetime.utcnow()
     db.session.commit()
 
-    flash(f"Turno iniciado em '{local.nome}' com {len(filas_config)} fila(s).", "info")
+    flash(f"Turno iniciado em '{local.identificador_admin}' com {len(filas_config)} fila(s).", "info")
     return redirect(url_for("atendimento.painel_local", setor=_setor_padrao_usuario(), local_id=local.id))
 
 

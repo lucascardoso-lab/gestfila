@@ -14,10 +14,15 @@
 
   <div class="grade">
     {% for tipo in tipos %}
-      <a class="botao-totem" style="{% if tipo.cor %}background:{{ tipo.cor }};color:#fff;{% endif %}"
-         href="{{ url_for('totem.confirmar_geracao', slug=totem.slug, botao_id=botao.id, tipo_senha_id=tipo.id) }}">
-        {{ tipo.nome }}
-      </a>
+      {# escolher o tipo já gera a senha direto (sem tela de confirmação extra,
+         pedido do cliente) - mesmo POST que a rota de geração já usava. #}
+      <form method="post" action="{{ url_for('totem.gerar_senha', slug=totem.slug, botao_id=botao.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="tipo_senha_id" value="{{ tipo.id }}">
+        <button type="submit" class="botao-totem" style="{% if tipo.cor %}background:{{ tipo.cor }};color:#fff;{% endif %}">
+          {{ tipo.nome }}
+        </button>
+      </form>
     {% endfor %}
   </div>
 {% endblock %}

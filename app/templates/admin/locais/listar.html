@@ -11,13 +11,16 @@
     <a class="botao secundario" href="{{ url_for('admin.ocupacao_locais', empresa_id=empresa.id) }}">Ver ocupação atual</a>
   </p>
   <table>
-    <thead><tr><th>Nome</th><th>Unidade</th><th>Tipo</th><th>Status</th><th>Ações</th></tr></thead>
+    {# Identificador (admin) é a coluna primária desta tela - nome de exibição
+       vem como referência extra, não substitui (BLUEPRINT.md, seção 10.32). #}
+    <thead><tr><th>Identificador (admin)</th><th>Nome de exibição</th><th>Unidade</th><th>Tipo</th><th>Status</th><th>Ações</th></tr></thead>
     <tbody>
       {% for local in locais %}
         <tr>
-          <td>{{ local.nome }}</td>
+          <td>{{ local.identificador_admin }}</td>
+          <td>{{ local.nome_exibicao }}</td>
           <td>{{ local.unidade.nome }}</td>
-          <td>{{ {'recepcao': 'Recepção', 'coleta': 'Coleta', 'outro': 'Outro'}.get(local.tipo, '—') }}</td>
+          <td>{{ {'recepcao': 'Atendente', 'coleta': 'Executor', 'outro': 'Outro'}.get(local.tipo, '—') }}</td>
           <td><span class="badge {{ 'ativo' if local.ativo else 'inativo' }}">{{ 'Ativo' if local.ativo else 'Inativo' }}</span></td>
           <td class="acoes">
             <a href="{{ url_for('admin.editar_local', local_id=local.id) }}">Editar</a>
@@ -26,14 +29,14 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="link" type="submit">{{ 'Desativar' if local.ativo else 'Ativar' }}</button>
             </form>
-            <form class="inline" method="post" action="{{ url_for('admin.excluir_local', local_id=local.id) }}" onsubmit="return confirm('Excluir definitivamente o local \'{{ local.nome }}\'? Esta ação não pode ser desfeita.');">
+            <form class="inline" method="post" action="{{ url_for('admin.excluir_local', local_id=local.id) }}" onsubmit="return confirm('Excluir definitivamente o local \'{{ local.identificador_admin }}\'? Esta ação não pode ser desfeita.');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="link-perigo" type="submit">Excluir</button>
             </form>
           </td>
         </tr>
       {% else %}
-        <tr><td colspan="5">Nenhum local cadastrado.</td></tr>
+        <tr><td colspan="6">Nenhum local cadastrado.</td></tr>
       {% endfor %}
     </tbody>
   </table>

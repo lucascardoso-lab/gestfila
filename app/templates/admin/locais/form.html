@@ -10,10 +10,15 @@
     <form method="post">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-      <label for="nome">Nome</label>
-      <input type="text" id="nome" name="nome" maxlength="150"
-             value="{{ valores.nome if valores else (local.nome if local else '') }}"
-             placeholder="ex.: rec1-01, Coleta B 02" required autofocus>
+      {# Campos separados (BLUEPRINT.md, seção 10.32/adendo "Separação nome de
+         exibição / identificador administrativo"): nome_exibicao é o que
+         aparece pro paciente/atendente (painel de TV, tela de Atendimento) -
+         pode repetir entre unidades; identificador_admin é só pra telas
+         administrativas, único por empresa. #}
+      <label for="nome_exibicao">Nome de exibição (aparece para o paciente/TV)</label>
+      <input type="text" id="nome_exibicao" name="nome_exibicao" maxlength="150"
+             value="{{ valores.nome_exibicao if valores else (local.nome_exibicao if local else '') }}"
+             placeholder="ex.: Guichê 01, Coleta B" required autofocus>
 
       <label for="unidade_id">Unidade</label>
       {% set unidade_sel = valores.unidade_id if valores else (local.unidade_id if local else none) %}
@@ -23,12 +28,21 @@
         {% endfor %}
       </select>
 
+      <label for="identificador_admin">Identificador administrativo (único, usado só no cadastro)</label>
+      <p class="subtitulo" style="margin:.35rem 0 .5rem;">Sugerido automaticamente como "[sigla da unidade] nome de exibição" - pode ajustar livremente. Precisa ser único dentro desta empresa (não pode repetir, mesmo em unidades diferentes).</p>
+      <input type="text" id="identificador_admin" name="identificador_admin" maxlength="200"
+             value="{{ valores.identificador_admin if valores else (local.identificador_admin if local else '') }}"
+             placeholder="ex.: [MAT] Guichê 01" required>
+
       <label for="tipo">Tipo (opcional)</label>
       {% set tipo_sel = valores.tipo if valores else (local.tipo if local else none) %}
+      {# Rótulos "Atendente"/"Executor" seguem a nomenclatura de perfis adotada
+         na seção 10.21 do BLUEPRINT - só o texto exibido mudou, os values
+         "recepcao"/"coleta" continuam os mesmos (Local.tipo, sem migration). #}
       <select id="tipo" name="tipo">
         <option value="" {{ 'selected' if not tipo_sel else '' }}>—</option>
-        <option value="recepcao" {{ 'selected' if tipo_sel == 'recepcao' else '' }}>Recepção</option>
-        <option value="coleta" {{ 'selected' if tipo_sel == 'coleta' else '' }}>Coleta</option>
+        <option value="recepcao" {{ 'selected' if tipo_sel == 'recepcao' else '' }}>Atendente</option>
+        <option value="coleta" {{ 'selected' if tipo_sel == 'coleta' else '' }}>Executor</option>
         <option value="outro" {{ 'selected' if tipo_sel == 'outro' else '' }}>Outro</option>
       </select>
 
@@ -48,4 +62,32 @@
       <p><button class="botao" type="submit" style="margin-top:1.5rem;">Salvar</button></p>
     </form>
   </div>
+
+  <script>
+    (function () {
+      const SIGLAS_POR_UNIDADE = {{ unidades_siglas | tojson }};
+      const elNomeExibicao = document.getElementById("nome_exibicao");
+      const elUnidade = document.getElementById("unidade_id");
+      const elIdentificador = document.getElementById("identificador_admin");
+
+      // Só sugere automaticamente enquanto o campo não tiver sido editado à
+      // mão - editar um Local existente (ou reabrir o form após um erro de
+      // validação) já vem com um valor real, que não deve ser sobrescrito
+      // silenciosamente.
+      let identificadorEditadoManualmente = {{ 'true' if (local or valores) else 'false' }};
+
+      function sugerirIdentificador() {
+        if (identificadorEditadoManualmente) return;
+        const sigla = SIGLAS_POR_UNIDADE[elUnidade.value] || "";
+        const nome = elNomeExibicao.value.trim();
+        elIdentificador.value = sigla && nome ? `[${sigla}] ${nome}` : "";
+      }
+
+      elNomeExibicao.addEventListener("input", sugerirIdentificador);
+      elUnidade.addEventListener("change", sugerirIdentificador);
+      elIdentificador.addEventListener("input", () => { identificadorEditadoManualmente = true; });
+
+      if (!identificadorEditadoManualmente) sugerirIdentificador();
+    })();
+  </script>
 {% endblock %}

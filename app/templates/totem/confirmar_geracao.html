@@ -1,13 +1,13 @@
 {% extends "totem/_layout.html" %}
 
-{% block titulo %}Quantidade de acompanhantes - Totem{% endblock %}
+{% block titulo %}Confirmar - Totem{% endblock %}
 
 {% block conteudo %}
   {% set voltar_destino = url_for('totem.submenu', slug=totem.slug, botao_id=botao.parent_id) if botao.parent_id else url_for('totem.tela_raiz', slug=totem.slug) %}
 
   <div class="cartao-modal">
-    <h2>Quantidade de acompanhantes</h2>
-    <p>Toque no número de pessoas que estão lhe acompanhando</p>
+    <h2>Confirmar atendimento</h2>
+    <p>Toque em "Gerar Senha" para continuar</p>
 
     <form method="post" action="{{ url_for('totem.gerar_senha', slug=totem.slug, botao_id=botao.id) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -15,13 +15,6 @@
         <input type="hidden" name="tipo_senha_id" value="{{ tipo_escolhido.id }}">
         <p class="tipo-escolhido" style="{% if tipo_escolhido.cor %}color:{{ tipo_escolhido.cor }};{% endif %}">{{ tipo_escolhido.nome }}</p>
       {% endif %}
-
-      <div class="opcoes-acompanhantes">
-        {% for n in opcoes_acompanhantes %}
-          <input type="radio" id="acomp-{{ n }}" name="qtd_acompanhantes" value="{{ n }}" {{ 'checked' if n == 0 else '' }}>
-          <label for="acomp-{{ n }}">{{ n }}</label>
-        {% endfor %}
-      </div>
 
       <div class="acoes-modal">
         <button type="submit" class="botao-totem" style="min-height:auto; padding:.9rem 1rem;">Gerar Senha</button>
@@ -39,14 +32,6 @@
     .cartao-modal h2 { margin: 0 0 .5rem; font-size: 1.6rem; color: var(--gf-cinza-escuro); }
     .cartao-modal p { color: var(--gf-cinza-medio); margin: 0 0 1.5rem; font-size: 1.1rem; }
     .tipo-escolhido { font-weight: 700; font-size: 1.2rem !important; color: var(--gf-cinza-escuro) !important; }
-    .opcoes-acompanhantes { display: flex; justify-content: center; gap: .6rem; flex-wrap: wrap; margin-bottom: 2rem; }
-    .opcoes-acompanhantes input[type="radio"] { display: none; }
-    .opcoes-acompanhantes label {
-      display: flex; align-items: center; justify-content: center; width: 52px; height: 52px;
-      border-radius: 50%; background: var(--gf-cinza-claro); color: var(--gf-cinza-escuro); font-size: 1.3rem; font-weight: 700;
-      cursor: pointer; border: 2px solid transparent;
-    }
-    .opcoes-acompanhantes input[type="radio"]:checked + label { background: var(--gf-primaria); color: #fff; border-color: var(--gf-primaria-escura); }
     .acoes-modal { display: flex; flex-direction: column; gap: .9rem; align-items: stretch; }
     .acoes-modal .botao-voltar { text-align: center; }
   </style>

@@ -54,12 +54,21 @@ with app.app_context():
     db.session.add(fila_x)
     db.session.commit()
 
-    local_com_rodizio = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Local Com Rodizio")
-    local_sem_rodizio = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Local Sem Rodizio")
+    local_com_rodizio = Local(
+        empresa_id=empresa.id, unidade_id=unidade.id, nome="Local Com Rodizio",
+        nome_exibicao="Local Com Rodizio", identificador_admin="[UNI] Local Com Rodizio",
+    )
+    local_sem_rodizio = Local(
+        empresa_id=empresa.id, unidade_id=unidade.id, nome="Local Sem Rodizio",
+        nome_exibicao="Local Sem Rodizio", identificador_admin="[UNI] Local Sem Rodizio",
+    )
     # local próprio pra coleta_f/gerencial_f (passos 5/6) - não pode ser o mesmo
     # local_com_rodizio que recepcao_f já ocupa nos passos 3/4, já que dois usuários
     # não podem mais ocupar o mesmo Local ao mesmo tempo (ver test_regressao_ocupacao_local.py).
-    local_com_rodizio_2 = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Local Com Rodizio 2")
+    local_com_rodizio_2 = Local(
+        empresa_id=empresa.id, unidade_id=unidade.id, nome="Local Com Rodizio 2",
+        nome_exibicao="Local Com Rodizio 2", identificador_admin="[UNI] Local Com Rodizio 2",
+    )
     db.session.add_all([local_com_rodizio, local_sem_rodizio, local_com_rodizio_2])
     db.session.commit()
 
