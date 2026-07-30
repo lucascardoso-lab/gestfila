@@ -59,6 +59,11 @@ def cancelar_senhas_em_andamento():
 def register_encerramento_middleware(app):
     @app.before_request
     def _encerramento_automatico():
+        # Gate p/ hermeticidade da suíte (config.py): desligado em testing, para
+        # uma rodada depois do horário (ex.: CI em UTC às 23:xx) não cancelar
+        # senhas e derrubar sessões em TODO teste autenticado. Ligado em prod/dev.
+        if not current_app.config.get("ENCERRAMENTO_SESSOES_ATIVO", True):
+            return None
         if datetime.now().time() < _horario_encerramento():
             return None  # ainda não é hora - nenhum custo extra por request
 

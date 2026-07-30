@@ -177,6 +177,10 @@ id_aguardando = nova_senha("FA004", "aguardando")
 #    qualquer hora do dia é >= 00:00) - backend cancela as senhas abertas E
 #    derruba a sessão de quem está numa tela de Atendimento.
 # ===========================================================================
+# Religa o gate (desligado por padrão em TestingConfig p/ hermeticidade da suíte
+# inteira) - aqui é EXATAMENTE o ponto onde queremos o middleware ativo, para
+# exercitar o encerramento de propósito.
+app.config["ENCERRAMENTO_SESSOES_ATIVO"] = True
 app.config["HORARIO_ENCERRAMENTO_SESSOES"] = "00:00"
 
 resp = c.get(URL_FILA, follow_redirects=False)

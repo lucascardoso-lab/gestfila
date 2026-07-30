@@ -47,6 +47,16 @@ class Config:
     HORARIO_ENCERRAMENTO_SESSOES = os.environ.get("HORARIO_ENCERRAMENTO_SESSOES", "23:00")
     AVISO_ENCERRAMENTO_MINUTOS = int(os.environ.get("AVISO_ENCERRAMENTO_MINUTOS", "5"))
 
+    # Liga/desliga o encerramento automático de sessões por horário (seção 10.18).
+    # Existe para deixar a SUÍTE hermética: o middleware compara datetime.now()
+    # local do servidor com HORARIO_ENCERRAMENTO_SESSOES, então uma suíte que
+    # rodasse depois desse horário (ex.: CI em UTC às 23:xx) veria o middleware
+    # cancelar toda senha 'chamada'/'em_atendimento' a cada request e quebraria
+    # todos os fluxos autenticados. Ligado em produção/dev; DESLIGADO em testing
+    # (o teste dedicado test_regressao_encerramento_automatico religa via
+    # app.config para exercitar o comportamento de propósito).
+    ENCERRAMENTO_SESSOES_ATIVO = True
+
 
 class DevelopmentConfig(Config):
     DEBUG = True
@@ -66,6 +76,9 @@ class TestingConfig(Config):
     WTF_CSRF_ENABLED = False
     RATELIMIT_ENABLED = False
     SQLALCHEMY_DATABASE_URI = os.environ.get("TEST_DATABASE_URL", "sqlite:///:memory:")
+    # Suíte hermética: sem isto, uma rodada depois das 23h (ex.: CI em UTC)
+    # dispararia o encerramento automático e quebraria todo fluxo autenticado.
+    ENCERRAMENTO_SESSOES_ATIVO = False
 
 
 config_by_name = {

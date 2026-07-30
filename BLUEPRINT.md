@@ -3011,6 +3011,33 @@ de falha não-fatal que a 10.6/10.28 já garantia.
 
 **Arquivos:** `.github/workflows/tests.yml` (novo), `app/totem/impressao.py`.
 
+**3. A PRIMEIRA execução real do CI já pegou um bug de teste que a suíte
+local escondia (exatamente o motivo de ter CI):** o CI rodou às ~23:16 UTC e
+**dezenas de testes falharam**, embora passassem localmente. Causa raiz: o
+middleware de encerramento automático (10.18) usa `datetime.now()` (hora
+local do servidor) e, passado o `HORARIO_ENCERRAMENTO_SESSOES` (default
+"23:00"), cancela toda senha `chamada`/`em_atendimento` e derruba a sessão
+de atendimento a **cada** request. Rodando depois das 23h (o runner é UTC),
+ele quebrava todo fluxo autenticado. A suíte **não era hermética** quanto ao
+relógio - passava só porque era rodada antes das 23h no fuso local.
+**Correção:** novo gate `ENCERRAMENTO_SESSOES_ATIVO` (`app/config.py`) -
+`True` em prod/dev, `False` em `TestingConfig`; o middleware
+(`app/middleware/encerramento.py`) retorna cedo quando desligado. O teste
+dedicado (`test_regressao_encerramento_automatico`) **religa** o gate no
+ponto exato em que quer exercitar o encerramento. Provado reproduzindo a
+falha localmente com `HORARIO_ENCERRAMENTO_SESSOES=00:00` (toda a suíte quebra
+sem o fix, toda passa com o fix). **Arquivos:** `app/config.py`,
+`app/middleware/encerramento.py`, `tests/test_regressao_encerramento_automatico.py`.
+
+> **⚠️ Observação de PRODUÇÃO revelada por este bug (a confirmar no deploy,
+> não corrigida aqui):** o middleware compara `datetime.now()` - a hora LOCAL
+> do servidor. Se o servidor de produção rodar em **UTC** (default comum de
+> Linux), o encerramento das 23:00 dispararia às 23:00 UTC = **20:00 no
+> horário de Brasília** (UTC-3), três horas cedo demais. O deploy precisa
+> garantir o fuso da clínica (ex.: `TZ=America/Sao_Paulo` / `timedatectl`),
+> ou o encerramento por horário vai disparar na hora errada. Registrado na
+> seção 11 (pontos abertos).
+
 > **Nota menor (mesma rodada de housekeeping):** os ícones da navegação
 > admin (`app/templates/admin/_layout.html`) foram diferenciados - 🏢 Empresas,
 > 🛡 Perfis, 🏥 Unidades - que antes usavam ícones repetidos/genéricos,
@@ -3021,6 +3048,11 @@ de falha não-fatal que a 10.6/10.28 já garantia.
 
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
+- **Fuso horário do servidor de produção** (ver 10.36): o encerramento
+  automático das sessões (10.18) usa `datetime.now()` = hora LOCAL do servidor.
+  O deploy Linux precisa estar no fuso da clínica (`TZ=America/Sao_Paulo`),
+  senão o encerramento das 23:00 dispara na hora errada (3h cedo se o servidor
+  for UTC). Alternativa futura: tornar o cálculo explicitamente ciente de fuso.
 - Impressão física da senha: impressora térmica local no totem (ESC/POS) ou só exibição em tela?
 - Padding numérico definitivo (3 dígitos como `BR009` é fixo ou configurável por serviço?).
 - Texto exato do áudio de chamada (modelo de frase).
