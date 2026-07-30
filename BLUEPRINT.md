@@ -334,6 +334,55 @@ continua sendo o marcador de auditoria do hand-off em si.
 
 ---
 
+## 10.0. ÍNDICE DOS ADENDOS (10.1+)
+
+> Os adendos abaixo registram, em ordem cronológica, cada decisão/mudança
+> feita depois do escopo original (seções 1–10). Um adendo mais novo pode
+> superseder parte de um mais antigo - quando isso acontece, há nota cruzada
+> nos dois. Numeração sequencial, sem lacunas.
+
+| Nº | Título |
+|---|---|
+| 10.1 | Fusão de Serviço em Fila |
+| 10.2 | Tela unificada de Atendimento (chamar/tocar/realocar/finalizar + redirecionamento) |
+| 10.3 | Cadastro de Locais (guichês/postos) |
+| 10.4 | Tipos de senha configuráveis (prefixo/cor/peso) |
+| 10.5 | Navegação multi-nível do totem + quantidade de acompanhantes *(acompanhantes removido, ver 10.34)* |
+| 10.6 | Impressão física via térmica Bematech (ESC/POS) *(supersedida pela 10.28)* |
+| 10.7 | Link direto de acesso público (Totens e TVs) |
+| 10.8 | Rodízio de chamadas por Local (múltiplas filas) |
+| 10.9 | Super admin global criável pelo painel |
+| 10.10 | Busca com autocomplete no bloco Redirecionar |
+| 10.11 | Horário de relógio junto da duração (Atendimento) |
+| 10.12 | Nota operacional — seed de Perfis obrigatório |
+| 10.12.2 | Dashboard operacional pós-login (KPIs, gráfico, filas, últimos atendimentos) |
+| 10.13 | Correções no painel/TV (duplicação, histórico, voz) |
+| 10.14 | Exclusão segura (Excluir) nas telas administrativas |
+| 10.15 | Ocupação de locais (um usuário por Local) + logout remoto |
+| 10.16 | Decisão de UX — botão "Chamar" oculto para perfis operacionais |
+| 10.17 | Bloqueio de chamada sem finalização + recuperação de estado |
+| 10.18 | Encerramento automático das sessões de atendimento (23h) |
+| 10.19 | Tela "Iniciar Turno" (configuração de turno pelo operador) |
+| 10.20 | "Minhas filas" (acesso rápido) no bloco Redirecionar *(removido, ver 10.29)* |
+| 10.21 | Renome dos perfis recepcao/coleta → atendente/executor |
+| 10.22 | UX de contexto multi-unidade no painel admin |
+| 10.23 | "Iniciar Turno" padronizada como tela de todo login |
+| 10.24 | Identidade visual GESTFILA (rebrand completo) |
+| 10.25 | Hardening de segurança (CSRF, rate limit, proxy, páginas de erro) |
+| 10.26 | Redesign do painel de chamada (TV): card central, identidade, animação |
+| 10.27 | Correções pós-homologação do redesign do painel de TV |
+| 10.28 | Impressão do totem via window.print() do navegador *(substitui a 10.6)* |
+| 10.29 | Remoção de "Minhas filas" no bloco Redirecionar *(supersede 10.20)* |
+| 10.30 | Escala responsiva de "Últimas chamadas" e rodapé no painel de TV |
+| 10.31 | Rótulos "Atendente"/"Executor" em `Local.tipo` e telas de setor |
+| 10.32 | Separação `Local.nome` em `nome_exibicao`/`identificador_admin` |
+| 10.33 | Fallback de áudio pré-gravado no painel de TV (Web Speech API quebrada em Smart TV) |
+| 10.34 | Remoção da etapa "Quantidade de acompanhantes" no totem *(supersede parte da 10.5)* |
+| 10.35 | Super admin com senha aleatória + troca obrigatória no 1º login |
+| 10.36 | Integração contínua (GitHub Actions) + compat Linux do `win32print` |
+
+---
+
 ## 10.1. ADENDO — Fusão de Serviço em Fila (decisão pós-Fase 10)
 
 > Decisão tomada após testar o totem na prática: a separação Serviço/Fila criava um
@@ -610,6 +659,11 @@ explicitamente em uma decisão futura própria, com seu próprio adendo:
 ---
 
 ## 10.5. ADENDO — Navegação multi-nível do totem + quantidade de acompanhantes
+
+> **NOTA CRUZADA:** a parte "Quantidade de acompanhantes" desta seção foi
+> **removida** a pedido do cliente - ver **10.34** (a etapa de UI que pedia o
+> número saiu; a coluna `Senha.qtd_acompanhantes` foi mantida, só desativada).
+> O resto desta seção (navegação multi-nível do totem) continua valendo.
 
 > Baseado em mapeamento detalhado da navegação real do sistema de referência
 > (ChameFácil/Prolins), confirmando e expandindo a hierarquia de botões já
@@ -1972,7 +2026,8 @@ recém-chamada) trocado de um vermelho solto (`#9c1f1f`) pra
 none` - nunca compete com a informação real da tela nem intercepta clique/
 toque).
 
-**9. Totem** (`totem/_layout.html` + `totem/confirmar_acompanhantes.html`)
+**9. Totem** (`totem/_layout.html` + `totem/confirmar_acompanhantes.html`,
+depois renomeado para `confirmar_geracao.html` na 10.34)
 — trocado do tema escuro original pro gradiente claro branco→cinza-claro
 pedido. Botões do totem vermelhos com `border-radius: 12px` e sombra leve;
 variante `.navegacao` (submenus) em cinza escuro pra distinguir de "gera
@@ -1992,8 +2047,8 @@ ou lógica de backend tocada):
 `app/templates/atendimento/escolher_local.html`,
 `app/templates/atendimento/_redirecionar_busca.html`,
 `app/templates/relatorios/_layout.html`, `app/templates/totem/_layout.html`,
-`app/templates/totem/confirmar_acompanhantes.html`,
-`app/templates/painel/_layout.html`.
+`app/templates/totem/confirmar_acompanhantes.html` (depois renomeado para
+`confirmar_geracao.html`, 10.34), `app/templates/painel/_layout.html`.
 
 **Confirmação:** suíte completa (40 arquivos de teste, cobrindo rotas,
 formulários, WebSocket/Socket.IO, isolamento multi-tenant, RBAC) revalidada
@@ -2748,6 +2803,28 @@ com um aviso explicando quando marcar.
 > modo `speechSynthesis` normal, o nome continua sendo falado como sempre -
 > essa omissão é exclusiva do fallback pré-gravado.)
 
+**Opções de "humanização" avaliadas e conscientemente DESCARTADAS na Fase 0
+(decisão de não evoluir, não pendência esquecida):** a fala pré-gravada é
+deliberadamente mais "seca"/robótica que uma síntese de voz - duas melhorias
+de naturalidade foram consideradas e recusadas de propósito, cada uma com seu
+motivo:
+- **Números por extenso** ("senha vinte e três" em vez de "dois três"):
+  descartado por exigir ~39 clipes + uma lógica de concatenação frágil
+  (`cem` vs `cento`, o conector "e" nos lugares certos, centenas/dezenas)
+  contra os **10 clipes** (`numero_0`…`numero_9`) e a concatenação trivial do
+  dígito-a-dígito. O código lê "003" como "zero zero três" - menos natural,
+  porém à prova de erro e cobrindo qualquer número (001–999) com 10 arquivos.
+- **Preposição com concordância de gênero** ("dirija-se **ao** guichê" /
+  "dirija-se **à** coleta"): descartado para não ter que gravar as duas
+  variações nem embutir lógica de gênero por local. Mantido o invariável
+  "Por favor, dirija-se a [local]", que **já era** o texto do template de
+  chamada da empresa antes do fallback - consistente com o que a TV já falava
+  no modo `speechSynthesis`.
+
+Se um dia se quiser evoluir a naturalidade, o caminho está registrado aqui -
+mas é uma escolha de produto (mais clipes/lógica em troca de fala mais
+natural), não um bug a corrigir.
+
 **3. Slug canônico ÚNICO, no servidor** (`app/utils/slug.py::
 gerar_slug_audio_local`): separador **underscore** (`local_guiche_01.wav`),
 diferente de `gerar_slug_base` que usa hífen para URL. O slug é calculado só no
@@ -2818,6 +2895,127 @@ O painel voltou ao estado limpo; render revalidado sem erro de JS. Suíte comple
 `app/static/audio/` (46 `.wav`). Testes: novo
 `test_regressao_audio_pregravado.py`; 4 testes de payload ajustados para
 ignorar `local_audio_slug` no match (helper `_sem_slug_audio`).
+
+---
+
+## 10.34. ADENDO — Remoção da etapa "Quantidade de acompanhantes" no totem (supersede parte da 10.5)
+
+> Pedido do cliente: a etapa "Quantidade de acompanhantes" (tela extra no
+> totem antes de emitir a senha, introduzida na 10.5) foi considerada
+> desnecessária no fluxo real e removida - o paciente toca o serviço e a
+> senha sai direto, sem uma pergunta intermediária que ninguém usava.
+
+**1. Fluxo direto (sem tela de confirmação extra):** as folhas do menu do
+totem (`totem/menu.html`) que geram senha agora se comportam assim
+(`_decorar_botoes` calcula `precisa_escolher_tipo`/`tipo_unico` por botão):
+- **0 ou 1 tipo de senha ativo na fila** → o botão é um `<form method="post">`
+  que **POSTa direto** em `totem.gerar_senha` (com o `tipo_senha_id` embutido
+  como hidden quando há exatamente 1 tipo). Nenhuma tela intermediária.
+- **2+ tipos ativos** → ainda precisa de uma escolha real (não dá pra pular),
+  então vai para a tela de escolha de tipo. O mesmo vale para
+  `totem/escolher_tipo.html`, cujos botões de tipo também viraram POST direto
+  em `gerar_senha`.
+
+**2. `confirmar_acompanhantes.html` → `confirmar_geracao.html`:** o template
+da tela de acompanhantes foi **renomeado/repurposado** (git detecta como
+rename ~60%) - deixou de coletar quantidade de acompanhantes e passou a ser
+só a confirmação/escolha de tipo quando ela é necessária (rota
+`totem.confirmar_geracao`, mantida como caminho para o caso de 2+ tipos e
+como fallback defensivo).
+
+**3. Campo/coluna preservados, só a UI saiu** (mesmo princípio de "desativar,
+não apagar" já usado na 10.28/10.32): `Senha.qtd_acompanhantes` (coluna) e
+`QTD_ACOMPANHANTES_MAXIMO` continuam existindo; `gerar_senha()` ainda aceita
+`qtd_acompanhantes` do form (default 0 quando o POST direto não manda nada).
+Nada quebra e a coleta pode ser reativada no futuro sem migration - só a
+etapa de UI que pedia o número foi removida.
+
+**Arquivos alterados:** `app/templates/totem/menu.html`,
+`app/templates/totem/escolher_tipo.html`,
+`app/templates/totem/confirmar_acompanhantes.html` → `confirmar_geracao.html`
+(rename), `app/totem/routes.py` (`_decorar_botoes`, rotas
+`confirmar_geracao`/`gerar_senha`). **Cross-ref:** supersede a parte "Quantidade
+de acompanhantes" da **10.5** (o resto da 10.5 - navegação multi-nível do
+totem - continua valendo).
+
+---
+
+## 10.35. ADENDO — Super admin com senha aleatória + troca obrigatória no 1º login (hardening para publicação no GitHub)
+
+> Contexto: ao preparar o repositório para publicação no GitHub, a senha fixa
+> hardcoded do super admin inicial (`"ChangeMe123!"`) era um risco óbvio - um
+> segredo previsível versionado no código. Trocada por um fluxo seguro por
+> construção.
+
+**1. Senha inicial aleatória** (`seeds/seed_inicial.py`): o super admin
+(`login="superadmin"`) é criado com `secrets.token_urlsafe(12)` - nunca uma
+senha fixa versionada. A senha temporária é **impressa no stdout do seed**
+(uma vez, para o operador do primeiro deploy anotar), nunca gravada em
+arquivo/repo.
+
+**2. Troca obrigatória antes de liberar qualquer tela**
+(`Usuario.deve_trocar_senha`, boolean default `False`; middleware
+`app/middleware/forcar_troca_senha.py`, registrado em `app/__init__.py`): o
+super admin nasce com `deve_trocar_senha=True`. Um `before_request` global
+redireciona **toda** requisição autenticada para `auth.trocar_senha_obrigatoria`
+enquanto a flag estiver ligada - exceto os endpoints estritamente necessários
+(`ENDPOINTS_PERMITIDOS = {trocar_senha_obrigatoria, logout, static}`). Rotas
+públicas (totem/painel de TV, sem login) nunca são afetadas
+(`current_user.is_authenticated` é o primeiro gate). Ao definir a senha nova,
+`auth/routes.py` zera a flag. Resultado: a senha temporária impressa pelo seed
+**não tem como virar credencial permanente** - o sistema bloqueia tudo até a
+troca.
+
+**Arquivos:** `seeds/seed_inicial.py`, `app/models/usuario.py` (coluna
+`deve_trocar_senha`), `app/middleware/forcar_troca_senha.py`,
+`app/__init__.py` (registro), `app/auth/routes.py` +
+`app/templates/auth/trocar_senha_obrigatoria.html`. **Testes:**
+`tests/test_regressao_forcar_troca_senha.py` cobre: seed gera senha aleatória
+(nunca mais `"ChangeMe123!"` - asserção negativa explícita), a flag bloqueia
+telas operacionais/admin e libera só a troca/logout, e a troca zera a flag.
+*(Este trabalho já estava no commit inicial do repositório; o adendo o
+documenta retroativamente, que faltava.)*
+
+---
+
+## 10.36. ADENDO — Integração contínua (GitHub Actions) + compat Linux do `win32print`
+
+> Contexto: com o repositório no GitHub, faltava rodar a suíte
+> automaticamente a cada push (nada garantia que um commit não quebrou os
+> testes), e a suíte nem sequer **importava** num runner Linux por causa de um
+> `import win32print` incondicional.
+
+**1. Workflow de CI** (`.github/workflows/tests.yml`): roda em `push` e
+`pull_request` (qualquer branch - projeto de um contribuidor só, suíte
+rápida). `ubuntu-latest`, Python 3.11, `pip install -r requirements.txt`,
+e roda **cada** `tests/test_regressao_*.py` como script standalone
+(`python -m tests.<modulo>`, mesmo padrão local - não é pytest), agrupando a
+saída por módulo e falhando o job se qualquer um falhar. **Sem MySQL/service
+container:** a suíte sempre usa `create_app("testing")` → `TestingConfig`
+(SQLite em memória) - não é limitação do CI, é como a suíte já roda no dia a
+dia.
+
+**2. `win32print` tolerante a ausência** (`app/totem/impressao.py`): o import
+virou `try: import win32print / except ImportError: win32print = None` no
+nível do módulo. `pywin32` só instala em Windows (`requirements.txt`,
+`sys_platform == "win32"`), mas `impressao.py` é importado por
+`totem/routes.py` → `create_app()`, ou seja, **toda** a aplicação (suíte
+inteira + o deploy real em Linux, seção 10) passa por ele - um import
+incondicional quebraria tudo em qualquer ambiente não-Windows. Mantido como
+**atributo de módulo** (não import local dentro da função) de propósito: os
+testes do mecanismo legado (`test_regressao_fase10_6.py`) fazem
+`patch.object(impressao, "win32print")`, que exige o nome no módulo. O único
+uso real (`enviar_para_impressora_windows`) só roda quando há impressora
+configurada - cenário que já pressupõe Windows - e está dentro do tratamento
+de falha não-fatal que a 10.6/10.28 já garantia.
+
+**Arquivos:** `.github/workflows/tests.yml` (novo), `app/totem/impressao.py`.
+
+> **Nota menor (mesma rodada de housekeeping):** os ícones da navegação
+> admin (`app/templates/admin/_layout.html`) foram diferenciados - 🏢 Empresas,
+> 🛡 Perfis, 🏥 Unidades - que antes usavam ícones repetidos/genéricos,
+> dificultando a distinção rápida no menu. Mudança puramente cosmética, sem
+> impacto de comportamento.
 
 ---
 
