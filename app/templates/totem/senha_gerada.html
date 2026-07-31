@@ -128,17 +128,22 @@
 
     /* Imprime só o cupom - sem cabeçalho do totem, sem os botões, sem o
        watermark GESTFILA (evita o problema de cabeçalho/rodapé do próprio
-       site aparecendo na prévia de impressão do navegador). `size: auto` +
-       margin 0 deixa o navegador usar o tamanho de página já configurado no
-       driver da impressora (Windows) em vez de forçar A4/Carta - importante
-       pras impressoras térmicas estreitas dos totens/estações reais, que têm
-       larguras de mídia variadas.
-       Centralização confiável: `left:0; right:0` estica a caixa de borda a
-       borda da PÁGINA (largura do papel), em vez de `width:100%` num elemento
-       absoluto - que alguns motores de impressão resolvem contra a largura da
-       tela do totem, jogando o conteúdo pra um lado e ocupando só parte do
-       rolo. `text-align:center` + `color:#000` explícitos aqui pra não depender
-       de herança. */
+       site aparecendo na prévia de impressão do navegador).
+
+       LARGURA DE PÁGINA EXPLÍCITA (`@page { size: 80mm auto }`): a versão
+       anterior usava `size: auto`, deixando o DRIVER decidir a largura da
+       página. Na impressão física real isso saiu deslocado à esquerda, com
+       faixa branca à direita - o driver estava usando uma largura de papel
+       MENOR que o rolo físico, então o cupom centralizava numa página estreita
+       e imprimia encostado à esquerda do rolo mais largo. Fixar `80mm` (largura
+       padrão dos rolos térmicos de totem; é a técnica padrão para cupom
+       térmico via navegador) torna a página determinística = a largura do rolo,
+       e aí `left:0; right:0; width:auto; text-align:center` de fato centralizam
+       no papel. SE O ROLO DESTA CLÍNICA NÃO FOR 80mm, trocar o valor aqui pela
+       largura real (ex.: 58mm), e garantir que o tamanho de papel no driver
+       Windows bata com o rolo. (Obs.: o `--print-to-pdf` do Chrome headless
+       IGNORA `@page size` e sempre usa Letter - por isso a validação real é só
+       na impressora física; ver 10.38.) */
     @media print {
       body * { visibility: hidden; }
       .cupom, .cupom * { visibility: visible; }
@@ -147,13 +152,13 @@
         /* width: auto é ESSENCIAL: a regra base tem width:320px (só pra prévia
            na tela); sem resetar aqui, num elemento absoluto o `width` vence e o
            `right:0` é IGNORADO (spec do CSS), deixando o cupom com 320px colado
-           na esquerda e faixa branca à direita no papel. Com width:auto, left:0
-           + right:0 esticam de borda a borda da página = largura do papel. */
+           na esquerda. Com width:auto, left:0 + right:0 esticam de borda a borda
+           da página = largura do papel. */
         width: auto;
         margin: 0; padding: 0; border: none; box-shadow: none;
         text-align: center; color: #000;
       }
-      @page { size: auto; margin: 0; }
+      @page { size: 80mm auto; margin: 0; }
     }
   </style>
 {% endblock %}

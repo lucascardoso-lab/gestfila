@@ -245,6 +245,18 @@ assert "cupom-separador { font-size: .9rem; color: var(--gf-cinza-medio)" not in
 ok("CSS do cupom usa peso bold uniforme (font-weight:700 em .cupom p), sem .cupom-linha normal nem separador cinza")
 
 # ===========================================================================
+# D.4) Largura de PÁGINA explícita no @page (correção do cupom saindo à esquerda
+#      na impressão FÍSICA, mesmo com o cupom centralizado dentro da página): com
+#      `size: auto` o driver da térmica usava uma largura de papel menor que o
+#      rolo, imprimindo o conteúdo encostado à esquerda. `@page { size: 80mm auto }`
+#      torna a página determinística = largura do rolo. Se o rolo desta clínica
+#      não for 80mm, trocar aqui e no CSS juntos.
+# ===========================================================================
+assert "@page { size: 80mm auto" in texto
+assert "size: auto;" not in texto  # não pode voltar pro auto não-determinístico
+ok("CSS @page usa largura de papel explícita (80mm), não 'auto' (que deixava o driver escolher errado)")
+
+# ===========================================================================
 # E) Retorno automático à tela inicial via setTimeout PRÓPRIO (não mais meta
 #    refresh - trocado porque não tinha gancho de JS nenhum), pausado em
 #    beforeprint e retomado em afterprint.

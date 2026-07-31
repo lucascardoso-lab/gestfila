@@ -3128,6 +3128,22 @@ requisito de correção - se a clínica não estiver no horário de Brasília, b
   desalinhamento. (Lição: a simulação anterior "print na tela" falhou por eu ter
   adicionado `width:auto` só nela, mascarando o bug - só o render de impressão de
   verdade pegou.)
+- **3ª rodada - o `width:auto` centralizou no PDF (Letter) mas o físico CONTINUOU
+  à esquerda.** Investigação: (i) confirmado que `--print-to-pdf` **ignora
+  `@page { size }`** e sempre usa Letter 216mm - rendi 3 variantes (`auto`,
+  `80mm`, `58mm`) e todas deram 216mm, então o PDF nunca testou a largura do
+  rolo; (ii) descartado ancestral posicionado/estreito (o `.totem`/`body` são
+  estáticos, então o bloco contêiner do `position:absolute` já é a página).
+  **Causa raiz final:** com `@page { size: auto }`, quem define a largura da
+  página é o driver; se o papel configurado no driver é MENOR que o rolo físico,
+  o cupom centraliza numa página estreita e imprime encostado à esquerda do rolo
+  mais largo → faixa branca à direita. **Correção:** `@page { size: 80mm auto }`
+  explícito (largura padrão de rolo térmico de totem; técnica padrão de cupom
+  térmico via navegador) - a página vira determinística = largura do rolo, e o
+  `left:0/right:0/width:auto/text-align:center` centraliza de fato no papel. **Se
+  o rolo não for 80mm, trocar o valor** no CSS e garantir que o tamanho de papel
+  do driver Windows bata. **Validação:** só na impressora física - o print-to-pdf
+  não serve para `@page size` (pendente de confirmação do cliente no físico).
 
 **2. Causa raiz do contraste** (impressora térmica é 1-bit - ponto preto ou nada):
 só duas linhas eram bold (`.cupom-empresa` 700, `.cupom-codigo` 800); o resto
