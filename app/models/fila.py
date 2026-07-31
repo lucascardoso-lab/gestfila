@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from app.extensions import db
 from .associations import fila_tipos_senha, tv_filas
 
@@ -63,12 +61,16 @@ class Fila(db.Model):
 
         `manhã` = 00:00–11:59:59 e `tarde` = 12:00–23:59:59 (o JSON só guarda
         booleano por período, sem horário exato - meio-dia é o corte mais simples e
-        menos arbitrário dado o que a seção 10.1 especifica). Usa hora local do
-        servidor (não UTC) porque "horário de funcionamento" é inerentemente um
-        conceito de relógio de parede da clínica, não um instante UTC absoluto -
-        assume que o servidor está configurado no fuso horário da clínica.
+        menos arbitrário dado o que a seção 10.1 especifica). "Horário de
+        funcionamento" é um conceito de relógio de parede da clínica, não um
+        instante UTC absoluto - por isso usa a hora no FUSO DA CLÍNICA
+        (`app/utils/tempo.py`, config `FUSO_HORARIO`), resolvida no código e
+        independente do fuso do SO do servidor (ver 10.36). Um `momento` explícito
+        (aware ou naive) passado pelo chamador é respeitado como veio.
         """
-        momento = momento or datetime.now()
+        from app.utils.tempo import agora_na_clinica  # import local: evita ciclo model<->util no import
+
+        momento = momento or agora_na_clinica()
         dia = DIAS_SEMANA[(momento.weekday() + 1) % 7]  # Python: segunda=0 -> nosso índice 1
         periodo = "manha" if momento.hour < 12 else "tarde"
         config_dia = (self.horario_funcionamento or {}).get(dia, {})

@@ -1,9 +1,10 @@
-from datetime import datetime, time as dtime
+from datetime import time as dtime
 
 from flask import current_app, flash, redirect, request, session, url_for
 from flask_login import current_user, logout_user
 
 from app.extensions import db
+from app.utils.tempo import agora_na_clinica
 
 
 def _horario_encerramento():
@@ -64,7 +65,9 @@ def register_encerramento_middleware(app):
         # senhas e derrubar sessões em TODO teste autenticado. Ligado em prod/dev.
         if not current_app.config.get("ENCERRAMENTO_SESSOES_ATIVO", True):
             return None
-        if datetime.now().time() < _horario_encerramento():
+        # hora da CLÍNICA (fuso explícito, app/utils/tempo.py), não a hora do SO -
+        # senão um servidor em UTC encerraria 3h cedo (ver 10.36).
+        if agora_na_clinica().time() < _horario_encerramento():
             return None  # ainda não é hora - nenhum custo extra por request
 
         cancelar_senhas_em_andamento()

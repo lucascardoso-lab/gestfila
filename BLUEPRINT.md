@@ -380,6 +380,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.34 | Remoção da etapa "Quantidade de acompanhantes" no totem *(supersede parte da 10.5)* |
 | 10.35 | Super admin com senha aleatória + troca obrigatória no 1º login |
 | 10.36 | Integração contínua (GitHub Actions) + compat Linux do `win32print` |
+| 10.37 | Fuso da clínica resolvido no código (encerramento/filas corretos em servidor UTC) |
 
 ---
 
@@ -3029,14 +3030,11 @@ falha localmente com `HORARIO_ENCERRAMENTO_SESSOES=00:00` (toda a suíte quebra
 sem o fix, toda passa com o fix). **Arquivos:** `app/config.py`,
 `app/middleware/encerramento.py`, `tests/test_regressao_encerramento_automatico.py`.
 
-> **⚠️ Observação de PRODUÇÃO revelada por este bug (a confirmar no deploy,
-> não corrigida aqui):** o middleware compara `datetime.now()` - a hora LOCAL
-> do servidor. Se o servidor de produção rodar em **UTC** (default comum de
-> Linux), o encerramento das 23:00 dispararia às 23:00 UTC = **20:00 no
-> horário de Brasília** (UTC-3), três horas cedo demais. O deploy precisa
-> garantir o fuso da clínica (ex.: `TZ=America/Sao_Paulo` / `timedatectl`),
-> ou o encerramento por horário vai disparar na hora errada. Registrado na
-> seção 11 (pontos abertos).
+> **⚠️ Observação de PRODUÇÃO revelada por este bug → RESOLVIDA na 10.37:** o
+> middleware comparava `datetime.now()` (hora local do SO). Num servidor UTC,
+> o encerramento das 23:00 dispararia às 20:00 de Brasília. Em vez de depender
+> de config de fuso do SO (frágil), o cálculo passou a resolver o fuso da
+> clínica **no código** - ver **10.37**.
 
 > **Nota menor (mesma rodada de housekeeping):** os ícones da navegação
 > admin (`app/templates/admin/_layout.html`) foram diferenciados - 🏢 Empresas,
@@ -3046,13 +3044,63 @@ sem o fix, toda passa com o fix). **Arquivos:** `app/config.py`,
 
 ---
 
+## 10.37. ADENDO — Fuso da clínica resolvido no código (não no SO do servidor)
+
+> Contexto: a observação da 10.36 (encerramento automático poderia disparar 3h
+> cedo num servidor UTC) é **risco real de comportamento errado em produção**,
+> não dívida cosmética - resolver via configuração de fuso do SO
+> (`TZ=America/Sao_Paulo`) seria frágil: um redeploy ou reconfiguração de
+> infraestrutura pode resetar isso silenciosamente, sem ninguém perceber, e o
+> encerramento (e o horário das filas) passaria a disparar na hora errada sem
+> nenhum erro visível. Por isso o fuso é resolvido **no código**.
+
+**1. Descoberta - o bug estava em DOIS lugares, não um** (ambos usavam
+`datetime.now()`, naive, fuso do SO):
+- `app/middleware/encerramento.py` - o encerramento automático das 23h (10.18).
+- `app/models/fila.py::Fila.aberta_em()` - o horário de funcionamento das filas
+  (10.1), que inclusive **documentava** a suposição ("assume que o servidor está
+  no fuso da clínica"). Num servidor UTC, filas apareceriam abertas/fechadas 3h
+  fora. O deploy real (`deploy/painel-senhas.service`) **não seta `TZ`**, então
+  o app herdaria o fuso do SO - risco não-mitigado até aqui.
+
+**2. Util único de hora de parede** (`app/utils/tempo.py`):
+`agora_na_clinica()` = instante atual convertido para o fuso da clínica
+(config `FUSO_HORARIO`, default `America/Sao_Paulo` - `app/config.py`), via
+`datetime.now(ZoneInfo(...))`, que **expressa o instante corrente no fuso pedido
+independentemente de como o SO está configurado**. `_instante_utc()` é um seam
+separado só para os testes simularem "o relógio do servidor está em tal
+instante UTC". Os dois call-sites (encerramento e `aberta_em`) passaram a usar
+esse util. `tzdata` adicionado ao `requirements.txt` para o `zoneinfo` funcionar
+também em Windows/containers mínimos que não trazem a base IANA do SO.
+
+**3. Teste que trava o cenário real de risco**
+(`tests/test_regressao_fuso_horario.py`): cada caso **simula o relógio do
+servidor em UTC** (patch de `_instante_utc`) e confirma a decisão no horário de
+Brasília - com o código antigo (`datetime.now()` naive num servidor UTC) daria
+o resultado ERRADO, é essa diferença que o teste prende:
+- `agora_na_clinica()`: 02:30 UTC → 23:30 Brasília (UTC-3).
+- `Fila.aberta_em()` (aberta só à tarde): 23:30 Brasília = ABERTA / 10:30
+  Brasília = FECHADA.
+- Encerramento end-to-end com o horário PADRÃO "23:00": **dispara** às 23:30
+  Brasília (servidor 02:30 UTC) e **não** dispara às 22:30 Brasília (01:30 UTC).
+  O código antigo leria 02:30 < 23:00 e não encerraria - os 3h de erro que o
+  teste elimina.
+
+**Arquivos:** `app/utils/tempo.py` (novo), `app/config.py` (`FUSO_HORARIO`),
+`app/middleware/encerramento.py`, `app/models/fila.py`, `requirements.txt`
+(`tzdata`), `.env.example` (documenta `FUSO_HORARIO`); novo
+`tests/test_regressao_fuso_horario.py`. **Deploy:** o `TZ` do SO deixou de ser
+requisito de correção - se a clínica não estiver no horário de Brasília, basta
+`FUSO_HORARIO=<outro fuso IANA>` no `.env`.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
-- **Fuso horário do servidor de produção** (ver 10.36): o encerramento
-  automático das sessões (10.18) usa `datetime.now()` = hora LOCAL do servidor.
-  O deploy Linux precisa estar no fuso da clínica (`TZ=America/Sao_Paulo`),
-  senão o encerramento das 23:00 dispara na hora errada (3h cedo se o servidor
-  for UTC). Alternativa futura: tornar o cálculo explicitamente ciente de fuso.
+- ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da
+  clínica agora é resolvido no código (`app/utils/tempo.py`, config
+  `FUSO_HORARIO`, default Brasília), não depende mais do fuso do SO. Só ajuste
+  `FUSO_HORARIO` no `.env` se a clínica não estiver no horário de Brasília.
 - Impressão física da senha: impressora térmica local no totem (ESC/POS) ou só exibição em tela?
 - Padding numérico definitivo (3 dígitos como `BR009` é fixo ou configurável por serviço?).
 - Texto exato do áudio de chamada (modelo de frase).

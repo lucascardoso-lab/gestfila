@@ -8,6 +8,7 @@ Flask-SocketIO>=5.3,<6.0
 eventlet>=0.35,<1.0
 PyMySQL>=1.1,<2.0
 python-dotenv>=1.0,<2.0
+tzdata>=2024.1
 email-validator>=2.2,<3.0
 pandas>=2.2,<3.0
 openpyxl>=3.1,<4.0

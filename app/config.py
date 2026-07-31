@@ -47,6 +47,12 @@ class Config:
     HORARIO_ENCERRAMENTO_SESSOES = os.environ.get("HORARIO_ENCERRAMENTO_SESSOES", "23:00")
     AVISO_ENCERRAMENTO_MINUTOS = int(os.environ.get("AVISO_ENCERRAMENTO_MINUTOS", "5"))
 
+    # Fuso horário da clínica para decisões de "relógio de parede" (encerramento
+    # 10.18 e horário de funcionamento das filas 10.1) - resolvido no CÓDIGO
+    # (app/utils/tempo.py), NÃO no fuso do SO do servidor. Default explícito para
+    # Brasília; um deploy em UTC continua avaliando esses horários corretamente.
+    FUSO_HORARIO = os.environ.get("FUSO_HORARIO", "America/Sao_Paulo")
+
     # Liga/desliga o encerramento automático de sessões por horário (seção 10.18).
     # Existe para deixar a SUÍTE hermética: o middleware compara datetime.now()
     # local do servidor com HORARIO_ENCERRAMENTO_SESSOES, então uma suíte que
