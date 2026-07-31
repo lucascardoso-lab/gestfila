@@ -208,10 +208,36 @@ assert "@media print" in texto
 # "@media print {" (com a chave) - não a menção à regra dentro do comentário
 # que vem antes explicando o motivo dela existir.
 indice_regra_print = texto.index("@media print {")
-bloco_print = texto[indice_regra_print:indice_regra_print + 400]
+bloco_print = texto[indice_regra_print:indice_regra_print + 500]
 assert "visibility: hidden" in bloco_print
 assert ".cupom" in bloco_print
 ok("CSS @media print presente, isolando o cupom do resto da tela na impressão")
+
+# ===========================================================================
+# D.2) Centralização confiável na impressão (correção do cupom saindo à esquerda,
+#      ocupando só parte do rolo): a regra @media print do .cupom estica de borda
+#      a borda da PÁGINA (`left:0; right:0`, não `width:100%` num absoluto, que
+#      alguns motores resolvem contra a largura da tela) e centraliza o conteúdo.
+# ===========================================================================
+assert "left: 0" in bloco_print and "right: 0" in bloco_print
+assert "text-align: center" in bloco_print
+assert "width: 100%" not in bloco_print  # a causa raiz do desalinhamento - não pode voltar
+ok("CSS @media print centraliza o cupom na largura do papel (left:0/right:0 + text-align:center, sem width:100%)")
+
+# ===========================================================================
+# D.3) Peso de fonte UNIFORME (correção do contraste desigual na térmica): todas
+#      as linhas em bold (font-weight 700), hierarquia só por tamanho; nada de
+#      peso normal ou cor cinza (que saem claros/pontilhados na impressão 1-bit).
+# ===========================================================================
+indice_cupom_css = texto.index(".cupom p {")
+bloco_cupom_css = texto[indice_cupom_css:indice_regra_print]
+assert "font-weight: 700" in bloco_cupom_css  # aplicado a .cupom p (todas as linhas)
+# a classe antiga .cupom-linha (peso normal, usada em endereço/telefone/fila/
+# data-hora) não existe mais - foi substituída por classes bold por tamanho.
+assert "cupom-linha" not in texto
+# separador não usa mais a variável de cinza (que imprimia fraco).
+assert "cupom-separador { font-size: .9rem; color: var(--gf-cinza-medio)" not in texto
+ok("CSS do cupom usa peso bold uniforme (font-weight:700 em .cupom p), sem .cupom-linha normal nem separador cinza")
 
 # ===========================================================================
 # E) Retorno automático à tela inicial via setTimeout PRÓPRIO (não mais meta

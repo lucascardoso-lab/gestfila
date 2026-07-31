@@ -381,6 +381,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.35 | Super admin com senha aleatória + troca obrigatória no 1º login |
 | 10.36 | Integração contínua (GitHub Actions) + compat Linux do `win32print` |
 | 10.37 | Fuso da clínica resolvido no código (encerramento/filas corretos em servidor UTC) |
+| 10.38 | Correção do layout do cupom impresso (centralização + contraste) + procedimento de impressão |
 
 ---
 
@@ -2343,6 +2344,10 @@ pendente de confirmação manual.
 
 ## 10.28. ADENDO — Impressão do totem via window.print() do navegador (substitui a 10.6)
 
+> **NOTA CRUZADA:** o layout do cupom (Fase 2 abaixo) foi corrigido depois, a
+> partir de impressão física real (centralização + contraste + procedimento de
+> impressão do totem) - ver **10.38**.
+
 > Mudança de arquitetura consciente, não uma correção incremental: troca do
 > mecanismo de impressão silenciosa via `win32print`/ESC-POS (adendo 10.6)
 > por impressão via diálogo nativo do navegador (`window.print()`), com
@@ -3092,6 +3097,80 @@ o resultado ERRADO, é essa diferença que o teste prende:
 `tests/test_regressao_fuso_horario.py`. **Deploy:** o `TZ` do SO deixou de ser
 requisito de correção - se a clínica não estiver no horário de Brasília, basta
 `FUSO_HORARIO=<outro fuso IANA>` no `.env`.
+
+---
+
+## 10.38. ADENDO — Correção do layout do cupom impresso (centralização + contraste) e procedimento de impressão
+
+> Reportado a partir de impressão FÍSICA real (não só a prévia em tela): o cupom
+> (10.28, Fase 2) saía **alinhado à esquerda, ocupando menos da metade da largura
+> do rolo**, e com **contraste desigual** entre linhas (algumas nítidas, outras
+> muito claras).
+
+**1. Causa raiz da centralização** (`@media print` de `totem/senha_gerada.html`):
+o cupom era `position: absolute; width: 100%`. Num elemento absoluto, `width:100%`
+é 100% do bloco contêiner - que vários motores de impressão resolvem como a
+**largura da viewport da tela do totem** (~1080px), não a largura do papel. A
+caixa ficava muito mais larga que o rolo e o `text-align:center` centralizava
+dentro dela, jogando o conteúdo pra fora/pro lado. **Correção:** trocar
+`width:100%` por **`left:0; right:0`** (estica de borda a borda da PÁGINA =
+largura do papel, confiável), com `text-align:center` e `color:#000` explícitos
+na regra de impressão.
+
+**2. Causa raiz do contraste** (impressora térmica é 1-bit - ponto preto ou nada):
+só duas linhas eram bold (`.cupom-empresa` 700, `.cupom-codigo` 800); o resto
+(`.cupom-linha`: fila, endereço, telefone, data/hora) era **peso normal (400)** e
+o separador era **cinza `#95A5A6`** - traços finos e cinza saem claros/pontilhados.
+**Correção:** peso **uniforme bold (700)** em todas as linhas (`.cupom p`), com a
+hierarquia vindo **só do tamanho**, nunca do peso, e separador preto. Estrutura
+reordenada pra reforçar a hierarquia: empresa (médio) → fila (menor, MAIÚSCULO)
+→ **código (maior, negrito)** → data/hora + endereço/telefone (rodapé, menor).
+
+**3. Avaliação: dá pra forçar as configs do diálogo de impressão via CSS?**
+(pedido explícito - a alternativa a depender de alguém marcar as opções certas
+toda vez):
+- **Margens: SIM (via CSS).** `@page { margin: 0 }` já torna a margem padrão 0 -
+  o diálogo usa isso por padrão; só uma escolha manual de "margem personalizada"
+  reintroduz margem.
+- **Escala (100% vs "Ajustar à página"): NÃO há CSS que force isso.** Porém, com
+  a correção do item 1, o layout ficou **tolerante a escala**: o cupom ocupa a
+  largura inteira e centraliza independente da escala, então "Ajustar à página"
+  não quebra mais o alinhamento (no máximo muda o tamanho geral, o layout
+  continua certo).
+- **`@page { size }`** foi mantido em `auto` (decisão da 10.28: larguras de rolo
+  incertas entre os totens). Fixar `size: <largura> auto` reduziria ainda mais a
+  dependência do diálogo/driver, mas cravaria uma largura de papel - só vale se a
+  largura real for padronizada/confirmada. Fica registrado como opção futura.
+
+**4. Solução robusta pra ZERO dependência de diálogo (recomendação de deploy do
+totem):** rodar o navegador do totem em **modo kiosk-printing** (Chrome/Edge com
+`--kiosk-printing`): `window.print()` imprime **direto na impressora padrão, sem
+mostrar o diálogo**, usando as configs salvas. Elimina a escolha manual a cada
+impressão - é a forma de não depender de ninguém lembrar das opções nem do
+Windows resetar o padrão numa atualização.
+
+> **⚙️ PROCEDIMENTO DE IMPRESSÃO DO TOTEM (passo obrigatório de deploy - para não
+> virar mistério futuro "por que às vezes o cupom sai errado"):**
+> 1. **Preferencial:** iniciar o navegador do totem com `--kiosk-printing` (ou o
+>    equivalente do navegador embarcado), com a impressora térmica como padrão do
+>    Windows. Sem diálogo, impressão imediata e consistente.
+> 2. **Se NÃO usar kiosk-printing** (diálogo aparece a cada impressão), as opções
+>    obrigatórias no diálogo são: **Impressora = a térmica**, **Margens = Nenhuma**
+>    (ou Padrão, já que o CSS zera com `@page margin:0`), **Escala = 100%** (NUNCA
+>    "Ajustar à página"). Windows pode resetar isso numa atualização - conferir
+>    após updates.
+
+**5. Teste físico:** validado por renderização de impressão real via
+`--print-to-pdf`/emulação de mídia `print` do Chrome (o cupom passou a ocupar a
+largura inteira, centralizado, com todas as linhas bold) - a confirmação final na
+impressora térmica física é do operador, com as opções do procedimento acima.
+Teste de regressão `tests/test_regressao_cupom_impressao_navegador.py` ganhou 2
+casos: centralização (`left:0`/`right:0` + `text-align:center`, e `width:100%`
+proibido de voltar) e peso bold uniforme (sem `.cupom-linha` normal nem separador
+cinza). Suíte completa (42 arquivos) sem falhas.
+
+**Arquivos alterados:** `app/templates/totem/senha_gerada.html`,
+`tests/test_regressao_cupom_impressao_navegador.py`.
 
 ---
 
