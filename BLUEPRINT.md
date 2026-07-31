@@ -3107,15 +3107,27 @@ requisito de correção - se a clínica não estiver no horário de Brasília, b
 > do rolo**, e com **contraste desigual** entre linhas (algumas nítidas, outras
 > muito claras).
 
-**1. Causa raiz da centralização** (`@media print` de `totem/senha_gerada.html`):
-o cupom era `position: absolute; width: 100%`. Num elemento absoluto, `width:100%`
-é 100% do bloco contêiner - que vários motores de impressão resolvem como a
-**largura da viewport da tela do totem** (~1080px), não a largura do papel. A
-caixa ficava muito mais larga que o rolo e o `text-align:center` centralizava
-dentro dela, jogando o conteúdo pra fora/pro lado. **Correção:** trocar
-`width:100%` por **`left:0; right:0`** (estica de borda a borda da PÁGINA =
-largura do papel, confiável), com `text-align:center` e `color:#000` explícitos
-na regra de impressão.
+**1. Causa raiz da centralização** (`@media print` de `totem/senha_gerada.html`)
+- exigiu DUAS rodadas, com um sub-bug de CSS sutil no meio:
+- **1ª tentativa (insuficiente):** trocar `position: absolute; width: 100%` por
+  `left: 0; right: 0`. **Não resolveu na impressão física** - reportado pelo
+  cliente e depois reproduzido aqui.
+- **Sub-bug descoberto (a causa real):** a regra base `.cupom` tem `width: 320px`
+  (só pra prévia na tela). A regra `@media print` definia `left:0; right:0` mas
+  **não resetava o `width`**. Pela spec do CSS, num elemento absoluto com `left`,
+  `right` E `width` todos definidos, o **`right` é IGNORADO** e o elemento fica
+  com `width: 320px` em `left: 0` → bloco de 320px colado na esquerda, faixa
+  branca à direita. **Correção final:** adicionar **`width: auto`** na regra de
+  impressão (com `left:0; right:0; width:auto` o cupom estica de borda a borda da
+  página = largura do papel), com `text-align:center` e `color:#000` explícitos.
+- **Confirmado por render de impressão REAL** (`--print-to-pdf` do Chrome, mesmo
+  motor do físico, renderizado com PyMuPDF): sem `width:auto` o cupom sai a 320px
+  na esquerda (reproduz o físico); com `width:auto` ocupa a largura inteira,
+  centralizado. Isso também **provou que a causa era o CSS, não driver/escala/
+  diálogo** - o print-to-pdf não passa por nenhum deles e reproduziu o mesmo
+  desalinhamento. (Lição: a simulação anterior "print na tela" falhou por eu ter
+  adicionado `width:auto` só nela, mascarando o bug - só o render de impressão de
+  verdade pegou.)
 
 **2. Causa raiz do contraste** (impressora térmica é 1-bit - ponto preto ou nada):
 só duas linhas eram bold (`.cupom-empresa` 700, `.cupom-codigo` 800); o resto
@@ -3160,14 +3172,16 @@ Windows resetar o padrão numa atualização.
 >    "Ajustar à página"). Windows pode resetar isso numa atualização - conferir
 >    após updates.
 
-**5. Teste físico:** validado por renderização de impressão real via
-`--print-to-pdf`/emulação de mídia `print` do Chrome (o cupom passou a ocupar a
-largura inteira, centralizado, com todas as linhas bold) - a confirmação final na
-impressora térmica física é do operador, com as opções do procedimento acima.
-Teste de regressão `tests/test_regressao_cupom_impressao_navegador.py` ganhou 2
-casos: centralização (`left:0`/`right:0` + `text-align:center`, e `width:100%`
-proibido de voltar) e peso bold uniforme (sem `.cupom-linha` normal nem separador
-cinza). Suíte completa (42 arquivos) sem falhas.
+**5. Teste:** o **contraste** foi confirmado na impressora térmica física real
+pelo cliente (todas as linhas nítidas e uniformes). A **centralização** foi
+validada por renderização de impressão real via `--print-to-pdf` do Chrome
+(motor de impressão de verdade), renderizada em imagem com PyMuPDF - o cupom
+passou a ocupar a largura inteira, centralizado. A confirmação final na térmica
+física (com o procedimento de impressão acima) fica com o operador. Teste de
+regressão `tests/test_regressao_cupom_impressao_navegador.py` ganhou 2 casos:
+centralização (exige `left:0`/`right:0` **+ `width:auto`** + `text-align:center`,
+e proíbe `width:100%` de voltar) e peso bold uniforme (sem `.cupom-linha` normal
+nem separador cinza). Suíte completa (42 arquivos) sem falhas.
 
 **Arquivos alterados:** `app/templates/totem/senha_gerada.html`,
 `tests/test_regressao_cupom_impressao_navegador.py`.

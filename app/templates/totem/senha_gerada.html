@@ -144,6 +144,12 @@
       .cupom, .cupom * { visibility: visible; }
       .cupom {
         visibility: visible; position: absolute; top: 0; left: 0; right: 0;
+        /* width: auto é ESSENCIAL: a regra base tem width:320px (só pra prévia
+           na tela); sem resetar aqui, num elemento absoluto o `width` vence e o
+           `right:0` é IGNORADO (spec do CSS), deixando o cupom com 320px colado
+           na esquerda e faixa branca à direita no papel. Com width:auto, left:0
+           + right:0 esticam de borda a borda da página = largura do papel. */
+        width: auto;
         margin: 0; padding: 0; border: none; box-shadow: none;
         text-align: center; color: #000;
       }

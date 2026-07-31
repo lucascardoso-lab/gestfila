@@ -208,7 +208,7 @@ assert "@media print" in texto
 # "@media print {" (com a chave) - não a menção à regra dentro do comentário
 # que vem antes explicando o motivo dela existir.
 indice_regra_print = texto.index("@media print {")
-bloco_print = texto[indice_regra_print:indice_regra_print + 500]
+bloco_print = texto[indice_regra_print:indice_regra_print + 1000]
 assert "visibility: hidden" in bloco_print
 assert ".cupom" in bloco_print
 ok("CSS @media print presente, isolando o cupom do resto da tela na impressão")
@@ -222,7 +222,12 @@ ok("CSS @media print presente, isolando o cupom do resto da tela na impressão")
 assert "left: 0" in bloco_print and "right: 0" in bloco_print
 assert "text-align: center" in bloco_print
 assert "width: 100%" not in bloco_print  # a causa raiz do desalinhamento - não pode voltar
-ok("CSS @media print centraliza o cupom na largura do papel (left:0/right:0 + text-align:center, sem width:100%)")
+# `width: auto;` é ESSENCIAL: sem resetar o width:320px da regra base, num
+# elemento absoluto o `width` vence e o `right:0` é IGNORADO (spec do CSS),
+# deixando o cupom com 320px colado na esquerda. Confirmado por render de
+# impressão real (print-to-pdf) que left:0/right:0 SEM width:auto não centraliza.
+assert "width: auto;" in bloco_print
+ok("CSS @media print centraliza o cupom na largura do papel (left:0/right:0 + width:auto + text-align:center, sem width:100%)")
 
 # ===========================================================================
 # D.3) Peso de fonte UNIFORME (correção do contraste desigual na térmica): todas
