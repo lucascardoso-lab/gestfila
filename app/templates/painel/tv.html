@@ -99,15 +99,31 @@
           .replace(/\{nome\}/g, dados.nome_paciente || "");
       }
 
+      // Chrome carrega a lista de vozes de forma assíncrona - getVoices() pode
+      // devolver [] por um tempo após o load, só populando de fato quando o
+      // evento 'voiceschanged' dispara (Firefox/Edge não têm esse atraso,
+      // devolvem a lista completa desde o primeiro getVoices()). Se uma chamada
+      // chegar nessa janela, vozPtPreferida() não achava nenhuma voz pt e a
+      // fala saía com a voz padrão do Chrome pro idioma do SO (relatado como
+      // "chamando em espanhol", só no Chrome) em vez de degradar/aguardar.
+      // Cache atualizado no 'voiceschanged' resolve a corrida sem mudar a
+      // lógica de pontuação de vozes (validada na seção 10.13).
+      let vozesCache = [];
+      if ("speechSynthesis" in window) {
+        vozesCache = speechSynthesis.getVoices();
+        speechSynthesis.onvoiceschanged = () => {
+          vozesCache = speechSynthesis.getVoices();
+        };
+      }
+
       // Escolhe a melhor voz pt disponível, em vez da primeira que aparecer -
       // vozes "Online"/"Natural"/"Neural" (Edge/Windows mais recente) e vozes
       // "Google" (Chrome) usam síntese muito mais natural que as vozes SAPI
       // locais clássicas do Windows (essas tendem a soar robóticas, era o que
       // estava saindo antes). Dentro de cada nível de qualidade, prefere pt-BR
       // sobre outras variantes de português (pt-PT, pt-AO, etc.).
-      // (mantida sem nenhuma alteração - correção validada na seção 10.13)
       function vozPtPreferida() {
-        const vozes = speechSynthesis.getVoices().filter((v) => v.lang && v.lang.toLowerCase().startsWith("pt"));
+        const vozes = vozesCache.filter((v) => v.lang && v.lang.toLowerCase().startsWith("pt"));
         if (!vozes.length) return null;
 
         function pontuar(v) {
