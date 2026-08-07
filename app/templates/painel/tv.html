@@ -224,14 +224,26 @@
           return; // sem suporte a TTS - degrada graciosamente
         }
 
-        const fala = new SpeechSynthesisUtterance(montarTextoChamada(dados));
         const voz = vozPtPreferida();
-        // usa o idioma da própria voz escolhida - forçar "pt-BR" quando a voz é de
-        // outra variante (ex.: pt-PT) é um descompasso que alguns motores tratam
-        // como erro silencioso; só cai no default quando não há voz pt nenhuma.
-        fala.lang = voz ? voz.lang : "pt-BR";
+        if (!voz) {
+          // Nenhuma voz pt-* instalada neste navegador/SO (ex.: Edge no Windows
+          // usa as vozes OneCore do próprio SO - se só o pacote de voz em
+          // espanhol foi instalado em Configurações > Hora e Idioma > Voz, não
+          // existe voz pt aqui, mesmo com a lista já carregada; diferente do
+          // Chrome, que embute vozes "Google" independentes do SO). Falar mesmo
+          // assim usava a voz padrão do sistema no idioma errado ("chamando em
+          // espanhol"). Preferível não falar a falar errado - a correção real é
+          // instalar a voz Português (Brasil) no SO, ou ligar o fallback de
+          // áudio pré-gravado desta TV (Tv.usa_audio_pregravado) no cadastro.
+          console.warn("GESTFILA: nenhuma voz pt-* disponível neste navegador - chamada não foi falada. " +
+            "Instale a voz Português (Brasil) no sistema operacional ou ligue o áudio pré-gravado desta TV.");
+          return;
+        }
+
+        const fala = new SpeechSynthesisUtterance(montarTextoChamada(dados));
+        fala.lang = voz.lang;
         fala.volume = TV_VOLUME / 100;
-        if (voz) fala.voice = voz;
+        fala.voice = voz;
 
         speechSynthesis.cancel(); // evita empilhar falas se varias chamadas chegarem rapido
         speechSynthesis.speak(fala);
