@@ -2426,7 +2426,14 @@ explícita para o mesmo efeito) - é uma consequência direta de onde a
 prévia/impressão acontece no fluxo (depois, no client-side, não antes).
 Retorno automático à tela inicial (`meta refresh`) mantido, só alongado de
 10s pra 20s - dá espaço real pra abrir e fechar o diálogo nativo de
-impressão antes de a tela trocar sozinha.
+impressão antes de a tela trocar sozinha. **Nota posterior (fora desta
+seção, sem adendo próprio):** o `meta refresh` foi trocado por um
+`setTimeout` próprio em `app/templates/totem/senha_gerada.html`, pausado em
+`beforeprint` e retomado em `afterprint` (`meta refresh` não tem gancho de
+JS nenhum, continuaria contando por baixo do diálogo de impressão). Como o
+diálogo passou a pausar a contagem inteira - os 20s só contam DEPOIS dele
+fechar, nunca durante -, a folga deixou de ser necessária e o valor foi
+reduzido pra 3s, padronizado com o resto do totem.
 
 **Arquivos alterados:** `app/models/unidade.py` (+ migration
 `c53c321f3868`), `app/admin/unidades.py`, `app/templates/admin/unidades/

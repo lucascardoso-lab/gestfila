@@ -39,7 +39,12 @@
   <script>
     (function () {
       var URL_RETORNO = {{ url_for('totem.tela_raiz', slug=totem.slug) | tojson }};
-      var SEGUNDOS_RETORNO = 20;
+      // Padronizado em 3s (era 20s até a 10.28) - o pause/resume em beforeprint/
+      // afterprint (ver abaixo) desacopla o timer da duração do diálogo de
+      // impressão, então não precisa de folga extra pra "dar tempo" do diálogo:
+      // o diálogo pausa o timer inteiro, e os 3s só começam a contar DEPOIS
+      // dele fechar, não durante.
+      var SEGUNDOS_RETORNO = 3;
       // sessionStorage (não localStorage) de propósito: sobrevive a um F5/
       // reconexão de rede na MESMA aba (não reabre o diálogo pra senha já
       // processada), mas não persiste entre sessões/abas novas - cada chave é

@@ -289,6 +289,12 @@ assert 'window.location.href = URL_RETORNO' in corpo_script
 assert "/totem/totem-cupom-sem-endereco" in texto  # URL_RETORNO aponta pro totem certo (Jinja já resolvido)
 ok("Retorno automático via setTimeout próprio (sem <meta refresh>), apontando pro totem certo")
 
+# Valor padronizado em 3s (era 20s até a 10.28) - o pause/resume abaixo
+# desacopla o timer da duração do diálogo, então não precisa mais de folga.
+assert "var SEGUNDOS_RETORNO = 3;" in corpo_script
+assert "var SEGUNDOS_RETORNO = 20;" not in corpo_script  # valor antigo não pode voltar
+ok("SEGUNDOS_RETORNO padronizado em 3 (não mais 20)")
+
 assert 'addEventListener("beforeprint", cancelarRetorno)' in corpo_script
 assert 'addEventListener("afterprint", agendarRetorno)' in corpo_script
 # cancelarRetorno precisa dar clearTimeout de verdade (não só existir de nome).
@@ -296,6 +302,25 @@ bloco_cancelar = corpo_script[corpo_script.index("function cancelarRetorno"):]
 bloco_cancelar = bloco_cancelar[:bloco_cancelar.index("}") + 30]
 assert "clearTimeout(timerRetorno)" in bloco_cancelar
 ok("Timer de retorno é pausado em beforeprint (clearTimeout de verdade) e retomado em afterprint")
+
+# Prova de que reduzir pra 3s é seguro mesmo com o diálogo ficando aberto por
+# MAIS de 3s: sem runtime de navegador neste ambiente (mesma limitação já
+# registrada no docstring deste arquivo), não dá pra literalmente abrir o
+# diálogo, esperar >3s e cronometrar - a prova aqui é estrutural, mas trava a
+# garantia matemática do comportamento: `agendarRetorno()` (chamado em TODA
+# afterprint, inclusive depois de um diálogo demorado) primeiro cancela
+# qualquer timer restante (`cancelarRetorno()`, sem depender de "quanto
+# sobrou") e SÓ DEPOIS agenda um setTimeout novo com a duração CHEIA
+# (`SEGUNDOS_RETORNO * 1000`, não um valor parcial/calculado a partir do
+# tempo decorrido) - ou seja, os 3s sempre recomeçam do zero quando o
+# diálogo fecha, nunca "já tinham estourado" durante a espera, não importa
+# quanto tempo o diálogo ficou aberto.
+bloco_agendar = corpo_script[corpo_script.index("function agendarRetorno"):]
+bloco_agendar = bloco_agendar[:200]  # cobre o corpo inteiro da função (poucas linhas)
+assert "}" in bloco_agendar  # sanity check - função tem fim dentro da janela
+assert bloco_agendar.index("cancelarRetorno()") < bloco_agendar.index("setTimeout(")  # cancela ANTES de reagendar
+assert "SEGUNDOS_RETORNO * 1000" in bloco_agendar  # duração CHEIA, não parcial/restante
+ok("agendarRetorno() sempre cancela e reagenda a duração CHEIA - os 3s recomeçam do zero após o diálogo fechar, não importa quanto tempo ficou aberto")
 
 print()
 print(f"TODOS OS {len(passos)} TESTES DO CUPOM/IMPRESSÃO VIA NAVEGADOR PASSARAM")
