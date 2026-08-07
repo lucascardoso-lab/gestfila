@@ -108,12 +108,31 @@
       // "chamando em espanhol", só no Chrome) em vez de degradar/aguardar.
       // Cache atualizado no 'voiceschanged' resolve a corrida sem mudar a
       // lógica de pontuação de vozes (validada na seção 10.13).
+      //
+      // Bug adicional confirmado em produção: numa aba recém-carregada (F5),
+      // 'voiceschanged' às vezes NUNCA dispara sozinho no Chrome - só depois de
+      // alguma interação que "acorda" o processo de voz (abrir o DevTools foi o
+      // gatilho observado, mas qualquer interação tem o mesmo efeito; bug
+      // conhecido do motor de voz do Chrome, não do nosso código). Sem esse
+      // evento, a chamada ficava muda pra sempre nessa aba (o desvio "sem voz
+      // pt -> não fala" nunca revertia). Poll de segurança: tenta de novo por
+      // alguns segundos após o load, sem depender de nenhuma interação manual.
       let vozesCache = [];
       if ("speechSynthesis" in window) {
-        vozesCache = speechSynthesis.getVoices();
-        speechSynthesis.onvoiceschanged = () => {
+        const atualizarVozesCache = () => {
           vozesCache = speechSynthesis.getVoices();
         };
+        atualizarVozesCache();
+        speechSynthesis.onvoiceschanged = atualizarVozesCache;
+
+        let tentativasPollVozes = 0;
+        const pollVozes = setInterval(() => {
+          atualizarVozesCache();
+          tentativasPollVozes += 1;
+          if (vozesCache.length > 0 || tentativasPollVozes >= 20) {
+            clearInterval(pollVozes); // achou vozes, ou desistiu após ~5s (20 x 250ms)
+          }
+        }, 250);
       }
 
       // Escolhe a melhor voz pt disponível, em vez da primeira que aparecer -
