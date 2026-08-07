@@ -133,6 +133,16 @@
             clearInterval(pollVozes); // achou vozes, ou desistiu após ~5s (20 x 250ms)
           }
         }, 250);
+
+        // Truque empírico (relatado em várias discussões sobre esse bug do
+        // Chrome, sem garantia): falar um utterance silencioso (volume 0) logo
+        // no load parece "acordar" o motor de voz do Chrome pelo mesmo caminho
+        // interno que abrir o DevTools aciona, sem precisar de interação manual
+        // nem do usuário perceber nada (nenhum som sai, volume 0). Não
+        // atrapalha Firefox/Edge, que já funcionam sem isso.
+        const aquecimento = new SpeechSynthesisUtterance(" ");
+        aquecimento.volume = 0;
+        speechSynthesis.speak(aquecimento);
       }
 
       // Escolhe a melhor voz pt disponível, em vez da primeira que aparecer -
