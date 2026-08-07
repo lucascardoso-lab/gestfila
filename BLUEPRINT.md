@@ -382,6 +382,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.36 | Integração contínua (GitHub Actions) + compat Linux do `win32print` |
 | 10.37 | Fuso da clínica resolvido no código (encerramento/filas corretos em servidor UTC) |
 | 10.38 | Correção do layout do cupom impresso (centralização + contraste) + procedimento de impressão |
+| 10.39 | Reset diário do sequencial usava dia civil em UTC, não da clínica (3º call-site do bug da 10.37) |
 
 ---
 
@@ -3201,6 +3202,72 @@ nem separador cinza). Suíte completa (42 arquivos) sem falhas.
 
 **Arquivos alterados:** `app/templates/totem/senha_gerada.html`,
 `tests/test_regressao_cupom_impressao_navegador.py`.
+
+---
+
+## 10.39. ADENDO — Reset diário do sequencial usava dia civil em UTC, não da clínica (3º call-site do bug da 10.37)
+
+> Reportado durante a escrita de testes de regressão para o reset diário do
+> sequencial (seção 8: "Reset de sequencial à meia-noite"): ao simular o
+> relógio do servidor em UTC (mesmo padrão de `test_regressao_fuso_horario.py`,
+> 10.37) para exercitar a virada de dia, o sequencial resetava 3 horas ANTES
+> da meia-noite real de Brasília.
+
+**1. Causa raiz** (`app/totem/routes.py::_emitir_senha`): a query que decide
+se uma senha antiga é "de hoje" (pra saber se o sequencial deve reiniciar,
+`Fila.zera_diariamente`) comparava:
+```python
+func.date(Senha.criada_em) == datetime.utcnow().date()
+```
+Isso **parecia** correto por comparar UTC com UTC (`criada_em` é gravado em
+UTC naive, `datetime.utcnow()` também é UTC) - mas o dia CIVIL que importa
+pro negócio é o da CLÍNICA, não o de UTC. A virada de dia em UTC acontece às
+**21h em Brasília** (UTC-3), 3h antes da meia-noite real. Resultado: toda
+noite, entre 21h e 23:59 (Brasília), a primeira senha gerada depois desse
+horário resetava o sequencial pra 001 - **colidindo com um código já
+impresso/chamado mais cedo no mesmo dia civil**. É a mesma classe de bug que
+a 10.37 corrigiu em `app/middleware/encerramento.py` e
+`app/models/fila.py::aberta_em()` - só que este terceiro call-site escapou
+daquela correção porque a comparação "UTC com UTC" mascarava o problema (não
+tinha o cheiro óbvio de `datetime.now()` naive que os outros dois tinham).
+
+**2. Segundo call-site com o MESMO padrão, encontrado ao investigar:**
+`app/atendimento/helpers.py::historico_chamadas_tv` (10.13, item 2 - histórico
+"de hoje" do painel de TV) já documentava explicitamente "mesma janela usada
+no reset diário do sequencial (totem/routes.py)" - ou seja, replicava o
+mesmo bug por construção deliberada de manter os dois consistentes entre si.
+Corrigir só um dos dois teria consertado um e deixado o painel de TV mostrando
+"hoje" com um recorte diferente do sequencial - por isso os dois foram
+corrigidos juntos, reaproveitando a mesma função.
+
+**3. Correção — janela de datas em UTC, não `func.date()`:** nova função
+`janela_dia_clinica_em_utc(momento_clinica=None)` (`app/utils/tempo.py`, ao
+lado de `agora_na_clinica()`): calcula a meia-noite de "hoje" e "amanhã" no
+fuso da clínica e converte os dois limites pra instantes UTC naive, devolvendo
+`(inicio_utc, fim_utc)`. Os dois call-sites passaram a filtrar por **range**
+(`Senha.criada_em >= inicio_utc, Senha.criada_em < fim_utc` /
+`Senha.chamada_em >= inicio_utc, Senha.chamada_em < fim_utc`), nunca mais por
+igualdade de `.date()` contra `datetime.utcnow().date()`. Comparar por janela
+em vez de igualdade de data evita reintroduzir esta classe de bug numa quarta
+função: qualquer novo código que precisar filtrar "isso é de hoje na clínica"
+sobre uma coluna UTC deve reaproveitar `janela_dia_clinica_em_utc()`, nunca
+comparar `.date()` contra `datetime.utcnow()`/`agora_na_clinica()` diretamente.
+
+**4. Teste que trava o cenário** (`tests/test_regressao_sequencial_diario.py`,
+novo arquivo): simula o relógio do servidor em UTC (mesmo padrão da 10.37) e
+confirma que o sequencial NÃO reseta na faixa 21h-23:59 Brasília (checkpoints
+em 20:00, 21:00, 22:00, 23:00 e 23:59 do mesmo dia civil - com o código antigo,
+o primeiro checkpoint depois das 21h já resetava, o que o teste pega) e reseta
+de verdade só à meia-noite real de Brasília. `tests/test_regressao_tv_historico.py`
+(pré-existente, cobre `historico_chamadas_tv`) segue passando sem alteração,
+confirmando que a troca de implementação não mudou o comportamento observável
+do painel de TV, só corrigiu o limite exato da janela.
+
+**Arquivos alterados:** `app/utils/tempo.py` (nova
+`janela_dia_clinica_em_utc`), `app/totem/routes.py` (`_emitir_senha`),
+`app/atendimento/helpers.py` (`historico_chamadas_tv`); novo
+`tests/test_regressao_sequencial_diario.py`. Suíte completa (46 arquivos) sem
+falhas.
 
 ---
 

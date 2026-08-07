@@ -22,6 +22,10 @@ import os
 os.environ.setdefault("SECRET_KEY", "test")
 os.environ.setdefault("FLASK_ENV", "testing")
 
+from datetime import datetime
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
+
 from app import create_app
 from app.extensions import db
 from app.models import (
@@ -36,6 +40,15 @@ from app.models import (
     Unidade,
     Usuario,
 )
+
+UTC = ZoneInfo("UTC")
+
+
+def servidor_em_utc(ano, mes, dia, hora, minuto):
+    """Mesmo padrão de tests/test_regressao_fuso_horario.py: finge que o relógio
+    do servidor está neste instante UTC (patch de app.utils.tempo._instante_utc,
+    que é o seam usado pelo middleware via agora_na_clinica())."""
+    return patch("app.utils.tempo._instante_utc", return_value=datetime(ano, mes, dia, hora, minuto, tzinfo=UTC))
 
 app = create_app("testing")
 
@@ -246,6 +259,86 @@ ok("Painel de TV continua respondendo normalmente (200) mesmo depois do horário
 resp = c_admin_idem.get("/admin/unidades", follow_redirects=False)
 assert resp.status_code == 200
 ok("Admin continua logado e acessando o painel administrativo, mesmo após o horário de encerramento")
+
+# ===========================================================================
+# G) Multi-tenant: o encerramento roda para TODAS as empresas de uma vez numa
+#    única passada - não é uma ação disparada por-tenant. Uma requisição
+#    (de qualquer empresa) que chega depois do horário deve cancelar senhas
+#    abertas de uma empresa B, mesmo sem ninguém de B ter feito requisição
+#    nenhuma (cancelar_senhas_em_andamento() não filtra por empresa_id).
+# ===========================================================================
+with app.app_context():
+    empresa_b = Empresa(nome="Clinica B")
+    db.session.add(empresa_b)
+    db.session.commit()
+
+    unidade_b = Unidade(empresa_id=empresa_b.id, nome="Unidade B1")
+    db.session.add(unidade_b)
+    db.session.commit()
+
+    fila_b = Fila(empresa_id=empresa_b.id, unidade_id=unidade_b.id, nome="Fila B", sigla="FB")
+    db.session.add(fila_b)
+    db.session.commit()
+
+    senha_b = Senha(
+        empresa_id=empresa_b.id, unidade_id=unidade_b.id, fila_id=fila_b.id,
+        codigo="FB001", sequencial=1, prioridade=False, status="chamada",
+    )
+    db.session.add(senha_b)
+    db.session.commit()
+    id_senha_b = senha_b.id
+
+# nenhum usuário de B fez login/requisição - o gatilho é a próxima requisição
+# de QUALQUER tenant (aqui, o admin da empresa A, já logado) depois do horário.
+resp = c_admin_idem.get("/admin/unidades", follow_redirects=False)
+assert resp.status_code == 200
+with app.app_context():
+    assert db.session.get(Senha, id_senha_b).status == "cancelada"
+ok("Encerramento roda para TODAS as empresas numa única passada - senha 'chamada' da empresa B é cancelada por uma requisição da empresa A")
+
+# ===========================================================================
+# H) Fuso da clínica (BLUEPRINT 10.37) DENTRO deste arquivo de encerramento -
+#    servidor simulado em UTC, horário configurado no valor PADRÃO real
+#    ("23:00", não o "00:00" artificial usado nos blocos C-G). 23:30 Brasília
+#    (02:30 UTC) dispara; 22:30 Brasília (01:30 UTC) não. Mesmo cenário já
+#    coberto em tests/test_regressao_fuso_horario.py - repetido aqui porque
+#    este é o arquivo "dono" da funcionalidade de encerramento.
+# ===========================================================================
+app.config["HORARIO_ENCERRAMENTO_SESSOES"] = "23:00"
+
+with app.app_context():
+    perfil_fuso = Perfil.query.filter_by(nome="atendente").first()
+    u_fuso = Usuario(empresa_id=empresa.id, nome="op_fuso_encerramento", login="op_fuso_encerramento")
+    u_fuso.set_senha("senha123")
+    u_fuso.perfis = [perfil_fuso]
+    u_fuso.unidades = [unidade]
+    db.session.add(u_fuso)
+    db.session.commit()
+
+    senha_h1 = Senha(
+        empresa_id=ids["empresa"], unidade_id=ids["unidade"], fila_id=ids["fila"],
+        codigo="FA010", sequencial=10, prioridade=False, status="chamada",
+        local_id=ids["local"], operador_id=u_fuso.id, setor="recepcao",
+    )
+    db.session.add(senha_h1)
+    db.session.commit()
+    id_senha_h1 = senha_h1.id
+
+c_fuso = login_como("op_fuso_encerramento")
+
+with servidor_em_utc(2026, 6, 15, 1, 30):  # 22:30 Brasília - ANTES das 23:00
+    resp = c_fuso.get(URL_FILA, follow_redirects=False)
+assert resp.status_code == 200
+with app.app_context():
+    assert db.session.get(Senha, id_senha_h1).status == "chamada"
+ok("Fuso (dentro deste arquivo): 22:30 Brasília (servidor 01:30 UTC) NÃO encerra - tela abre normal")
+
+with servidor_em_utc(2026, 6, 15, 2, 30):  # 23:30 Brasília - APÓS as 23:00
+    resp = c_fuso.get(URL_FILA, follow_redirects=False)
+assert resp.status_code == 302 and resp.headers["Location"].startswith("/login")
+with app.app_context():
+    assert db.session.get(Senha, id_senha_h1).status == "cancelada"
+ok("Fuso (dentro deste arquivo): 23:30 Brasília (servidor 02:30 UTC) ENCERRA - redireciona e cancela a senha, sem os 3h de erro do fuso do SO")
 
 print()
 print(f"TODOS OS {len(passos)} TESTES DE ENCERRAMENTO AUTOMATICO DE SESSOES PASSARAM")

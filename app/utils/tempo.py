@@ -12,8 +12,17 @@ sem ninguém perceber), o fuso é resolvido AQUI, no código.
 `datetime.now(tz)` calcula o instante corrente e o expressa em `tz` - o resultado
 é o mesmo independentemente de como o SO está configurado. `_instante_utc()` é um
 seam separado só para os testes conseguirem simular "o relógio do servidor está
-em tal instante" (ver tests/test_regressao_fuso_horario.py)."""
-from datetime import datetime
+em tal instante" (ver tests/test_regressao_fuso_horario.py).
+
+`janela_dia_clinica_em_utc()` (10.39) resolve uma variante do mesmo problema:
+colunas gravadas em UTC "naive" (`Senha.criada_em`/`chamada_em`, seção 8) não
+podem ser comparadas com `func.date(coluna) == datetime.utcnow().date()` para
+decidir "isso é de hoje" - isso compara o dia CIVIL EM UTC, não o dia civil da
+clínica (a virada de dia UTC cai às 21h de Brasília, 3h antes da meia-noite
+real - mesma classe de bug que a 10.36/10.37 corrigiram em outros dois
+call-sites, só que aqui a comparação já "parecia" consistente por comparar UTC
+com UTC, o que escondia o erro)."""
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from flask import current_app, has_app_context
@@ -40,3 +49,21 @@ def agora_na_clinica():
     """Instante atual convertido para o fuso da clínica (aware). Use `.time()`/
     `.hour`/`.weekday()` para as comparações de relógio de parede."""
     return _instante_utc().astimezone(ZoneInfo(_nome_fuso()))
+
+
+def janela_dia_clinica_em_utc(momento_clinica=None):
+    """Início (inclusive) e fim (exclusivo) do dia CIVIL da clínica "agora",
+    como instantes UTC NAIVE - para filtrar colunas gravadas em UTC naive
+    (`Senha.criada_em`/`chamada_em`, default=datetime.utcnow) por "hoje na
+    clínica" com um `BETWEEN`/range, nunca com `func.date(coluna) ==
+    algo.date()` (ver motivação no docstring do módulo, 10.39).
+
+    `momento_clinica` opcional (aware, já no fuso da clínica) permite fixar
+    "hoje" a partir de um instante específico - por padrão usa `agora_na_clinica()`.
+    """
+    momento = momento_clinica or agora_na_clinica()
+    inicio_local = momento.replace(hour=0, minute=0, second=0, microsecond=0)
+    fim_local = inicio_local + timedelta(days=1)
+    inicio_utc = inicio_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    fim_utc = fim_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    return inicio_utc, fim_utc

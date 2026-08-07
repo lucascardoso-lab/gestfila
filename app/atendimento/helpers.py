@@ -8,6 +8,7 @@ from sqlalchemy import func, update
 from app.extensions import db, socketio
 from app.models import Fila, Local, LogAtendimento, Senha, TipoSenha, TurnoAtivo, Usuario
 from app.utils.slug import gerar_slug_audio_local
+from app.utils.tempo import janela_dia_clinica_em_utc
 
 PERFIS_POR_SETOR = {
     "recepcao": ("atendente", "atendente_executor", "admin"),
@@ -539,9 +540,13 @@ def historico_chamadas_tv(tv, limite=8):
     voltava vazia. Usado por `entrar_tv` (app/sockets/painel.py) a cada (re)conexão, então
     também resolve o caso de a TV perder rede por alguns minutos e "pular" chamadas.
 
-    'hoje' = mesma janela usada no reset diário do sequencial (totem/routes.py) - compara
-    a data em UTC, não a data local da clínica, para ficar consistente com o resto do
-    sistema (criada_em/chamada_em são sempre UTC "naive" no banco).
+    'hoje' = mesma janela usada no reset diário do sequencial (totem/routes.py) -
+    o dia CIVIL DA CLÍNICA convertido pra um range em UTC (`janela_dia_clinica_em_
+    utc`, app/utils/tempo.py, 10.39), não `func.date(coluna) == datetime.utcnow().
+    date()` (comparar dia civil em UTC "parece" consistente por comparar UTC com
+    UTC, mas reseta 3h cedo em relação à meia-noite real de Brasília - mesmo bug
+    que a 10.37 corrigiu em encerramento.py/Fila.aberta_em, só que escondido aqui
+    atrás de uma comparação que só parecia certa).
 
     Limitação aceita (mesmo espírito da seção 7 do BLUEPRINT sobre logs_atendimento não
     guardar snapshot por evento): reflete o estado ATUAL de cada Senha, não um retrato de
@@ -552,11 +557,12 @@ def historico_chamadas_tv(tv, limite=8):
     if not fila_ids:
         return [], 0
 
-    hoje = datetime.utcnow().date()
+    inicio_utc, fim_utc = janela_dia_clinica_em_utc()
     consulta = Senha.query.filter(
         Senha.fila_id.in_(fila_ids),
         Senha.chamada_em.isnot(None),
-        func.date(Senha.chamada_em) == hoje,
+        Senha.chamada_em >= inicio_utc,
+        Senha.chamada_em < fim_utc,
     )
     total_hoje = consulta.count()
     recentes = consulta.order_by(Senha.chamada_em.desc()).limit(limite).all()

@@ -1,11 +1,10 @@
-from datetime import datetime
-
 from flask import abort, redirect, render_template, request, url_for
 from sqlalchemy import func, update
 
 from app.atendimento.helpers import emitir_atualizacao_fila
 from app.extensions import db, limiter
 from app.models import Fila, LogAtendimento, Senha, Totem, TotemBotao
+from app.utils.tempo import janela_dia_clinica_em_utc
 
 from . import totem_bp
 
@@ -297,11 +296,17 @@ def _emitir_senha(fila, unidade, tipo_senha=None, qtd_acompanhantes=0):
         Senha.unidade_id == unidade.id,
     )
     if fila.zera_diariamente:
-        # `criada_em` é gravado em UTC (default=datetime.utcnow no model) - comparar com a
-        # data UTC atual, nunca com a data local, para não zerar o sequencial no horário errado
-        # perto da meia-noite.
+        # `criada_em` é gravado em UTC (default=datetime.utcnow no model), mas o
+        # dia que importa pro reset é o dia CIVIL DA CLÍNICA, não o dia civil em
+        # UTC (10.39) - `func.date(criada_em) == datetime.utcnow().date()` parecia
+        # consistente (UTC comparado com UTC) mas reseta o sequencial 3h cedo
+        # (meia-noite UTC = 21h em Brasília, UTC-3). Filtra por uma JANELA
+        # [início, fim) do dia da clínica já convertida pra UTC, em vez de
+        # comparar `.date()` diretamente.
+        inicio_utc, fim_utc = janela_dia_clinica_em_utc()
         consulta_sequencial = consulta_sequencial.filter(
-            func.date(Senha.criada_em) == datetime.utcnow().date()
+            Senha.criada_em >= inicio_utc,
+            Senha.criada_em < fim_utc,
         )
 
     ultimo_sequencial = consulta_sequencial.scalar() or 0
