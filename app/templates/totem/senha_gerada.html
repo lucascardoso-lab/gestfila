@@ -130,21 +130,35 @@
        watermark GESTFILA (evita o problema de cabeçalho/rodapé do próprio
        site aparecendo na prévia de impressão do navegador).
 
-       LARGURA DE PÁGINA EXPLÍCITA (`@page { size: 80mm auto }`): a versão
-       anterior usava `size: auto`, deixando o DRIVER decidir a largura da
-       página. Na impressão física real isso saiu deslocado à esquerda, com
-       faixa branca à direita - o driver estava usando uma largura de papel
-       MENOR que o rolo físico, então o cupom centralizava numa página estreita
-       e imprimia encostado à esquerda do rolo mais largo. Fixar `80mm` (largura
-       padrão dos rolos térmicos de totem; é a técnica padrão para cupom
-       térmico via navegador) torna a página determinística = a largura do rolo,
-       e aí `left:0; right:0; width:auto; text-align:center` de fato centralizam
-       no papel. SE O ROLO DESTA CLÍNICA NÃO FOR 80mm, trocar o valor aqui pela
-       largura real (ex.: 58mm), e garantir que o tamanho de papel no driver
-       Windows bata com o rolo. (Obs.: o `--print-to-pdf` do Chrome headless
-       IGNORA `@page size` e sempre usa Letter - por isso a validação real é só
-       na impressora física; ver 10.38.) */
+       PÁGINA COM TAMANHO TOTALMENTE FIXO (`@page { size: 80mm 70mm }`, 10.40):
+       a etiqueta física usada é de tamanho FIXO (7cm altura x 8cm largura), não
+       um rolo contínuo - a versão anterior (`size: 80mm auto`) fixava a largura
+       mas deixava a ALTURA em "auto", pressupondo rolo contínuo. Validado via
+       --print-to-pdf real (Chrome, mesma técnica da 10.38, PyMuPDF): com altura
+       `auto` a página cai no fallback do motor (Letter, 279mm) - uma página
+       gigante mapeada numa etiqueta física de 7cm é o que provoca o driver
+       inserir espaço/avanço extra antes do conteúdo (faixa branca no topo,
+       reportada em produção). Com as DUAS dimensões fixas, a página sai
+       corretamente em 80x70mm, sem faixa em branco. SE A ETIQUETA/ROLO DESTA
+       CLÍNICA FOR OUTRO TAMANHO, trocar os dois valores aqui (largura E
+       altura) pelo tamanho físico real, e garantir que o tamanho de papel no
+       driver Windows bata com a etiqueta. (Obs.: o `--print-to-pdf` do Chrome
+       headless respeita `@page size` quando as DUAS dimensões são explícitas -
+       só ignora quando alguma fica `auto`, caindo no fallback Letter; ver 10.38
+       pra largura sozinha, 10.40 pra este caso.) */
     @media print {
+      /* Colapsa a altura do que fica escondido (10.40): `body * {visibility:
+         hidden}` abaixo NÃO tira os elementos do fluxo (visibility != display),
+         então o cabeçalho/título/dígitos/botões escondidos continuavam
+         ocupando sua altura normal - com `size: auto` isso nunca estourava uma
+         página (Letter tem 279mm de sobra), mas com a página fixa em 70mm essa
+         altura invisível gerava 3-4 páginas EXTRAS EM BRANCO por senha (um
+         desperdício real de etiquetas numa impressora física). `min-height:0`
+         é necessário porque `.totem` tem `min-height:100vh` na folha base -
+         só `height:0` não venceria o `min-height`. `.cupom` continua vindo
+         via `position:absolute`, então não depende da altura do `.totem`. */
+      html, body { height: 0; overflow: hidden; }
+      .totem { min-height: 0; height: 0; padding: 0; overflow: hidden; }
       body * { visibility: hidden; }
       .cupom, .cupom * { visibility: visible; }
       .cupom {
@@ -158,7 +172,7 @@
         margin: 0; padding: 0; border: none; box-shadow: none;
         text-align: center; color: #000;
       }
-      @page { size: 80mm auto; margin: 0; }
+      @page { size: 80mm 70mm; margin: 0; }
     }
   </style>
 {% endblock %}

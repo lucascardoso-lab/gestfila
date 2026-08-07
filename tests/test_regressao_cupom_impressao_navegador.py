@@ -208,7 +208,11 @@ assert "@media print" in texto
 # "@media print {" (com a chave) - não a menção à regra dentro do comentário
 # que vem antes explicando o motivo dela existir.
 indice_regra_print = texto.index("@media print {")
-bloco_print = texto[indice_regra_print:indice_regra_print + 1000]
+# janela alargada na 10.40 (2000, era 1000) - o bloco @media print ganhou as
+# regras de colapso de altura (html/body/.totem) ANTES da regra .cupom, então
+# uma janela mais curta deixava de pegar "left: 0"/"right: 0" (que agora vêm
+# mais adiante no texto).
+bloco_print = texto[indice_regra_print:indice_regra_print + 2000]
 assert "visibility: hidden" in bloco_print
 assert ".cupom" in bloco_print
 ok("CSS @media print presente, isolando o cupom do resto da tela na impressão")
@@ -245,16 +249,33 @@ assert "cupom-separador { font-size: .9rem; color: var(--gf-cinza-medio)" not in
 ok("CSS do cupom usa peso bold uniforme (font-weight:700 em .cupom p), sem .cupom-linha normal nem separador cinza")
 
 # ===========================================================================
-# D.4) Largura de PÁGINA explícita no @page (correção do cupom saindo à esquerda
-#      na impressão FÍSICA, mesmo com o cupom centralizado dentro da página): com
-#      `size: auto` o driver da térmica usava uma largura de papel menor que o
-#      rolo, imprimindo o conteúdo encostado à esquerda. `@page { size: 80mm auto }`
-#      torna a página determinística = largura do rolo. Se o rolo desta clínica
-#      não for 80mm, trocar aqui e no CSS juntos.
+# D.4) Página com tamanho TOTALMENTE fixo no @page (10.40, supersede a largura-
+#      só-explícita da 10.38): a etiqueta física é de tamanho FIXO (7x8cm), não
+#      rolo contínuo - `size: 80mm auto` fixava a largura mas deixava a ALTURA
+#      em auto, que o motor de impressão resolve como Letter (279mm, validado
+#      via --print-to-pdf real) - uma página gigante mapeada numa etiqueta de
+#      7cm é o que provocava a faixa em branco no topo na impressão física.
+#      Com as DUAS dimensões fixas (`80mm 70mm`), a página sai determinística
+#      e do tamanho exato da etiqueta. Se a etiqueta desta clínica for outro
+#      tamanho, trocar largura E altura aqui e no CSS juntos.
 # ===========================================================================
-assert "@page { size: 80mm auto" in texto
+assert "@page { size: 80mm 70mm" in texto
+assert "@page { size: 80mm auto" not in texto  # decisão da 10.38 superseded pela 10.40 - não pode voltar
 assert "size: auto;" not in texto  # não pode voltar pro auto não-determinístico
-ok("CSS @page usa largura de papel explícita (80mm), não 'auto' (que deixava o driver escolher errado)")
+ok("CSS @page usa tamanho de página totalmente fixo (80mm x 70mm, largura E altura), não 'auto' na altura (10.40)")
+
+# ===========================================================================
+# D.5) Colapso de altura do conteúdo escondido (10.40): `visibility:hidden`
+#      (usado pra isolar o cupom) NÃO tira os elementos do fluxo - sem isso, o
+#      cabeçalho/título/dígitos/botões escondidos continuavam ocupando altura
+#      normal, e com a página fixa em 70mm (D.4) isso gerava 3-4 páginas EXTRAS
+#      EM BRANCO por impressão (desperdício real de etiqueta física). `.totem`
+#      precisa de `min-height: 0` explícito - só `height: 0` não venceria o
+#      `min-height: 100vh` da folha de estilo base (_layout.html).
+# ===========================================================================
+assert "html, body { height: 0; overflow: hidden; }" in bloco_print
+assert ".totem { min-height: 0; height: 0;" in bloco_print
+ok("CSS @media print colapsa a altura do conteúdo escondido (html/body/.totem), evitando páginas extras em branco (10.40)")
 
 # ===========================================================================
 # E) Retorno automático à tela inicial via setTimeout PRÓPRIO (não mais meta

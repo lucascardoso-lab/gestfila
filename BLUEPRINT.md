@@ -383,6 +383,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.37 | Fuso da clínica resolvido no código (encerramento/filas corretos em servidor UTC) |
 | 10.38 | Correção do layout do cupom impresso (centralização + contraste) + procedimento de impressão |
 | 10.39 | Reset diário do sequencial usava dia civil em UTC, não da clínica (3º call-site do bug da 10.37) |
+| 10.40 | Etiqueta física de tamanho fixo (7x8cm): `@page` altura auto + páginas extras em branco |
 
 ---
 
@@ -3268,6 +3269,93 @@ do painel de TV, só corrigiu o limite exato da janela.
 `app/atendimento/helpers.py` (`historico_chamadas_tv`); novo
 `tests/test_regressao_sequencial_diario.py`. Suíte completa (46 arquivos) sem
 falhas.
+
+---
+
+## 10.40. ADENDO — Etiqueta física de tamanho FIXO (7x8cm, não rolo contínuo): faixa em branco no topo + páginas extras em branco
+
+> Reportado por foto comparando o cupom do sistema de referência (nítido,
+> sem espaço perdido) com o cupom do GESTFILA impresso numa etiqueta real de
+> banco de sangue (BSG016): faixa em branco no topo do cupom. Diferença de
+> premissa importante: a etiqueta usada é de **tamanho FIXO** (7cm altura x
+> 8cm largura), não uma bobina contínua - a 10.38 fixou a LARGURA (`80mm`)
+> mas deixou a ALTURA em `auto`, pressupondo rolo.
+
+**1. Causa raiz confirmada por render de impressão real** (mesma técnica da
+10.38: `--print-to-pdf` do Chrome real + PyMuPDF, antes de qualquer fix):
+`@page { size: 80mm auto }` tem a altura `auto` **ignorada** pelo motor de
+impressão - cai no fallback padrão (Letter, 215.9x279.4mm). Uma página
+virtual de quase 28cm mapeada numa etiqueta física de 7cm é o gatilho mais
+provável do driver inserir avanço/espaço extra antes do conteúdo (a faixa em
+branco fotografada). Com as DUAS dimensões fixas (`size: 80mm 70mm`), a
+página sai corretamente em 80.1x69.8mm - confirmado por render real.
+**Hipóteses alternativas descartadas por teste** (pedido explícito antes de
+assumir a causa acima): renderizei tanto `auto` quanto `70mm` fixo e em
+NENHUM dos dois o conteúdo saiu deslocado do topo (sempre colado em
+top≈1.2mm) - não é margem herdada, não é `position:absolute` com `top` não
+resetado (mesma classe de bug do `right` ignorado da 10.38, mas não é o caso
+aqui). A causa é especificamente o mismatch de tamanho de página vs. etiqueta
+física, que só se manifesta no driver real - por isso a confirmação final
+continua sendo na impressora física (mesma ressalva da 10.38).
+
+**2. Segundo bug, independente do primeiro - mais grave em produção que a
+faixa em branco:** só apareceu ao testar a correção do item 1 (página fixa),
+mas o impacto é maior: com `70mm` fixo, o cupom SEM endereço/telefone gerava
+**3 páginas** (deveria ser 1); COM endereço/telefone, **4 páginas** - só a
+primeira com conteúdo, as demais em branco. Numa impressora de etiqueta
+física de verdade isso não é só "estética errada" como o item 1 - é
+**etiqueta física desperdiçada a cada senha impressa** (2-3 etiquetas em
+branco por impressão). Causa: `body * { visibility: hidden; }` (isola o cupom
+na impressão) **não remove os elementos escondidos do fluxo** (`visibility`
+≠ `display`) - o cabeçalho do totem, título "Sua senha", dígitos grandes,
+botões etc. continuavam ocupando sua altura normal, invisível mas presente.
+Com `auto`/Letter (279mm) isso nunca estourava uma página, então o bug ficava
+mascarado; com a página fixa em 70mm, essa altura invisível gerava páginas
+extras em branco - numa impressora de etiqueta física de verdade, isso
+significa **etiquetas em branco desperdiçadas a cada senha impressa**.
+Corrigido colapsando a altura do que fica escondido: `html, body { height: 0;
+overflow: hidden; }` + `.totem { min-height: 0; height: 0; overflow: hidden;
+}` dentro do `@media print` (o `min-height: 0` é necessário porque `.totem`
+tem `min-height: 100vh` na folha base - só `height: 0` não venceria o
+`min-height`). `.cupom` continua vindo via `position: absolute`, então não
+depende da altura do `.totem` - confirmado que a posição não mudou.
+
+**3. Contraste/peso da fonte (mesma foto, pedido de comparação com a
+referência):** extraídas as fontes do PDF renderizado - todas as linhas do
+cupom (`INGOH`, `BANCO DE SANGUE`, `BSG001`, data/hora) usam
+`CourierNewPS-BoldMT`, uniformemente bold. A correção da 10.38 (peso bold
+uniforme) **está** aplicada corretamente neste cupom - é o mesmo template
+`senha_gerada.html` para toda fila/totem, não haveria como um cupom
+específico "não ter herdado" a regra. A diferença de nitidez observada na
+foto não tem causa em CSS identificável - avaliação: mais provável ser
+hardware (densidade de impressão/cabeça térmica/papel), fora do escopo de
+código.
+
+**4. Decisão de arquitetura (confirmada com o cliente antes de aplicar):**
+hoje não existe no código nenhuma distinção por totem/tipo de impressora (só
+um campo legado `Totem.nome_impressora_windows`, não usado pela abordagem
+atual via `window.print()`) - o `@page` é uma regra única, compartilhada por
+todo o sistema. Medido o cupom mais alto possível no template atual (com
+endereço + telefone, 8 linhas): usa 54.3mm dos 69.8mm disponíveis - cabe com
+folga. Cliente confirmou que **todos os totens desta instalação usam o mesmo
+tipo de etiqueta física fixa (7x8cm)** - por isso a correção foi aplicada
+globalmente na regra `@page` compartilhada, sem necessidade de um campo novo
+de configuração por totem. Se uma instalação futura tiver totens com tipos de
+impressora diferentes (etiqueta fixa E rolo contínuo ao mesmo tempo), essa
+decisão precisa ser revisitada (campo por totem, não mais uma regra global).
+
+**5. Teste:** validado por render de impressão real (`--print-to-pdf` +
+PyMuPDF) nos dois cenários (cupom curto e cupom com endereço/telefone) -
+ambos saem em 1 página só, 80.1x69.8mm, conteúdo colado no topo (~1.2mm).
+`tests/test_regressao_cupom_impressao_navegador.py`: casos D.2/D.4 ajustados
+(janela de busca do CSS alargada de 1000 para 2000 caracteres - o bloco
+`@media print` cresceu com as novas regras de colapso de altura; asserção do
+`@page` trocada de `80mm auto` para `80mm 70mm`) e novo caso D.5 (colapso de
+altura do conteúdo escondido). Suíte completa (46 arquivos) sem falhas. A
+confirmação final na etiqueta física real fica pendente do cliente testar.
+
+**Arquivos alterados:** `app/templates/totem/senha_gerada.html`,
+`tests/test_regressao_cupom_impressao_navegador.py`.
 
 ---
 
