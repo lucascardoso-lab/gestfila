@@ -384,6 +384,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.38 | Correção do layout do cupom impresso (centralização + contraste) + procedimento de impressão |
 | 10.39 | Reset diário do sequencial usava dia civil em UTC, não da clínica (3º call-site do bug da 10.37) |
 | 10.40 | Etiqueta física de tamanho fixo (7x8cm): `@page` altura auto + páginas extras em branco |
+| 10.41 | Single-session enforcement no login (reaproveita sessao_versao da 10.15) |
 
 ---
 
@@ -3363,6 +3364,114 @@ confirmação final na etiqueta física real fica pendente do cliente testar.
 
 **Arquivos alterados:** `app/templates/totem/senha_gerada.html`,
 `tests/test_regressao_cupom_impressao_navegador.py`.
+
+---
+
+## 10.41. ADENDO — Single-session enforcement no login (reaproveitando o mecanismo de logout remoto da 10.15)
+
+> Pergunta do cliente: "o sistema permite eu logar com o mesmo usuário em
+> sessões diferentes?" - resposta investigada: sim, sem nenhuma trava. Dois
+> problemas de produto ficaram expostos por essa resposta:
+>
+> 1. **Login simultâneo sem trava nenhuma:** `login()` (`app/auth/routes.py`)
+>    só LIA `Usuario.sessao_versao` pra gravar no cookie, nunca incrementava -
+>    duas (ou mais) sessões do mesmo usuário conviviam normalmente, cada uma
+>    batendo com o número do banco em `load_user()` (`app/__init__.py`).
+> 2. **Double-booking silencioso de Local:** consequência direta do primeiro -
+>    `local_atual_id`/`TurnoAtivo` (seção 10.15/10.19) são campos únicos por
+>    `Usuario`, não por sessão. Duas sessões do mesmo usuário podiam escolher/
+>    reconfirmar Locais diferentes (ou o mesmo) sem que uma soubesse da outra,
+>    já que a regra "um usuário por Local" (10.15) só bloqueia usuários
+>    DIFERENTES, nunca a própria pessoa reconfirmando - com duas sessões
+>    simultâneas, "a própria pessoa" podia ser dois dispositivos brigando pelo
+>    mesmo estado em silêncio.
+
+**Decisão: "nunca deveria acontecer".** Diferente de casos onde múltiplas
+sessões são um requisito real (ex.: painel de TV/totem, públicos por
+natureza), aqui é uma conta de OPERADOR/ADMIN pessoal - não existe cenário
+legítimo de produto para o mesmo login estar ativo em dois lugares ao mesmo
+tempo (ao contrário de, por exemplo, um sistema de e-mail onde isso é
+esperado). A escolha foi bloquear a causa raiz (impedir a segunda sessão de
+conviver com a primeira), não tentar detectar/arbitrar o double-booking
+depois que ele já aconteceu.
+
+**1. Reuso do mecanismo da 10.15, não um mecanismo novo:** a 10.15 já tinha
+construído `Usuario.sessao_versao` + a comparação em `load_user()` pro botão
+"Desconectar" do admin (`admin/locais.py::desconectar_usuario_local`) -
+incrementar esse mesmo número, incrementar `sessao_versao` do PRÓPRIO usuário
+dentro de `login()` produz exatamente o mesmo efeito (a sessão antiga vira
+inválida na próxima requisição), sem precisar de nenhuma tabela nova de
+sessões ativas, nenhum Redis/cache de sessão, nenhum JWT com jti revogável -
+o app já tinha tudo que precisava, só não usava no momento certo.
+
+**2. Ordem de operações** (mesmo padrão de `desconectar_usuario_local`):
+incrementa e persiste `sessao_versao` **ANTES** de gravar o cookie da sessão
+que está nascendo agora - e grava no cookie o valor **JÁ INCREMENTADO** (pós-
+commit, recarregado do banco). Se gravasse o valor antigo (pré-incremento), a
+sessão nova nasceria já invalidada na primeira requisição seguinte, porque
+`load_user()` compara contra o valor atual do banco, que já é o novo.
+
+**2.1. Incremento ATÔMICO no SQL, não `usuario.sessao_versao = usuario.
+sessao_versao + 1` em Python** (mesmo motivo já documentado em `app/totem/
+routes.py::_emitir_senha`, seção 8): um read-then-write em Python não é
+atômico - dois `POST /login` do MESMO usuário genuinamente simultâneos
+poderiam ambos ler o valor antigo antes de qualquer um commitar, calcular o
+mesmo próximo valor, e as duas sessões nasceriam válidas ao mesmo tempo
+(exatamente a fresta que este mecanismo existe pra fechar). `UPDATE usuarios
+SET sessao_versao = sessao_versao + 1` direto no SQL (`sqlalchemy.update`) é
+serializado pelo lock de linha do MySQL/InnoDB sob concorrência real, e força
+uma escrita real também no SQLite dos testes - mesmo idioma já estabelecido
+em `_emitir_senha` pro mesmo tipo de risco (lost update sob concorrência).
+`db.session.commit()` expira o objeto `usuario` (comportamento padrão do
+SQLAlchemy) - o acesso seguinte a `usuario.sessao_versao` (pro cookie) já
+recarrega do banco o valor recém-persistido, não um valor calculado em
+memória.
+
+**3. Decisão consciente: NÃO limpar `local_atual_id`/`TurnoAtivo` no login.**
+Cogitado e descartado de propósito. Diferente de `desconectar_usuario_local`
+(que libera o Local pra **outra pessoa** usar, porque o usuário desconectado
+não volta tão cedo), aqui a sessão nova É a mesma pessoa continuando -
+`local_atual_id`/`TurnoAtivo` vivem na linha do `Usuario`, não por sessão,
+então a sessão nova já enxerga o mesmo estado da antiga automaticamente, sem
+nenhuma limpeza necessária (não existe "sessão dona" de um Local, existe
+"usuário dono"). Limpar esses campos no login forçaria o operador a re-
+escolher Local/Fila toda vez que trocasse de aba/dispositivo - fricção sem
+ganho real, já que o problema resolvido (double-booking) é sobre IMPEDIR a
+sessão antiga de agir, não sobre resetar o estado da conta. Provado por
+teste (caso F, abaixo): a sessão nova herda o turno/Local aberto pela antiga
+de cara, sem precisar reconfirmar nada.
+
+**4. Não afeta o fluxo de troca de senha obrigatória** (superadmin semeado,
+`Usuario.deve_trocar_senha`): `trocar_senha_obrigatoria()` é uma rota
+separada, não chama `login()` de novo - só um incremento por POST /login bem-
+sucedido, sem risco de dupla invalidação. **Não afeta a guarda "admin não
+pode desconectar a si mesmo"** (10.15): essa guarda vive só dentro de
+`desconectar_usuario_local`, comparando contra `current_user` já autenticado
+- em `login()`, `current_user` é sempre anônimo nesse ponto (a rota já
+redireciona antes se já estiver autenticado), guardas de rotas diferentes,
+sem sobreposição.
+
+**5. Teste** (`tests/test_regressao_single_session.py`, novo arquivo, 15
+casos): logar duas vezes com o mesmo usuário invalida a sessão antiga (302
+pro login na próxima requisição) sem auto-invalidar a nova; cenário completo
+do problema original (sessão A escolhe um Local, sessão B loga, sessão A
+tenta agir no Local depois - é barrada ANTES de conseguir, nada muda no
+banco); `Usuario.sessao_versao` realmente incrementado (não só o
+comportamento HTTP observado); dois usuários DIFERENTES não se afetam;
+**caso F** - sessão nova herda `local_atual_id`/`TurnoAtivo` de um turno
+completo (Fila + Local) aberto pela sessão antiga, sem precisar re-escolher
+nada, provando que a decisão do item 3 não deixa a conta num estado
+"pendurado"; `desconectar_usuario_local` continua funcionando idêntico,
+convivendo sem conflito com o novo incremento do login.
+`tests/test_regressao_turno_ativo.py` tinha um caso pré-existente que
+assumia duas sessões simultâneas do mesmo usuário como comportamento válido
+(bloco G, "reload/nova sessão") - atualizado pra confirmar a invalidação da
+sessão antiga e continuar o resto do teste com a sessão nova. Suíte completa
+(47 arquivos) sem falhas.
+
+**Arquivos alterados:** `app/auth/routes.py` (`login()`); novo
+`tests/test_regressao_single_session.py`; `tests/test_regressao_turno_ativo.py`
+ajustado.
 
 ---
 

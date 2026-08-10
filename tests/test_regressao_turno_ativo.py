@@ -237,6 +237,20 @@ assert resp.status_code == 302
 assert resp.headers["Location"].endswith(URL_INICIAR_TURNO)
 ok("Reload/nova sessão do mesmo operador: login redireciona pra 'Iniciar Turno' (perfil operacional puro)")
 
+# Single-session enforcement (login() incrementa Usuario.sessao_versao a cada
+# autenticação bem-sucedida): a sessão ANTIGA (c1) deixa de ser válida assim
+# que a nova (c1_novo) loga - próxima requisição de c1 é tratada como anônima,
+# mesmo sem nenhum logout explícito ter acontecido. 'Iniciar Turno' usa
+# @roles_required (app/utils/decorators.py), não @login_required do Flask-
+# Login - current_user não autenticado vira 401 direto, não um redirect 302
+# pro login (isso é comportamento normal desta rota, não algo novo desta
+# mudança). Daqui em diante o teste usa c1_novo pra continuar a sessão do
+# operador - reusar c1 abaixo seria testar um cenário que não é mais
+# suportado de propósito (duas sessões simultâneas do mesmo usuário).
+resp_sessao_antiga = c1.get(URL_INICIAR_TURNO, follow_redirects=False)
+assert resp_sessao_antiga.status_code == 401
+ok("Sessão antiga (c1) foi invalidada pelo novo login (c1_novo) - próxima requisição não está mais autenticada (401)")
+
 resp = c1_novo.get(URL_INICIAR_TURNO)
 assert resp.status_code == 200
 texto_recuperado = resp.data.decode("utf-8")
@@ -256,10 +270,11 @@ ok("Tela de atendimento por-Local abre normalmente, mesmo sem confirmar o formul
 
 # ===========================================================================
 # H) Encerrar turno: marca ativo=False, libera o Local, mas NÃO desloga - o
-#    operador pode iniciar outro turno sem precisar logar de novo.
+#    operador pode iniciar outro turno sem precisar logar de novo. Continua
+#    com c1_novo (a sessão válida) - c1 já foi invalidada no bloco G acima.
 # ===========================================================================
-csrf = csrf_de(c1, f"/atendimento/recepcao/local/{ids['local_1']}")
-resp = c1.post(URL_ENCERRAR_TURNO, data={"csrf_token": csrf}, follow_redirects=True)
+csrf = csrf_de(c1_novo, f"/atendimento/recepcao/local/{ids['local_1']}")
+resp = c1_novo.post(URL_ENCERRAR_TURNO, data={"csrf_token": csrf}, follow_redirects=True)
 assert resp.status_code == 200
 assert "Iniciar turno" in resp.data.decode("utf-8")
 ok("'Encerrar turno' volta para a tela 'Iniciar Turno'")
@@ -273,13 +288,13 @@ with app.app_context():
 ok("'Encerrar turno' marca TurnoAtivo.ativo=False e libera o Local (local_atual_id=None)")
 
 # a sessão continua autenticada - não foi um logout.
-resp = c1.get("/atendimento/filas")
+resp = c1_novo.get("/atendimento/filas")
 assert resp.status_code == 200
 ok("Após encerrar o turno, a sessão continua autenticada (não é um logout) - operador acessa outras telas normalmente")
 
 # GET em 'Iniciar Turno' de novo não pula mais (turno inativo) - pode começar
 # outro turno, em outro Local, sem logar de novo.
-resp = c1.get(URL_INICIAR_TURNO)
+resp = c1_novo.get(URL_INICIAR_TURNO)
 assert resp.status_code == 200
 assert "Iniciar turno" in resp.data.decode("utf-8")
 ok("Após encerrar, GET em 'Iniciar Turno' mostra o formulário normalmente (não pula mais, turno está inativo)")

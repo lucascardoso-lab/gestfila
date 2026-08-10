@@ -1,5 +1,6 @@
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
+from sqlalchemy import update
 
 from app.extensions import db, limiter
 from app.models import TurnoAtivo, Usuario
@@ -33,10 +34,41 @@ def login():
         usuario = Usuario.query.filter_by(login=login_informado).first()
 
         if usuario and usuario.ativo and usuario.checar_senha(senha_informada):
+            # Single-session enforcement: incrementa ANTES de gravar o cookie,
+            # derrubando qualquer sessão anterior deste MESMO usuário (em
+            # qualquer dispositivo/aba) - reaproveita o mesmo mecanismo de
+            # logout remoto que admin/locais.py::desconectar_usuario_local já
+            # usa (mesma ordem: incrementa e persiste antes de qualquer outra
+            # coisa). Sem isto, duas sessões do mesmo usuário conviviam
+            # normalmente (ambas batiam com o número do banco em load_user()),
+            # o que permitia dois logins simultâneos "brigarem" em silêncio
+            # pelo mesmo Local (local_atual_id, seção 10.15).
+            #
+            # UPDATE real (não `usuario.sessao_versao = usuario.sessao_versao +
+            # 1` em Python) pelo mesmo motivo já documentado em app/totem/
+            # routes.py::_emitir_senha: um read-then-write em Python não é
+            # atômico - dois POST /login do MESMO usuário genuinamente
+            # simultâneos poderiam ambos ler o valor antigo antes de qualquer
+            # um commitar, calcular o mesmo próximo valor e as duas sessões
+            # nasceriam válidas ao mesmo tempo (a fresta que este mecanismo
+            # existe pra fechar). `sessao_versao = sessao_versao + 1` direto no
+            # SQL é serializado pelo lock de linha do MySQL/InnoDB (e força
+            # escrita real também no SQLite dos testes, mesmo efeito).
+            db.session.execute(
+                update(Usuario).where(Usuario.id == usuario.id).values(sessao_versao=Usuario.sessao_versao + 1)
+            )
+            db.session.commit()
+            # `usuario` foi expirado pelo commit acima (expire_on_commit padrão
+            # do SQLAlchemy) - o próximo acesso a `.sessao_versao` já recarrega
+            # do banco o valor recém-persistido, não um valor calculado em
+            # memória.
+
             login_user(usuario, remember=request.form.get("lembrar") == "on")
-            # grava a versão atual no cookie de sessão - é contra esse número que
-            # load_user() (app/__init__.py) compara a cada request, pra detectar
-            # um logout forçado remotamente (Usuario.sessao_versao).
+            # grava a versão JÁ INCREMENTADA (pós-commit acima, recarregada do
+            # banco) no cookie desta sessão nova - se gravasse o valor antigo,
+            # ela nasceria já invalidada na primeira requisição seguinte
+            # (load_user() compara contra o valor atual do banco, que já é o
+            # novo).
             session["sessao_versao"] = usuario.sessao_versao
             destino = request.args.get("next")
             if destino is None and _deve_ir_direto_para_turno(usuario):
