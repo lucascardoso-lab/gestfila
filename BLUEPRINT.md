@@ -385,6 +385,8 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.39 | Reset diário do sequencial usava dia civil em UTC, não da clínica (3º call-site do bug da 10.37) |
 | 10.40 | Etiqueta física de tamanho fixo (7x8cm): `@page` altura auto + páginas extras em branco |
 | 10.41 | Single-session enforcement no login (reaproveita sessao_versao da 10.15) |
+| 10.42 | Investigação "impressão em paisagem" - código correto, suspeita de driver Windows (sem mudança de código) |
+| 10.43 | Upload de logo por empresa (cupom + painel de TV + admin) |
 
 ---
 
@@ -3472,6 +3474,170 @@ sessão antiga e continuar o resto do teste com a sessão nova. Suíte completa
 **Arquivos alterados:** `app/auth/routes.py` (`login()`); novo
 `tests/test_regressao_single_session.py`; `tests/test_regressao_turno_ativo.py`
 ajustado.
+
+---
+
+## 10.42. ADENDO — Investigação "impressão saindo em paisagem" (código confirmado correto - suspeita de driver Windows)
+
+> Reportado pelo cliente após a 10.40: cupom saindo em modo paisagem em
+> TODOS os totens (hoje 2), pedido de padronizar em retrato. Contradição
+> aparente a resolver antes de tocar em qualquer CSS: a 10.40 fixou `@page
+> { size: 80mm 70mm }` - largura (80mm) MAIOR que altura (70mm), ou seja, a
+> página já é "paisagem" por definição de forma desde aquele fix.
+
+**1. Código investigado, confirmado correto e inalterado desde a 10.40:**
+grep em `senha_gerada.html`, `_layout.html` e `gestfila.css` por
+`orientation`/`rotate`/`landscape`/`portrait`/`transform` - nenhuma
+ocorrência real (só um falso positivo de `text-transform`, propriedade
+diferente). Nenhuma regra de rotação esquecida em nenhum lugar do sistema.
+
+**2. Render de impressão real** (`--print-to-pdf` do Chrome + PyMuPDF, mesma
+técnica da 10.38/10.39/10.40): `MediaBox: 227.04 x 198.0 pts` = **80.09 x
+69.85mm**, `rotation: 0`. O código pede exatamente o que a 10.40 documentou -
+sem rotação, sem fallback pra página grande tipo Letter/A4 (que apareceria
+como 215.9x279.4mm, o sintoma que a 10.40 já corrigiu uma vez). Conteúdo
+ocupa só ~40mm dos 70mm disponíveis, sem overflow.
+
+**3. Confirmado com o cliente: 8cm É a largura fixa real do rolo/suporte da
+impressora** (não uma inversão de medidas na 10.40). Isso fecha a
+possibilidade de "corrigir" trocando pra `size: 70mm 80mm` - isso
+contrariaria a largura física real e pioraria a impressão, não consertaria.
+
+**4. Conclusão: não há bug de código pra corrigir aqui.** O `@page` já pede
+o tamanho fisicamente correto (80x70mm, casando com a largura real do rolo),
+sem rotação, validado por render real. A foto do cliente mostra uma tira
+visivelmente mais comprida que os 70mm esperados - como o `--print-to-pdf`
+só prova o que o CSS *pede* (não o que o driver da impressora *faz* com esse
+pedido - ressalva já registrada na 10.28/10.40 e nunca totalmente validada em
+hardware físico), a explicação mais provável é o **driver Windows não
+respeitando o `@page size`** do CSS na impressão real - explica também por
+que acontece nos DOIS totens (mesma configuração de driver replicada nos
+dois, não algo em comum no código, que já está confirmado correto e
+idêntico nos dois).
+
+**5. Nenhum código alterado.** Decisão tomada com o cliente: documentar o
+diagnóstico e orientar checagem de configuração do driver, em vez de
+alterar CSS que já está correto. Checklist pra conferir na impressora física
+de cada totem (Configurações de impressora do Windows, ou no diálogo de
+impressão se `--kiosk-printing` não estiver ativo - ver procedimento da
+10.38):
+- **Tamanho de papel no driver:** deve ser 80x70mm (ou o tamanho
+  personalizado equivalente) - **não** Letter/A4/Carta nem "Ajustar
+  automaticamente".
+- **Orientação no driver:** Retrato, mesmo a etiqueta sendo mais larga que
+  alta - o `@page size: 80mm 70mm` já define a forma da página pelo CSS;
+  forçar "Paisagem" no driver por cima disso pode fazer o driver rotacionar
+  de novo, dobrando o efeito.
+- **Escala:** 100%, nunca "Ajustar à página" (mesma orientação já dada na
+  10.38).
+- Se o driver não tiver opção de tamanho de papel personalizado 80x70mm,
+  criar um tamanho de papel customizado nas propriedades da impressora
+  (Painel de Controle > Dispositivos e Impressoras > Propriedades do
+  Servidor de Impressão > Criar um Novo Formulário).
+
+**Se o checklist acima não resolver:** o próximo passo de diagnóstico seria
+capturar o job de impressão bruto (spool) que o driver realmente envia pra
+impressora, pra comparar contra o que o `--print-to-pdf` mostrou aqui - fora
+do escopo desta investigação (exige acesso físico ao totem), fica registrado
+como próximo passo se o ajuste de driver não for suficiente.
+
+**Arquivos alterados:** nenhum (investigação e documentação apenas).
+
+---
+
+## 10.43. ADENDO — Upload de logo por empresa (cupom + painel de TV + admin)
+
+> Feature nova: cada empresa (multi-tenant) pode fazer upload de um logo
+> próprio, exibido em três lugares - cupom impresso do totem, painel de TV,
+> e admin. Mesmo nível de escopo do "Nome da empresa" já existente (seção 8:
+> vem do cadastro de Empresa), não por unidade/totem.
+
+**1. Armazenamento:** `Empresa.logo_filename` (nullable, migration
+`6f6d09c50b0d`) guarda só o NOME do arquivo (ex.: `empresa_7.png`), nunca o
+caminho completo nem o blob no banco. Arquivo físico em
+`app/static/uploads/logos/`, nomeado deterministicamente como
+`empresa_<id>.png` - **sempre esse nome, sempre sobrescrevendo**, nunca
+baseado no nome original enviado pelo usuário (elimina por construção
+qualquer risco de colisão de nome entre empresas ou de path traversal via
+nome de arquivo malicioso). Pasta gitignorada (`app/static/uploads/`) -
+dado de instalação, não asset versionado do código-fonte, mesmo espírito de
+`instance/`.
+
+**2. Validação por CONTEÚDO real, não extensão/Content-Type**
+(`app/utils/uploads.py::salvar_logo_empresa`): usa Pillow (`Image.open()` +
+`.verify()`) pra de fato decodificar o arquivo e confirmar que é PNG ou JPEG
+genuíno - a extensão do nome enviado e o `Content-Type` do upload são
+controlados pelo cliente e não provam nada sozinhos. **SVG recusado de
+propósito**: é XML, pode embutir `<script>`/`onload` executável quando
+aberto num navegador (risco de XSS) - diferente de PNG/JPG, que são dados
+binários de pixel sem capacidade de execução. Reencodar sempre para PNG
+(mesmo quando o original é JPG) funciona também como sanitização: qualquer
+coisa fora dos pixels que a Pillow decodificou (metadados, payload de
+polyglot anexado ao arquivo) é descartada no processo. `Image.verify()` +
+`Image.MAX_IMAGE_PIXELS` (limite padrão do Pillow, já ligado) protegem
+contra decompression bomb (arquivo pequeno que decodifica pra uma imagem
+gigante). **Limite de tamanho: 2MB** (`TAMANHO_MAXIMO_LOGO_BYTES`), validado
+na aplicação; `Config.MAX_CONTENT_LENGTH = 3MB` no Flask como defesa em
+profundidade ANTES disso (evita bufferizar em memória um upload
+absurdamente grande antes mesmo do código da aplicação rodar).
+
+**3. Permissão: só super admin** (`@super_admin_required`, mesmo decorator
+das outras 5 rotas de Empresa) - **não** "admin da própria empresa" como a
+premissa inicial do pedido assumia. Confirmado antes de implementar: TODAS
+as rotas de cadastro de Empresa hoje (`listar/nova/editar/toggle/excluir`)
+já são exclusivas de super admin - gerenciar o cadastro da EMPRESA em si
+(diferente de gerenciar unidades/usuários/filas DENTRO dela, que aí sim é
+admin local) nunca foi acessível a admin de empresa neste sistema. O upload
+de logo segue o padrão já existente, não abre uma exceção nova.
+
+**4. Botão de remoção** (`POST /admin/empresas/<id>/logo/remover`): apaga o
+arquivo físico e limpa `logo_filename` - volta a exibir só o nome em texto
+nos 3 lugares, sem precisar substituir por outro arquivo pra "desfazer".
+
+**5. Exibição com fallback nos 3 lugares** - sem logo cadastrado, cada tela
+continua EXATAMENTE como antes desta feature, nenhuma mudança visual:
+- **Cupom** (`totem/senha_gerada.html`): `<img class="cupom-logo">` acima do
+  nome da empresa (layout da seção 8), dentro de `.cupom` - já herda a
+  visibilidade/posicionamento do `@media print` existente (10.40), nenhuma
+  regra nova de impressão necessária. **Limitação de hardware documentada,
+  não bug de código** (mesmo espírito da ressalva de validação em
+  impressora real, 10.38/10.40): impressora térmica é monocromática e de
+  baixa resolução - um logo com muito detalhe/gradiente pode sair
+  borrado/ilegível dependendo do arquivo original: aviso explícito no
+  formulário de upload do admin.
+- **Painel de TV** (`painel/tv.html` + `painel/_layout.html`): logo ao lado
+  da marca GESTFILA no cabeçalho (`.cabecalho-marca`, já `display:flex`).
+- **Admin**: miniatura na listagem de empresas + preview no formulário de
+  edição (só na edição, não na criação - o nome de arquivo determinístico
+  precisa do ID, que só existe depois de a empresa já ter sido criada).
+
+**6. Isolamento multi-tenant:** nome de arquivo determinístico por
+`empresa_id` evita colisão/mistura por construção (upload pra uma empresa
+fisicamente não pode escrever no arquivo de outra). **Decisão consciente
+sobre acesso direto à URL do arquivo:** os arquivos ficam em pasta pública
+(`app/static/`), então a URL do logo de qualquer empresa é acessível sem
+login, se alguém souber/adivinhar o ID - isto NÃO é tratado como falha de
+isolamento: é um asset público por natureza (mesmo nível de "publicidade"
+que as páginas de totem/painel de TV, que também são públicas sem login) -
+um logo de empresa não é dado sensível. O que de fato importa (e é
+garantido) é nunca vazar o ARQUIVO ou CAMPO errado entre tenants, não
+restringir acesso a uma imagem de marca.
+
+**7. Teste** (`tests/test_regressao_logo_empresa.py`, novo arquivo, 14
+casos): upload válido PNG e JPG (normalizado pra `.png` nos dois casos),
+rejeição de SVG disfarçado de `.png` por conteúdo real (não extensão),
+rejeição por tamanho, remoção, fallback nos 3 lugares com e sem logo,
+isolamento entre duas empresas (upload numa não cria/altera nada na outra),
+e RBAC (admin de empresa recebe 403, confirmando o item 3). Suíte completa
+sem falhas.
+
+**Arquivos alterados:** `migrations/versions/6f6d09c50b0d_*.py` (novo),
+`app/models/empresa.py` (`logo_filename`), `app/utils/uploads.py` (novo),
+`app/admin/empresas.py` (upload + rota de remoção), `app/templates/admin/
+empresas/form.html` e `listar.html`, `app/templates/totem/senha_gerada.html`,
+`app/templates/painel/tv.html` e `_layout.html`, `app/config.py`
+(`MAX_CONTENT_LENGTH`), `requirements.txt` (`Pillow`), `.gitignore`
+(`app/static/uploads/`); novo `tests/test_regressao_logo_empresa.py`.
 
 ---
 

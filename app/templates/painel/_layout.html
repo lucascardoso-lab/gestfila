@@ -38,6 +38,10 @@
        que usa <header> puro e deve continuar com a aparência de sempre. */
     .cabecalho { border-bottom: 3px solid var(--gf-primaria); }
     .cabecalho-marca { display: flex; align-items: center; gap: 1rem; }
+    /* Logo opcional por empresa (adendo 10.43) - sem logo cadastrado, o
+       cabeçalho continua exatamente como antes desta feature (só a marca
+       GESTFILA + nome da unidade/TV). */
+    .cabecalho-logo-empresa { max-height: 36px; max-width: 140px; }
     .cabecalho-unidade {
       font-size: 1.15rem; font-weight: 600; color: #fff;
       padding-left: 1rem; border-left: 1px solid var(--painel-fundo-elemento);

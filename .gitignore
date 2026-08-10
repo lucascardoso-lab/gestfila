@@ -16,3 +16,7 @@ backups/
 # Configuração local do Claude Code (caminhos/preferências específicos desta
 # máquina, não é config do projeto em si).
 .claude/
+
+# Logos de empresa enviados por upload (adendo 10.43) - dado de instalação,
+# não asset versionado do código-fonte (mesmo espírito de instance/).
+app/static/uploads/

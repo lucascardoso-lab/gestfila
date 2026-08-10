@@ -25,6 +25,14 @@ class Empresa(db.Model):
         db.String(255), nullable=False, default=TEXTO_CHAMADA_NOME_PADRAO
     )
 
+    # Adendo 10.43: logo opcional por empresa (cupom/TV/admin). Guarda só o
+    # nome do arquivo determinístico ('empresa_<id>.png'), nunca o nome
+    # original enviado pelo usuário nem o caminho completo - o arquivo físico
+    # fica em app/static/uploads/logos/ (app/utils/uploads.py resolve o
+    # caminho). None = sem logo, cai no fallback de nome em texto em todo
+    # lugar que exibe a marca da empresa.
+    logo_filename = db.Column(db.String(60), nullable=True)
+
     unidades = db.relationship("Unidade", back_populates="empresa")
     usuarios = db.relationship("Usuario", back_populates="empresa")
     servicos = db.relationship("Servico", back_populates="empresa")

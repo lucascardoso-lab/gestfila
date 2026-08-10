@@ -21,6 +21,9 @@
 
     <div class="area-cupom">
       <div class="cupom" id="cupom">
+        {% if unidade.empresa.logo_filename %}
+          <img class="cupom-logo" src="{{ url_for('static', filename='uploads/logos/' + unidade.empresa.logo_filename) }}" alt="">
+        {% endif %}
         <p class="cupom-empresa">{{ unidade.empresa.nome }}</p>
         <p class="cupom-separador">- - - - - - - - - - - - - - - -</p>
         <p class="cupom-fila">{{ fila.nome }}</p>
@@ -123,6 +126,13 @@
        nada): peso normal sai fino/claro e desigual. A hierarquia vem só do
        TAMANHO, nunca do peso, e nunca de cinza (que vira pontilhado fraco). */
     .cupom p { margin: .25rem 0; font-weight: 700; color: #000; }
+    /* Logo opcional por empresa (adendo 10.43) - térmica é monocromática e
+       baixa resolução, o logo pode sair borrado/ilegível dependendo do
+       arquivo original (limitação física do hardware, não bug de código -
+       mesmo espírito da ressalva já feita sobre validação em impressora
+       real, 10.38/10.40). Sem logo cadastrado, o cupom continua exatamente
+       como antes desta feature - só o nome em texto, nada muda. */
+    .cupom-logo { max-width: 100%; max-height: 60px; margin: 0 auto .5rem; display: block; }
     .cupom-empresa { font-size: 1.1rem; }
     .cupom-fila { font-size: .95rem; text-transform: uppercase; letter-spacing: .04em; }
     .cupom-codigo { font-size: 2.1rem; letter-spacing: .05em; margin: .4rem 0 !important; }

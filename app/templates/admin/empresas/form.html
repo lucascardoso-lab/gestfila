@@ -5,7 +5,7 @@
 {% block conteudo %}
   <h1>{{ 'Editar empresa' if empresa else 'Nova empresa' }}</h1>
   <div class="card">
-    <form method="post">
+    <form method="post" enctype="multipart/form-data">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
       <label for="nome">Nome</label>
@@ -14,7 +14,36 @@
       <label for="cnpj">CNPJ (opcional)</label>
       <input type="text" id="cnpj" name="cnpj" value="{{ empresa.cnpj if empresa else '' }}">
 
+      {# Upload de logo (adendo 10.43) só existe na edição - precisa do ID da
+         empresa (nome de arquivo determinístico 'empresa_<id>.png'), então
+         não faz sentido no formulário de "Nova empresa" (sem ID ainda). #}
+      {% if empresa %}
+        <label for="logo">Logo da empresa (opcional)</label>
+        {% if empresa.logo_filename %}
+          <div style="margin-bottom:.75rem;">
+            <img src="{{ url_for('static', filename='uploads/logos/' + empresa.logo_filename) }}"
+                 alt="Logo atual de {{ empresa.nome }}" style="max-height:80px; max-width:240px; display:block; margin-bottom:.5rem;">
+            <button type="submit" form="form-remover-logo" class="botao" style="background:var(--gf-cinza-medio,#888);">
+              Remover logo
+            </button>
+          </div>
+        {% endif %}
+        <input type="file" id="logo" name="logo" accept="image/png,image/jpeg">
+        <p style="font-size:.85rem; color:var(--gf-cinza-medio,#777); margin-top:.25rem;">
+          PNG ou JPG, até 2MB. Exibido no cupom impresso, no painel de TV e aqui no admin.
+          Impressoras térmicas são monocromáticas e de baixa resolução - logos muito detalhados
+          podem sair borrados ou ilegíveis no cupom impresso (limitação do hardware, não do sistema).
+          Deixe em branco pra manter o logo atual.
+        </p>
+      {% endif %}
+
       <p><button class="botao" type="submit" style="margin-top:1.5rem;">Salvar</button></p>
     </form>
+
+    {% if empresa and empresa.logo_filename %}
+      <form id="form-remover-logo" method="post" action="{{ url_for('admin.remover_logo_empresa_view', empresa_id=empresa.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      </form>
+    {% endif %}
   </div>
 {% endblock %}

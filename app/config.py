@@ -53,6 +53,15 @@ class Config:
     # Brasília; um deploy em UTC continua avaliando esses horários corretamente.
     FUSO_HORARIO = os.environ.get("FUSO_HORARIO", "America/Sao_Paulo")
 
+    # Cap de tamanho de requisição no nível do Flask (adendo 10.43, upload de
+    # logo de empresa) - defesa em profundidade ANTES do limite de 2MB
+    # aplicado em app/utils/uploads.py: sem isto, o corpo inteiro da
+    # requisição (por maior que fosse) seria bufferizado em memória antes do
+    # código da aplicação sequer rodar pra rejeitar. Um pouco acima de 2MB
+    # (overhead do multipart/form-data) pra não recusar um upload legítimo no
+    # limite exato.
+    MAX_CONTENT_LENGTH = 3 * 1024 * 1024
+
     # Liga/desliga o encerramento automático de sessões por horário (seção 10.18).
     # Existe para deixar a SUÍTE hermética: o middleware compara datetime.now()
     # local do servidor com HORARIO_ENCERRAMENTO_SESSOES, então uma suíte que

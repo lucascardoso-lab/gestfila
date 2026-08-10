@@ -6,10 +6,16 @@
   <h1>Empresas</h1>
   <p class="subtitulo"><a class="botao" href="{{ url_for('admin.nova_empresa') }}">+ Nova empresa</a></p>
   <table>
-    <thead><tr><th>Nome</th><th>CNPJ</th><th>Status</th><th>Ações</th></tr></thead>
+    <thead><tr><th></th><th>Nome</th><th>CNPJ</th><th>Status</th><th>Ações</th></tr></thead>
     <tbody>
       {% for empresa in empresas %}
         <tr>
+          <td>
+            {% if empresa.logo_filename %}
+              <img src="{{ url_for('static', filename='uploads/logos/' + empresa.logo_filename) }}"
+                   alt="Logo de {{ empresa.nome }}" style="max-height:32px; max-width:80px;">
+            {% endif %}
+          </td>
           <td>{{ empresa.nome }}</td>
           <td>{{ empresa.cnpj or '-' }}</td>
           <td><span class="badge {{ 'ativo' if empresa.ativo else 'inativo' }}">{{ 'Ativa' if empresa.ativo else 'Inativa' }}</span></td>
@@ -28,7 +34,7 @@
           </td>
         </tr>
       {% else %}
-        <tr><td colspan="4">Nenhuma empresa cadastrada ainda.</td></tr>
+        <tr><td colspan="5">Nenhuma empresa cadastrada ainda.</td></tr>
       {% endfor %}
     </tbody>
   </table>

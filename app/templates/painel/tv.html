@@ -7,6 +7,9 @@
     <header class="cabecalho">
       <div class="cabecalho-marca">
         <span class="gf-logo gf-logo--navbar gf-logo--claro"><span class="gf-logo-gest">GEST</span><span class="gf-logo-fila">FILA</span></span>
+        {% if empresa.logo_filename %}
+          <img class="cabecalho-logo-empresa" src="{{ url_for('static', filename='uploads/logos/' + empresa.logo_filename) }}" alt="Logo {{ empresa.nome }}">
+        {% endif %}
         <span class="cabecalho-unidade">{{ tv.unidade.nome }} — {{ tv.nome }}</span>
       </div>
       <div class="cabecalho-info">
