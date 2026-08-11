@@ -255,9 +255,22 @@ assert "font-weight: 700" in bloco_cupom_css  # aplicado a .cupom p (todas as li
 # a classe antiga .cupom-linha (peso normal, usada em endereço/telefone/fila/
 # data-hora) não existe mais - foi substituída por classes bold por tamanho.
 assert "cupom-linha" not in texto
-# separador não usa mais a variável de cinza (que imprimia fraco).
-assert "cupom-separador { font-size: .9rem; color: var(--gf-cinza-medio)" not in texto
-ok("CSS do cupom usa peso bold uniforme (font-weight:700 em .cupom p), sem .cupom-linha normal nem separador cinza")
+ok("CSS do cupom usa peso bold uniforme (font-weight:700 em .cupom p), sem .cupom-linha normal")
+
+# ===========================================================================
+# D.3.1) Linhas tracejadas separadoras REMOVIDAS (pedido do cliente - layout
+#        mais limpo, ref. cupom da Caixa Econômica sem separador): nem o
+#        texto literal do traço, nem a classe/regra CSS `.cupom-separador`
+#        (que nunca foi um `border`, sempre foi texto puro dentro de um
+#        `<p>` - confirmado lendo o HTML real antes de mexer). Espaçamento
+#        entre os blocos ajustado via `margin-top` em `.cupom-fila`/
+#        `.cupom-datahora` no lugar do respiro visual que o separador dava,
+#        sem reintroduzir nenhuma linha.
+# ===========================================================================
+assert "- - - - - - - - - - - - - - - -" not in texto  # texto literal do traço
+assert "cupom-separador" not in texto  # classe inteira removida (HTML e CSS)
+assert 'class="cupom-fila"' in texto and "margin-top: .6rem" in bloco_cupom_css
+ok("Linhas tracejadas separadoras removidas (texto e CSS) - espaçamento ajustado via margin-top, sem reintroduzir nenhuma linha")
 
 # ===========================================================================
 # D.4) Página com ALTURA "auto" no @page (10.44 - DECISÃO REVISTA, supersede
@@ -294,8 +307,8 @@ ok("CSS @media print colapsa a altura do conteúdo escondido (html/body/.totem) 
 # ===========================================================================
 # D.6) Cenário REAL reportado em produção (10.44): fila "Recepção Banco de
 #      Sangue", unidade com endereço E telefone (o conteúdo mais alto do
-#      template - 8 linhas: empresa, separador, fila, código, separador,
-#      data/hora, endereço, telefone). Estrutural, não confirma "1 página"
+#      template - 6 linhas desde a remoção dos separadores: empresa, fila,
+#      código, data/hora, endereço, telefone). Estrutural, não confirma "1 página"
 #      literalmente (isso exige motor de impressão real - print-to-pdf,
 #      rodado manualmente nesta sessão e documentado no adendo 10.44, mesmo
 #      padrão das validações da 10.38/10.40, nunca comitadas como

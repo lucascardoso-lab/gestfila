@@ -388,6 +388,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.42 | Investigação "impressão em paisagem" - código correto, suspeita de driver Windows (sem mudança de código) |
 | 10.43 | Upload de logo por empresa (cupom + painel de TV + admin) |
 | 10.44 | `@page` volta pra altura "auto" - premissa da 10.40 estava errada (rolo contínuo, não etiqueta fixa) |
+| 10.45 | Campos opcionais nulos apareciam como a string "None" (cupom mostrando "None"/"None") |
 
 ---
 
@@ -787,11 +788,12 @@ diferentes.
 **Layout do cupom impresso:**
 ```
         [Nome da empresa/clínica]
-        ----------------------
               CM03
-        ----------------------
         24/06/2026  14:32
 ```
+(mockup original tinha linhas tracejadas separadoras entre os blocos -
+removidas depois a pedido do cliente, ver nota na 10.38; layout atual sem
+separador, respiro visual só por espaçamento.)
 - Nome da empresa: vem do cadastro de `empresas` já existente.
 - Código da senha: fonte grande (usar comando ESC/POS de tamanho de fonte
   duplo/triplo, já suportado nativamente pela biblioteca escolhida).
@@ -3167,6 +3169,15 @@ hierarquia vindo **só do tamanho**, nunca do peso, e separador preto. Estrutura
 reordenada pra reforçar a hierarquia: empresa (médio) → fila (menor, MAIÚSCULO)
 → **código (maior, negrito)** → data/hora + endereço/telefone (rodapé, menor).
 
+> **Nota posterior (sem adendo próprio - ajuste de layout, não correção de
+> bug):** as duas linhas tracejadas separadoras (`.cupom-separador`, texto
+> literal `- - - - ...`, nunca foi um `border` CSS) foram **removidas** a
+> pedido do cliente, por um layout mais limpo (referência: cupom de senha da
+> Caixa Econômica, sem separador). O respiro visual entre os blocos passou a
+> vir de `margin-top` em `.cupom-fila`/`.cupom-datahora`, não de uma linha.
+> Estrutura atual: empresa → fila → código → data/hora → endereço/telefone,
+> sem nenhum separador entre eles.
+
 **3. Avaliação: dá pra forçar as configs do diálogo de impressão via CSS?**
 (pedido explícito - a alternativa a depender de alguém marcar as opções certas
 toda vez):
@@ -3742,6 +3753,80 @@ e documentada aqui. Suíte completa sem falhas.
 
 **Arquivos alterados:** `app/templates/totem/senha_gerada.html`,
 `tests/test_regressao_cupom_impressao_navegador.py`.
+
+---
+
+## 10.45. ADENDO — Campos opcionais nulos apareciam como a string "None" (cupom mostrando "None"/"None")
+
+> Reportado pelo cliente: cupom impresso mostrando literalmente a palavra
+> "None" no lugar do endereço/telefone quando esses campos não estavam
+> preenchidos para aquela unidade.
+
+**1. Causa raiz - não é bug no cupom, é bug no FORMULÁRIO DE EDIÇÃO:** o
+template `totem/senha_gerada.html` já fazia o `{% if unidade.endereco %}`
+certo desde sempre (confirmado lendo o código antes de mexer - não vaza
+"None" quando o campo é `NULL` de verdade). O bug real está nos formulários
+de edição do admin: `{{ campo if objeto else '' }}` só trata o caso "o
+OBJETO inteiro é `None`" (tela de "Novo/Nova", sem registro ainda) - não
+trata o caso "o objeto existe, mas o CAMPO em si é `None`" (registro
+existente, campo opcional nunca preenchido). Nesse segundo caso, o Jinja
+renderiza a string literal `"None"` dentro do `value=""`/`<textarea>`. Se o
+admin abrisse o formulário e salvasse sem tocar nesse campo específico
+(cenário comum - só queria editar outra coisa), o texto `"None"` (uma
+string NÃO-vazia) sobrevivia ao `.strip() or None` do backend e virava o
+valor de **verdade** no banco, substituindo o `NULL` original. O cupom
+então mostrava "None" porque o campo genuinamente passou a conter essa
+string - o `{% if %}` do cupom nunca teve chance de filtrar, porque não
+havia mais nada pra filtrar.
+
+**2. Confirmado com dado real de produção antes de corrigir** (mesmo
+padrão de investigação desta sessão - nunca assumir, sempre checar o banco
+real primeiro): `unidades.telefone` (id 3, "Laranjeiras") e
+`totens.nome_impressora_windows` (ids 1, 2, 3) já estavam com a string
+`"None"` gravada. A unidade "Banco de Sangue" (a do cupom da foto) já
+estava com `NULL` de verdade no momento da investigação - consistente com
+alguém ter aberto o formulário, visto o texto "None" no campo, apagado
+manualmente e salvo (o que corrige por acidente aquele registro específico
+via a lógica correta do backend, sem tocar na causa raiz no template).
+
+**3. Escopo do bug - 5 campos opcionais em 5 formulários, dois níveis de
+gravidade:**
+- **Corrompem dado de verdade** (string não-vazia sobrevive ao `.strip() or
+  None`): `Unidade.endereco`/`telefone`, `Empresa.cnpj`,
+  `Totem.nome_impressora_windows`. Corrigidos com `(campo if objeto else
+  '') or ''`.
+- **Só cosmético** (`Fila.tempo_espera_maximo_min`/
+  `tempo_atendimento_maximo_min`, `TipoSenha.tempo_maximo_min`): o backend
+  lê com `request.form.get(..., type=int) or None` - o Werkzeug descarta
+  silenciosamente `"None"` como texto inválido pra `int` e grava `NULL`
+  mesmo assim, então o dado nunca corrompia de verdade, só a UX ficava
+  confusa mostrando "None" no campo numérico. Corrigidos com `is not none`
+  (não `or ''` - um valor `0` legítimo é falsy em Python/Jinja, `or`
+  trocaria por `''` incorretamente pra um campo numérico).
+
+**4. Limpeza dos dados já corrompidos:** as linhas com `"None"` literal
+identificadas no item 2 foram corrigidas direto no banco (`UPDATE ... SET
+campo = NULL WHERE campo = 'None'`), restaurando o estado que sempre
+deveria ter existido - não é dado novo, é a correção do valor que o bug
+gravou por engano.
+
+**5. Teste** (`tests/test_regressao_crud_admin_empresas_unidades.py`, 2
+casos novos): GET no formulário de edição de Unidade/Empresa com campo
+opcional `None` confirma que a string "None" não aparece no HTML
+renderizado (nem no `<textarea>`, nem no `value=""`); round-trip completo
+(GET + POST simulando "admin salva sem tocar no campo") confirma que o
+banco continua com `NULL` de verdade depois de salvar, não a string
+"None". Sanity check manual: revertida cada correção temporariamente,
+confirmado que a asserção certa quebra (a primeira tentativa da asserção
+do CNPJ tinha a ordem de atributos HTML errada - `id="cnpj" value="None"`
+em vez de `name="cnpj" value="None"` - corrigida antes de confirmar o
+sanity check de verdade). Suíte completa sem falhas.
+
+**Arquivos alterados:** `app/templates/admin/unidades/form.html`,
+`app/templates/admin/empresas/form.html`, `app/templates/admin/totens/
+form.html`, `app/templates/admin/filas/form.html`, `app/templates/admin/
+tipos_senha/form.html`; `tests/test_regressao_crud_admin_empresas_unidades.py`
+ajustado.
 
 ---
 

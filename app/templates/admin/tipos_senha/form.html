@@ -27,9 +27,13 @@
       <input type="text" id="peso_prioridade" name="peso_prioridade"
              value="{{ valores.peso_prioridade if valores else (tipo.peso_prioridade if tipo else 0) }}">
 
+      {# `is not none` (não `or ''`) - mesmo bug de fundo corrigido em
+         admin/unidades/form.html, aqui só cosmético (backend usa type=int,
+         descarta "None" como texto inválido). #}
       <label for="tempo_maximo_min">Tempo máximo de referência (minutos, opcional)</label>
+      {% set tempo_maximo_val = valores.tempo_maximo_min if valores else (tipo.tempo_maximo_min if tipo else none) %}
       <input type="text" id="tempo_maximo_min" name="tempo_maximo_min"
-             value="{{ valores.tempo_maximo_min if valores else (tipo.tempo_maximo_min if tipo else '') }}">
+             value="{{ tempo_maximo_val if tempo_maximo_val is not none else '' }}">
 
       <p><button class="botao" type="submit" style="margin-top:1.5rem;">Salvar</button></p>
     </form>

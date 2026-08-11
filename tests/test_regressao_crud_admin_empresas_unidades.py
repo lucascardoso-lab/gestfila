@@ -18,6 +18,19 @@ pela rota). Este teste cobre:
    (404, não 403, pra não revelar que o ID existe - mesmo padrão documentado
    no docstring de autorizar_objeto).
 
+2.1) Bug real reportado em produção: campos opcionais nulos (Unidade.
+   endereco/telefone, Empresa.cnpj) apareciam como a string literal "None"
+   no formulário de edição - `{{ campo if objeto else '' }}` só tratava
+   "objeto é None" (tela de criação), não "objeto existe mas o campo em si
+   é None". Salvar sem tocar no campo persistia "None" como valor de
+   verdade no banco (sobrevive ao `.strip() or None` do backend por ser
+   string não-vazia) - o cupom impresso do totem passava a mostrar "None"
+   como endereço/telefone real. Corrigido nos templates (`(campo if objeto
+   else '') or ''`); mesmo padrão de bug corrigido em admin/totens/form.html
+   (nome_impressora_windows) e admin/filas.py/admin/tipos_senha.py (campos
+   numéricos, só cosmético - o backend usa type=int e descarta "None" como
+   texto inválido), fora do escopo deste arquivo.
+
 3) Perfis: tela somente-leitura (não existe CRUD de perfil pela web, ver
    README) - só confere que lista os perfis do seed e que é restrita a
    super admin.
@@ -177,6 +190,59 @@ assert resp.status_code == 404
 with app.app_context():
     assert db.session.get(Unidade, ids["unidade_b1"]).ativo is True
 ok("Admin da empresa A não consegue alternar ativo/inativo de unidade da empresa B (404, nada alterado)")
+
+# ===========================================================================
+# D.1) Bug real reportado em produção: campos opcionais nulos (endereco/
+#      telefone de Unidade, cnpj de Empresa) apareciam como a STRING literal
+#      "None" no formulário de edição - `{{ campo if objeto else '' }}` só
+#      tratava "objeto é None" (tela de criação), não "objeto existe mas o
+#      campo em si é None". Se o admin salvasse sem tocar nesse campo, o
+#      texto "None" (não-vazio) sobrevivia ao `.strip() or None` do backend e
+#      virava o valor de VERDADE no banco - o cupom impresso do totem passava
+#      a mostrar "None" como se fosse o endereço/telefone real. unidade_a1
+#      already tem endereco/telefone=None (setados assim no bloco D acima).
+# ===========================================================================
+resp = c_admin_a.get(f"/admin/unidades/{ids['unidade_a1']}/editar")
+assert resp.status_code == 200
+texto_form_unidade = resp.data.decode("utf-8")
+# extrai o conteúdo real do <textarea id="endereco"> e do value="" do telefone
+trecho_endereco = texto_form_unidade[texto_form_unidade.index('id="endereco"'):texto_form_unidade.index("</textarea>", texto_form_unidade.index('id="endereco"'))]
+assert ">None<" not in trecho_endereco and trecho_endereco.rstrip().endswith(">")  # textarea vazia, sem "None" antes do fechamento
+trecho_telefone = texto_form_unidade[texto_form_unidade.index('id="telefone"'):texto_form_unidade.index('id="telefone"') + 200]
+assert 'value="None"' not in trecho_telefone
+ok("Formulário de edição de Unidade com endereco/telefone=None NÃO renderiza a string 'None' nos campos")
+
+# round-trip completo: "admin abre o formulário e salva sem tocar em nada" -
+# confirma que o banco continua None de verdade, não a string "None".
+resp = c_admin_a.post(
+    f"/admin/unidades/{ids['unidade_a1']}/editar",
+    data={"nome": "Unidade A1 Renomeada", "endereco": "", "telefone": ""},
+    follow_redirects=True,
+)
+assert resp.status_code == 200
+with app.app_context():
+    unidade_pos_save = db.session.get(Unidade, ids["unidade_a1"])
+    assert unidade_pos_save.endereco is None
+    assert unidade_pos_save.telefone is None
+ok("Salvar o formulário sem alterar endereco/telefone mantém None de verdade no banco (não a string 'None')")
+
+# mesmo bug, mesma correção: Empresa.cnpj (nullable) - empresa nova sem CNPJ.
+resp = c_super.post(
+    "/admin/empresas/nova",
+    data={"nome": "Clinica Sem CNPJ", "cnpj": ""},
+    follow_redirects=True,
+)
+assert resp.status_code == 200
+with app.app_context():
+    empresa_sem_cnpj = Empresa.query.filter_by(nome="Clinica Sem CNPJ").first()
+    assert empresa_sem_cnpj is not None and empresa_sem_cnpj.cnpj is None
+    id_empresa_sem_cnpj = empresa_sem_cnpj.id
+
+resp = c_super.get(f"/admin/empresas/{id_empresa_sem_cnpj}/editar")
+assert resp.status_code == 200
+texto_form_empresa = resp.data.decode("utf-8")
+assert 'name="cnpj" value="None"' not in texto_form_empresa
+ok("Formulário de edição de Empresa com cnpj=None NÃO renderiza a string 'None' no campo")
 
 # ===========================================================================
 # E) Perfis: tela somente-leitura, restrita a super admin.

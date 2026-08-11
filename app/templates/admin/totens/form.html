@@ -34,8 +34,12 @@
       </select>
 
       <label for="nome_impressora_windows">Nome da impressora no Windows (opcional - seção 10.6)</label>
+      {# `or ''` no final - mesmo bug corrigido em admin/unidades/form.html:
+         totem existente com este campo nunca preenchido (None) renderizava a
+         string literal "None", que virava valor de verdade se salvo sem
+         edição (sobrevive ao "or None" do backend por ser string não-vazia). #}
       <input type="text" id="nome_impressora_windows" name="nome_impressora_windows" maxlength="120"
-             value="{{ valores.nome_impressora_windows if valores else (totem.nome_impressora_windows if totem else '') }}"
+             value="{{ (valores.nome_impressora_windows if valores else (totem.nome_impressora_windows if totem else '')) or '' }}"
              placeholder='ex.: Bematech MP-4200 TH'>
       <p class="subtitulo" style="margin:.35rem 0 0;">Nome exato como aparece em "Dispositivos e Impressoras" do Windows deste totem. Deixe em branco para não imprimir (só exibição em tela).</p>
 

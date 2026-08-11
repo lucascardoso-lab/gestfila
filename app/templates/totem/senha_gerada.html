@@ -25,10 +25,8 @@
           <img class="cupom-logo" src="{{ url_for('static', filename='uploads/logos/' + unidade.empresa.logo_filename) }}" alt="">
         {% endif %}
         <p class="cupom-empresa">{{ unidade.empresa.nome }}</p>
-        <p class="cupom-separador">- - - - - - - - - - - - - - - -</p>
         <p class="cupom-fila">{{ fila.nome }}</p>
         <p class="cupom-codigo">{{ senha.codigo }}</p>
-        <p class="cupom-separador">- - - - - - - - - - - - - - - -</p>
         <p class="cupom-datahora" id="cupom-data-hora" data-momento="{{ senha.criada_em.isoformat() }}Z">--/--/---- --:--</p>
         {% if unidade.endereco %}<p class="cupom-contato">{{ unidade.endereco }}</p>{% endif %}
         {% if unidade.telefone %}<p class="cupom-contato">{{ unidade.telefone }}</p>{% endif %}
@@ -134,10 +132,13 @@
        como antes desta feature - só o nome em texto, nada muda. */
     .cupom-logo { max-width: 100%; max-height: 60px; margin: 0 auto .5rem; display: block; }
     .cupom-empresa { font-size: 1.1rem; }
-    .cupom-fila { font-size: .95rem; text-transform: uppercase; letter-spacing: .04em; }
+    /* margin-top extra em .cupom-fila/.cupom-datahora - respiro visual no
+       lugar das linhas tracejadas removidas (pedido do cliente, ref. cupom
+       da Caixa Econômica sem separador), sem reintroduzir nenhuma linha. */
+    .cupom-fila { font-size: .95rem; text-transform: uppercase; letter-spacing: .04em; margin-top: .6rem; }
     .cupom-codigo { font-size: 2.1rem; letter-spacing: .05em; margin: .4rem 0 !important; }
-    .cupom-datahora, .cupom-contato { font-size: .85rem; }
-    .cupom-separador { font-size: .9rem; }
+    .cupom-datahora { font-size: .85rem; margin-top: .6rem; }
+    .cupom-contato { font-size: .85rem; }
 
     #botao-imprimir { margin-top: 1rem; max-width: 320px; min-height: auto; padding: .9rem 1rem; font-size: 1.2rem; }
 

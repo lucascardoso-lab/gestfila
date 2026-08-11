@@ -70,13 +70,22 @@
         {% endfor %}
       </select>
 
+      {# `if X is not none else ''` (não `or ''`) - campo numérico, 0 seria um
+         valor falsy válido e "or" o trocaria por '' incorretamente. Mesmo
+         bug de fundo corrigido em admin/unidades/form.html: fila existente
+         com este campo nunca preenchido (None) renderizava a string literal
+         "None" no value (aqui só cosmético - o backend usa type=int, que
+         descarta "None" como texto inválido e grava NULL mesmo assim - mas
+         ainda é uma UX confusa mostrar "None" no campo). #}
       <label for="tempo_espera_maximo_min">Tempo de espera máximo (minutos, opcional)</label>
+      {% set tempo_espera_val = valores.tempo_espera_maximo_min if valores else (fila.tempo_espera_maximo_min if fila else none) %}
       <input type="text" id="tempo_espera_maximo_min" name="tempo_espera_maximo_min"
-             value="{{ valores.tempo_espera_maximo_min if valores else (fila.tempo_espera_maximo_min if fila else '') }}">
+             value="{{ tempo_espera_val if tempo_espera_val is not none else '' }}">
 
       <label for="tempo_atendimento_maximo_min">Tempo de atendimento máximo (minutos, opcional)</label>
+      {% set tempo_atendimento_val = valores.tempo_atendimento_maximo_min if valores else (fila.tempo_atendimento_maximo_min if fila else none) %}
       <input type="text" id="tempo_atendimento_maximo_min" name="tempo_atendimento_maximo_min"
-             value="{{ valores.tempo_atendimento_maximo_min if valores else (fila.tempo_atendimento_maximo_min if fila else '') }}">
+             value="{{ tempo_atendimento_val if tempo_atendimento_val is not none else '' }}">
 
       {% set alerta_sel = valores.alerta_email if valores else (fila.alerta_email if fila else false) %}
       <label><input type="checkbox" name="alerta_email" {{ 'checked' if alerta_sel else '' }}> Enviar alerta por e-mail</label>

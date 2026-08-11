@@ -12,7 +12,11 @@
       <input type="text" id="nome" name="nome" value="{{ empresa.nome if empresa else '' }}" required autofocus>
 
       <label for="cnpj">CNPJ (opcional)</label>
-      <input type="text" id="cnpj" name="cnpj" value="{{ empresa.cnpj if empresa else '' }}">
+      {# `or ''` - mesmo bug corrigido em admin/unidades/form.html: empresa
+         existente com cnpj nunca preenchido (None) renderizava a string
+         literal "None" no campo, que virava valor de verdade se salvo sem
+         edição (sobrevive ao "or None" do backend por ser string não-vazia). #}
+      <input type="text" id="cnpj" name="cnpj" value="{{ (empresa.cnpj if empresa else '') or '' }}">
 
       {# Upload de logo (adendo 10.43) só existe na edição - precisa do ID da
          empresa (nome de arquivo determinístico 'empresa_<id>.png'), então

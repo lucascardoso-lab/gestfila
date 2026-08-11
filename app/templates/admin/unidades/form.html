@@ -14,10 +14,18 @@
       <input type="text" id="nome" name="nome" value="{{ unidade.nome if unidade else '' }}" required autofocus>
 
       <label for="endereco">Endereço (opcional)</label>
-      <textarea id="endereco" name="endereco" rows="2" placeholder="Rua, número, bairro, cidade - aparece no cupom impresso do totem">{{ unidade.endereco if unidade else '' }}</textarea>
+      {# `(unidade.endereco if unidade else '') or ''` - bug real corrigido:
+         só tratar "unidade é None" (tela de Nova) não bastava. Numa unidade
+         JÁ existente com endereco nunca preenchido (Python None), o Jinja
+         renderizava a string literal "None" dentro do campo - se o admin
+         salvasse sem tocar nele, esse texto virava o valor de verdade no
+         banco (passava no "or None" do backend por ser uma string não-vazia,
+         mesmo sendo o texto errado). Cupom impresso passava a mostrar "None"
+         como se fosse o endereço real. #}
+      <textarea id="endereco" name="endereco" rows="2" placeholder="Rua, número, bairro, cidade - aparece no cupom impresso do totem">{{ (unidade.endereco if unidade else '') or '' }}</textarea>
 
       <label for="telefone">Telefone (opcional)</label>
-      <input type="text" id="telefone" name="telefone" value="{{ unidade.telefone if unidade else '' }}" placeholder="(00) 0000-0000">
+      <input type="text" id="telefone" name="telefone" value="{{ (unidade.telefone if unidade else '') or '' }}" placeholder="(00) 0000-0000">
 
       <p><button class="botao" type="submit" style="margin-top:1.5rem;">Salvar</button></p>
     </form>
