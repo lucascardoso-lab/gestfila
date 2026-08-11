@@ -389,6 +389,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.43 | Upload de logo por empresa (cupom + painel de TV + admin) |
 | 10.44 | `@page` volta pra altura "auto" - premissa da 10.40 estava errada (rolo contínuo, não etiqueta fixa) |
 | 10.45 | Campos opcionais nulos apareciam como a string "None" (cupom mostrando "None"/"None") |
+| 10.46 | Impressão silenciosa (kiosk) saía sem CSS: `<script>` (window.print síncrono) vinha antes do `<style>` do cupom no HTML |
 
 ---
 
@@ -3827,6 +3828,85 @@ sanity check de verdade). Suíte completa sem falhas.
 form.html`, `app/templates/admin/filas/form.html`, `app/templates/admin/
 tipos_senha/form.html`; `tests/test_regressao_crud_admin_empresas_unidades.py`
 ajustado.
+
+---
+
+## 10.46. ADENDO — Impressão silenciosa (kiosk) saía sem CSS: `<style>` do cupom precisa vir ANTES do `<script>`
+
+> Reportado pelo cliente: com a impressão silenciosa ativada (kiosk printing
+> / `print.always_print_silent` no Firefox, `--kiosk-printing` no
+> Chrome/Edge - sem o diálogo nativo do navegador), a etiqueta saía
+> desconfigurada, sem a formatação CSS do cupom. Com o diálogo de impressão
+> normal, saía correta. Investigação pedida contra 5 hipóteses específicas
+> (corrida de carregamento de CSS, tamanho/margem de `@page`,
+> `background-color`/`print-color-adjust`, disparo pelo Socket.IO antes do
+> paint, `@media print` escondendo o nó errado) - relatada ao cliente com
+> arquivo:linha ANTES de qualquer correção ser aplicada, só corrigido depois
+> de aprovação explícita.
+
+**1. Causa raiz - corrida de parsing HTML, não rede/webfont:** em
+`app/templates/totem/senha_gerada.html`, o bloco `<script>` do cupom (que
+chama `window.print()` de forma SÍNCRONA já no carregamento inicial, dentro
+de um guard de `sessionStorage` que evita imprimir a mesma senha duas
+vezes) vinha ANTES do bloco `<style>` (que tem as regras de `.cupom`,
+`@page`, `@media print`). O parser HTML do navegador executa `<script>`
+assim que o encontra, ANTES de processar o resto do documento que vem
+depois dele - então `window.print()` podia disparar antes do parser sequer
+ter chegado nas regras do `<style>`, com o CSSOM do cupom ainda incompleto.
+Não é bug de rede/webfont: todo o CSS deste cupom é inline (sem `<link>`
+externo nem `@font-face` - "Courier New" é fonte de sistema), então não
+tem nada "carregando" de fora pra dar corrida com um `setTimeout` ou
+`link.onload`.
+
+**2. Por que só aparecia sem diálogo:** com o diálogo nativo de impressão,
+a espera pelo clique humano no botão "Imprimir" dá folga de sobra pro
+parser terminar de processar o resto do documento (inclusive o `<style>`)
+muito antes da impressão de fato renderizar - a corrida existia no código,
+mas nunca tinha chance de se manifestar visivelmente. Sem diálogo
+(impressão silenciosa), a impressão acontece o mais rápido possível assim
+que `window.print()` é chamado, sem essa folga - a corrida vira bug visível
+com frequência alta.
+
+**3. 4 das 5 hipóteses do cliente descartadas com evidência direta:**
+`@page` (tamanho/margem) já estava correto e sem `named page` conflitante
+(10.44); não há dependência de `background-color`/`print-color-adjust` no
+CSS do cupom (regras usam texto bold em vez de cor de fundo, herdado da
+correção de contraste da 10.38); a chamada de `window.print()` não depende
+de nenhum evento do Socket.IO, só do carregamento inicial da própria página
+do cupom; o `@media print` esconde o nó certo (`.totem` inteiro, exceto
+`.cupom` - mesma regra testada desde a 10.38). A quinta hipótese (corrida
+de carregamento de CSS) se confirmou, mas numa variante diferente da
+levantada pelo cliente (CSS externo/`<link>`/webfont) - a real é ordem de
+parsing entre `<script>` síncrono e `<style>` inline no mesmo documento.
+
+**4. Correção - só reordenar, sem `setTimeout`/`await` novo:** o bloco
+`<style>` foi movido pra ANTES do `<script>` no template (o HTML/CSS em si
+não mudou, só a ORDEM dos dois blocos). Isso garante que o CSSOM do cupom
+esteja completo antes de qualquer script rodar, incluindo o
+`window.print()` automático. Não muda nada no modo com diálogo (que já
+tinha folga de sobra) - só fecha a corrida que, nesse modo, nunca chegava a
+se manifestar.
+
+**5. Teste** (`tests/test_regressao_cupom_impressao_navegador.py`, caso
+C.1 novo): confirma que o `<style>` do CUPOM vem antes do `<script>` do
+cupom no HTML renderizado. Armadilha encontrada e corrigida durante o
+próprio sanity check desta correção: a primeira versão da asserção usava
+`texto.index("<style>")` (primeira ocorrência no documento inteiro), que
+sem querer batia no `<style>` de `_layout.html` (dentro do `<head>`,
+sempre antes de qualquer conteúdo do `<body>` independente da ordem local
+do cupom) - a asserção "passava" mesmo com o bug revertido de propósito
+pra teste. Corrigido pra `texto.rindex("<style>")` (ÚLTIMA ocorrência no
+documento): como `_layout.html` só tem um `<style>` e o cupom só tem um
+`<style>` e um `<script>`, e o do layout vem sempre primeiro (é do
+`<head>`), o último `<style>` do documento é necessariamente o do cupom,
+esteja ele antes ou depois do `<script>`. Sanity check refeito depois da
+correção do teste: revertida a ordem de propósito, a asserção quebrou
+como esperado; restaurada a ordem certa, os 19 testes do arquivo voltaram
+a passar. Suíte completa (~49 arquivos) sem falhas.
+
+**Arquivos alterados:** `app/templates/totem/senha_gerada.html` (só
+reordenação de blocos, sem mudança de conteúdo);
+`tests/test_regressao_cupom_impressao_navegador.py` (caso C.1 novo).
 
 ---
 

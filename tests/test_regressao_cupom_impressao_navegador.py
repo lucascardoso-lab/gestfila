@@ -213,6 +213,45 @@ assert "sessionStorage" not in bloco_listener_manual
 ok("Botão manual chama a mesma função de impressão, sem depender do guard - sempre disponível como fallback")
 
 # ===========================================================================
+# C.1) <style> do CUPOM (local, dentro do content block) vem ANTES do
+#      <script> do cupom no documento (10.46) - bug real de produção:
+#      impressão silenciosa (kiosk/always_print_silent) saía sem
+#      formatação, só com diálogo normal saía certa. Causa: o <script>
+#      chama window.print() de forma SÍNCRONA já no carregamento inicial
+#      (guard de sessionStorage) - o parser HTML executa scripts assim que
+#      os encontra, ANTES de processar o que vem depois deles no documento.
+#      Com o <style> (regras de .cupom/@page/@media print) posicionado
+#      DEPOIS do <script> (ordem antiga), print() podia disparar antes do
+#      parser sequer ter chegado nessas regras - o CSSOM ainda não tinha
+#      elas aplicadas. Com diálogo, a espera pelo clique humano escondia a
+#      corrida; sem diálogo, não há essa folga. Não é bug de rede/webfont
+#      (nunca foi) - é puramente ordem de parsing, por isso a correção é só
+#      reordenar os dois blocos, sem nenhum setTimeout/await novo.
+#      IMPORTANTE: usar rindex/índice do <script> LOCAL (o único que existe
+#      no documento inteiro, então texto.index("<script>") já é ele), mas
+#      texto.index("<style>") sozinho pegaria o <style> de _layout.html
+#      (dentro do <head>, sempre antes de qualquer conteúdo do body) e
+#      passaria mesmo com o <style>/<script> do CUPOM na ordem errada - foi
+#      exatamente isso que aconteceu no sanity check desta correção (a
+#      asserção continuou "passando" depois de reverter o fix de propósito).
+#      Por isso aqui usamos o ÚLTIMO <style> do documento (rindex, sem
+#      limite de posição): _layout.html só tem UM <style> (no <head>) e o
+#      cupom só tem UM <style> - como o do layout vem sempre primeiro (é
+#      do <head>, sempre antes do <body>), o ÚLTIMO <style> do documento
+#      inteiro É necessariamente o do cupom, esteja ele antes OU depois do
+#      <script> (que também é único no documento). Um rindex limitado a
+#      "antes do <script>" (tentativa anterior) falha nesse exato cenário:
+#      se o <style> do cupom estiver DEPOIS do <script> (bug revertido de
+#      propósito nesta sanity check), a busca limitada só encontra de novo
+#      o <style> do layout, e a asserção passa mesmo com o bug presente -
+#      foi exatamente isso que escondeu a regressão no sanity check.
+# ===========================================================================
+indice_script_cupom = texto.index("<script>")
+indice_style_cupom = texto.rindex("<style>")
+assert indice_style_cupom < indice_script_cupom
+ok("<style> do CUPOM (não o do _layout.html) vem antes do <script> (que chama window.print()) - CSSOM completo antes de qualquer script rodar")
+
+# ===========================================================================
 # D) CSS @media print isola só o cupom.
 # ===========================================================================
 assert "@media print" in texto

@@ -37,74 +37,25 @@
     <a class="botao-totem navegacao" href="{{ url_for('totem.tela_raiz', slug=totem.slug) }}" style="margin-top:1.5rem; max-width:320px;">Novo atendimento</a>
   </div>
 
-  <script>
-    (function () {
-      var URL_RETORNO = {{ url_for('totem.tela_raiz', slug=totem.slug) | tojson }};
-      // Padronizado em 3s (era 20s até a 10.28) - o pause/resume em beforeprint/
-      // afterprint (ver abaixo) desacopla o timer da duração do diálogo de
-      // impressão, então não precisa de folga extra pra "dar tempo" do diálogo:
-      // o diálogo pausa o timer inteiro, e os 3s só começam a contar DEPOIS
-      // dele fechar, não durante.
-      var SEGUNDOS_RETORNO = 3;
-      // sessionStorage (não localStorage) de propósito: sobrevive a um F5/
-      // reconexão de rede na MESMA aba (não reabre o diálogo pra senha já
-      // processada), mas não persiste entre sessões/abas novas - cada chave é
-      // por senha.id, então uma senha NOVA (próximo atendimento) sempre
-      // dispara de novo; só a MESMA senha nunca dispara duas vezes.
-      var CHAVE_JA_IMPRESSO = "gestfila_totem_impresso_{{ senha.id }}";
-
-      // data/hora nunca formatada no servidor (mesma convenção do resto do
-      // projeto) - "Z" força interpretação UTC antes de converter pro fuso
-      // local de quem está vendo a tela (aqui, o próprio totem). Formatado
-      // ANTES do print automático abaixo, pra o cupom impresso já sair com a
-      // data certa, não o placeholder "--/--/---- --:--".
-      var elDataHora = document.getElementById("cupom-data-hora");
-      var momento = new Date(elDataHora.dataset.momento);
-      elDataHora.textContent =
-        momento.toLocaleDateString("pt-BR") + "  " + momento.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-
-      // Retorno automático via setTimeout próprio, NÃO <meta refresh>: um
-      // meta refresh é 100% nativo do navegador, sem nenhum gancho de JS -
-      // continuaria contando por baixo do diálogo de impressão em qualquer
-      // navegador, podendo trocar de tela COM o diálogo ainda aberto. Um
-      // timer em JS dá pra pausar/retomar nos eventos padronizados
-      // beforeprint/afterprint (suportados desde o IE10 - não varia entre
-      // Chrome/Edge/Firefox modernos).
-      var timerRetorno = null;
-      function agendarRetorno() {
-        cancelarRetorno();
-        timerRetorno = setTimeout(function () {
-          window.location.href = URL_RETORNO;
-        }, SEGUNDOS_RETORNO * 1000);
-      }
-      function cancelarRetorno() {
-        if (timerRetorno) {
-          clearTimeout(timerRetorno);
-          timerRetorno = null;
-        }
-      }
-      window.addEventListener("beforeprint", cancelarRetorno);
-      window.addEventListener("afterprint", agendarRetorno);
-
-      function imprimirComprovante() {
-        window.print();
-      }
-      document.getElementById("botao-imprimir").addEventListener("click", imprimirComprovante);
-
-      agendarRetorno();
-
-      // Dispara a impressão automaticamente ao carregar (reduz fricção,
-      // pedido do cliente) - só se esta senha específica ainda não tiver
-      // disparado nesta aba. O botão "Imprimir comprovante de novo" continua
-      // como fallback manual, sempre disponível, pra quem fechar/cancelar o
-      // diálogo automático sem imprimir.
-      if (!sessionStorage.getItem(CHAVE_JA_IMPRESSO)) {
-        sessionStorage.setItem(CHAVE_JA_IMPRESSO, "1");
-        imprimirComprovante();
-      }
-    })();
-  </script>
-
+  {# CSS ANTES do <script> DE PROPÓSITO (10.46) - bug real de produção:
+     impressão silenciosa (kiosk/always_print_silent) saía sem formatação,
+     só com diálogo normal saía certa. Causa: o <script> abaixo chama
+     window.print() de forma SÍNCRONA já no carregamento inicial (guard de
+     sessionStorage, poucas linhas abaixo) - o parser HTML executa scripts
+     assim que os encontra, ANTES de processar o que vem depois deles no
+     documento. Com o <style> deste cupom posicionado DEPOIS do <script>
+     (ordem antiga), print() podia disparar antes do parser sequer ter
+     chegado nas regras de .cupom/@page/@media print - o CSSOM ainda não
+     tinha essas regras aplicadas. Com diálogo, a espera pelo clique humano
+     escondia a corrida (dava tempo de sobra pro parser terminar o resto do
+     documento antes da imprensão de fato renderizar); sem diálogo, a
+     impressão acontece o mais rápido possível, sem essa folga. Não é bug de
+     rede/webfont (todo este CSS é inline, sem <link> externo nem @font-face -
+     "Courier New" é fonte de sistema) - é puramente ordem de parsing.
+     Correção: mover o <style> pra ANTES do <script>, garantindo que o CSSOM
+     do cupom esteja completo antes de qualquer script rodar. Não muda nada
+     no modo com diálogo (que já tinha folga de sobra) - só fecha a corrida
+     que não existia mais nesse modo. #}
   <style>
     .tela-pos-geracao { display: flex; flex-direction: column; align-items: center; width: 100%; }
 
@@ -195,4 +146,72 @@
       @page { size: 80mm auto; margin: 0; }
     }
   </style>
+
+  <script>
+    (function () {
+      var URL_RETORNO = {{ url_for('totem.tela_raiz', slug=totem.slug) | tojson }};
+      // Padronizado em 3s (era 20s até a 10.28) - o pause/resume em beforeprint/
+      // afterprint (ver abaixo) desacopla o timer da duração do diálogo de
+      // impressão, então não precisa de folga extra pra "dar tempo" do diálogo:
+      // o diálogo pausa o timer inteiro, e os 3s só começam a contar DEPOIS
+      // dele fechar, não durante.
+      var SEGUNDOS_RETORNO = 3;
+      // sessionStorage (não localStorage) de propósito: sobrevive a um F5/
+      // reconexão de rede na MESMA aba (não reabre o diálogo pra senha já
+      // processada), mas não persiste entre sessões/abas novas - cada chave é
+      // por senha.id, então uma senha NOVA (próximo atendimento) sempre
+      // dispara de novo; só a MESMA senha nunca dispara duas vezes.
+      var CHAVE_JA_IMPRESSO = "gestfila_totem_impresso_{{ senha.id }}";
+
+      // data/hora nunca formatada no servidor (mesma convenção do resto do
+      // projeto) - "Z" força interpretação UTC antes de converter pro fuso
+      // local de quem está vendo a tela (aqui, o próprio totem). Formatado
+      // ANTES do print automático abaixo, pra o cupom impresso já sair com a
+      // data certa, não o placeholder "--/--/---- --:--".
+      var elDataHora = document.getElementById("cupom-data-hora");
+      var momento = new Date(elDataHora.dataset.momento);
+      elDataHora.textContent =
+        momento.toLocaleDateString("pt-BR") + "  " + momento.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+      // Retorno automático via setTimeout próprio, NÃO <meta refresh>: um
+      // meta refresh é 100% nativo do navegador, sem nenhum gancho de JS -
+      // continuaria contando por baixo do diálogo de impressão em qualquer
+      // navegador, podendo trocar de tela COM o diálogo ainda aberto. Um
+      // timer em JS dá pra pausar/retomar nos eventos padronizados
+      // beforeprint/afterprint (suportados desde o IE10 - não varia entre
+      // Chrome/Edge/Firefox modernos).
+      var timerRetorno = null;
+      function agendarRetorno() {
+        cancelarRetorno();
+        timerRetorno = setTimeout(function () {
+          window.location.href = URL_RETORNO;
+        }, SEGUNDOS_RETORNO * 1000);
+      }
+      function cancelarRetorno() {
+        if (timerRetorno) {
+          clearTimeout(timerRetorno);
+          timerRetorno = null;
+        }
+      }
+      window.addEventListener("beforeprint", cancelarRetorno);
+      window.addEventListener("afterprint", agendarRetorno);
+
+      function imprimirComprovante() {
+        window.print();
+      }
+      document.getElementById("botao-imprimir").addEventListener("click", imprimirComprovante);
+
+      agendarRetorno();
+
+      // Dispara a impressão automaticamente ao carregar (reduz fricção,
+      // pedido do cliente) - só se esta senha específica ainda não tiver
+      // disparado nesta aba. O botão "Imprimir comprovante de novo" continua
+      // como fallback manual, sempre disponível, pra quem fechar/cancelar o
+      // diálogo automático sem imprimir.
+      if (!sessionStorage.getItem(CHAVE_JA_IMPRESSO)) {
+        sessionStorage.setItem(CHAVE_JA_IMPRESSO, "1");
+        imprimirComprovante();
+      }
+    })();
+  </script>
 {% endblock %}
