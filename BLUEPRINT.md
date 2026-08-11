@@ -383,10 +383,11 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.37 | Fuso da clínica resolvido no código (encerramento/filas corretos em servidor UTC) |
 | 10.38 | Correção do layout do cupom impresso (centralização + contraste) + procedimento de impressão |
 | 10.39 | Reset diário do sequencial usava dia civil em UTC, não da clínica (3º call-site do bug da 10.37) |
-| 10.40 | Etiqueta física de tamanho fixo (7x8cm): `@page` altura auto + páginas extras em branco |
+| 10.40 | Etiqueta física de tamanho fixo (7x8cm): `@page` altura auto + páginas extras em branco *(premissa física revista, ver 10.44)* |
 | 10.41 | Single-session enforcement no login (reaproveita sessao_versao da 10.15) |
 | 10.42 | Investigação "impressão em paisagem" - código correto, suspeita de driver Windows (sem mudança de código) |
 | 10.43 | Upload de logo por empresa (cupom + painel de TV + admin) |
+| 10.44 | `@page` volta pra altura "auto" - premissa da 10.40 estava errada (rolo contínuo, não etiqueta fixa) |
 
 ---
 
@@ -3284,6 +3285,15 @@ falhas.
 
 ## 10.40. ADENDO — Etiqueta física de tamanho FIXO (7x8cm, não rolo contínuo): faixa em branco no topo + páginas extras em branco
 
+> **⚠️ PREMISSA FÍSICA REVISTA NA 10.44** - dados novos confirmaram que esta
+> impressora é na verdade um rolo contínuo de 80mm (não uma etiqueta fixa de
+> 7x8cm como assumido abaixo) - a decisão do item 3 (`size: 80mm 70mm`) foi
+> **superseded** pela 10.44 (`size: 80mm auto`). O registro abaixo é mantido
+> como estava, sem edição retroativa - documenta o raciocínio e as evidências
+> disponíveis NAQUELE momento, que motivaram a decisão então correta com a
+> informação que se tinha. O colapso de altura (item 3, `visibility:hidden`)
+> continua válido e foi mantido na 10.44 - só o tamanho fixo da página mudou.
+
 > Reportado por foto comparando o cupom do sistema de referência (nítido,
 > sem espaço perdido) com o cupom do GESTFILA impresso numa etiqueta real de
 > banco de sangue (BSG016): faixa em branco no topo do cupom. Diferença de
@@ -3492,7 +3502,7 @@ ocorrência real (só um falso positivo de `text-transform`, propriedade
 diferente). Nenhuma regra de rotação esquecida em nenhum lugar do sistema.
 
 **2. Render de impressão real** (`--print-to-pdf` do Chrome + PyMuPDF, mesma
-técnica da 10.38/10.39/10.40): `MediaBox: 227.04 x 198.0 pts` = **80.09 x
+técnica da 10.38/10.40): `MediaBox: 227.04 x 198.0 pts` = **80.09 x
 69.85mm**, `rotation: 0`. O código pede exatamente o que a 10.40 documentou -
 sem rotação, sem fallback pra página grande tipo Letter/A4 (que apareceria
 como 215.9x279.4mm, o sintoma que a 10.40 já corrigiu uma vez). Conteúdo
@@ -3638,6 +3648,100 @@ empresas/form.html` e `listar.html`, `app/templates/totem/senha_gerada.html`,
 `app/templates/painel/tv.html` e `_layout.html`, `app/config.py`
 (`MAX_CONTENT_LENGTH`), `requirements.txt` (`Pillow`), `.gitignore`
 (`app/static/uploads/`); novo `tests/test_regressao_logo_empresa.py`.
+
+---
+
+## 10.44. ADENDO — `@page` volta pra altura "auto": premissa física da 10.40 estava errada (rolo contínuo, não etiqueta fixa)
+
+> **Decisão revista, não "vai-e-volta" por capricho.** A 10.40 fixou `@page
+> { size: 80mm 70mm }` em cima da premissa de que a impressora usa uma
+> etiqueta física de tamanho FIXO (7cm altura x 8cm largura). Dados novos
+> confirmados nesta sessão contradizem essa premissa: a impressora real é um
+> **rolo contínuo de 80mm de largura**, formato retrato, com **corte
+> automático rente ao conteúdo** - o mesmo tipo de impressora de senha usada
+> pela Caixa Econômica (referência visual enviada pelo cliente confirmando o
+> formato). Evidência decisiva: **o driver Windows desta impressora só
+> oferece a opção de papel 80x297mm** - papel de rolo contínuo padrão, nunca
+> um tamanho fixo de 70mm de altura. A 10.40 não estava errada em *querer*
+> resolver o problema da faixa em branco - estava errada na suposição física
+> sobre QUAL hardware estava sendo configurado.
+
+**1. Investigação (fase 1) - tentativa de reproduzir uma SEGUNDA causa antes
+de mexer em CSS:** antes de reverter a decisão da 10.40, investigado se
+havia uma causa de código adicional (não só a premissa física errada) pro
+problema relatado em produção. Testado via `--print-to-pdf` real (mesma
+técnica da 10.38/10.40/10.42), cenário exato do incidente relatado (fila
+"Recepção Banco de Sangue", unidade com endereço E telefone - o conteúdo
+mais alto do template):
+
+```
+atual_80x70_com_header:    paginas=1  80.09x69.85mm
+atual_80x70_sem_header:    paginas=1  80.09x69.85mm
+proposto_auto_com_header:  paginas=1  215.90x279.40mm (fallback Letter, esperado no headless)
+proposto_auto_sem_header:  paginas=1  215.90x279.40mm
+```
+
+**Não foi possível reproduzir uma segunda página em nenhuma combinação**,
+com ou sem cabeçalho/rodapé do navegador ligado. Também confirmado que não
+existe nenhum elemento fora de `.totem` em `totem/_layout.html` (`<body>`
+só tem `.totem`, que envolve tudo, inclusive o logo GESTFILA) e que
+`.gf-watermark` (usado no painel de TV) não é referenciado em nenhum
+template do totem. **Conclusão da fase 1:** nenhuma segunda causa de código
+encontrada em ambiente controlado - o colapso de altura da 10.40 (mantido,
+ver item 3) já garante 1 página sozinho, independente do `@page size`. Se
+alguma página extra ainda foi vista fisicamente em produção antes desta
+correção, a explicação mais provável é a mesma da 10.42 (driver não
+respeitando um `@page size` fixo que não correspondia ao hardware real) -
+**fica registrado como não totalmente explicado em ambiente controlado**,
+pendente de confirmação num teste físico real depois deste deploy.
+
+**2. Mudança:** `@page { size: 80mm 70mm; margin: 0; }` → `@page { size:
+80mm auto; margin: 0; }` (`app/templates/totem/senha_gerada.html`). Volta a
+ser o comportamento CERTO pra rolo contínuo: o corte automático da
+impressora decide onde a etiqueta termina, não uma altura fixa arbitrária
+no CSS. Validado por render real (`--print-to-pdf` + PyMuPDF): 1 página,
+conteúdo colado no topo (~1.2mm), sem overflow, tanto pro cupom curto
+quanto pro cenário real (Recepção Banco de Sangue, endereço+telefone,
+conteúdo terminando em ~50mm).
+
+**3. O que NÃO mudou - colapso de altura da 10.40, mantido integralmente:**
+`html, body { height: 0; overflow: hidden; }` + `.totem { min-height: 0;
+height: 0; ... }` dentro do `@media print` continuam necessários
+independente do tamanho de página - sem eles, o cabeçalho/título/dígitos/
+botões escondidos (`visibility:hidden` não tira do fluxo) desperdiçariam
+papel de rolo imprimindo espaço vazio antes do corte automático, mesmo com
+`size: auto` (o rolo seguiria alimentando até acabar o conteúdo REAL da
+página, que incluiria essa altura invisível). Este mecanismo não dependia
+da premissa física errada da 10.40 - continua correto.
+
+**4. Nota sobre o histórico - 10.38/10.40 marcadas como SUPERSEDIDAS, não
+apagadas:** a decisão da 10.40 (`size: 80mm 70mm`) foi tomada de boa-fé,
+com o melhor entendimento disponível na época (relato do cliente + medidas
+que pareciam confirmar uma etiqueta fixa) - o registro de POR QUE aquela
+decisão foi tomada continua no BLUEPRINT, sem edição retroativa. O que este
+adendo faz é registrar que dados novos (driver só oferece 80x297mm,
+referência visual da impressora real da Caixa) contradisseram a premissa, e
+documentar a correção com o mesmo rigor. A largura fixa de 80mm decidida na
+**10.38** continua válida e não foi revista - só a altura (`auto` vs. fixa)
+mudou.
+
+**5. Teste** (`tests/test_regressao_cupom_impressao_navegador.py`): D.4
+trocado de volta pra aceitar `@page { size: 80mm auto` e recusar `80mm
+70mm` (sanity check manual: revertido temporariamente pro valor antigo,
+confirmado que o teste quebra na asserção certa, restaurado). D.5 (colapso
+de altura) mantido sem alteração - continua válido. Novo caso D.6 reproduz
+o cenário real do incidente (fila "Recepção Banco de Sangue", unidade com
+endereço+telefone) - estrutural (confirma o HTML/CSS certos chegam pro
+navegador), não confirma "1 página" literalmente: isso exige motor de
+impressão real, e este projeto deliberadamente não depende de Chrome/
+PyMuPDF na suíte automatizada (mesmo padrão das validações manuais da
+10.38/10.40/10.42, nunca comitadas como teste - decisão confirmada
+com o cliente nesta sessão, não uma omissão). A confirmação de "1 página"
+pra este caso é a investigação da fase 1 (item 1 acima), rodada manualmente
+e documentada aqui. Suíte completa sem falhas.
+
+**Arquivos alterados:** `app/templates/totem/senha_gerada.html`,
+`tests/test_regressao_cupom_impressao_navegador.py`.
 
 ---
 

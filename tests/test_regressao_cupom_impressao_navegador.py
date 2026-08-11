@@ -74,7 +74,14 @@ with app.app_context():
 
     fila_completa = Fila(empresa_id=empresa.id, unidade_id=unidade_completa.id, nome="Recepcao Geral", sigla="RG")
     fila_sem_endereco = Fila(empresa_id=empresa.id, unidade_id=unidade_sem_endereco.id, nome="Laboratorio", sigla="LAB")
-    db.session.add_all([fila_completa, fila_sem_endereco])
+    # cenário real reportado em produção (10.44) - mesma unidade_completa
+    # (com endereço/telefone, o caso mais alto de conteúdo), fila com nome
+    # do incidente real ("Recepção Banco de Sangue").
+    fila_banco_sangue = Fila(
+        empresa_id=empresa.id, unidade_id=unidade_completa.id,
+        nome="Recepcao Banco de Sangue", sigla="RBS",
+    )
+    db.session.add_all([fila_completa, fila_sem_endereco, fila_banco_sangue])
     db.session.commit()
 
     # totem com nome_impressora_windows (legado) preenchido - prova que a nova
@@ -96,12 +103,16 @@ with app.app_context():
     botao_sem_endereco = TotemBotao(
         empresa_id=empresa.id, unidade_id=unidade_sem_endereco.id, label="Laboratorio", fila_id=fila_sem_endereco.id, ordem=1,
     )
-    db.session.add_all([botao_completo, botao_sem_endereco])
+    botao_banco_sangue = TotemBotao(
+        empresa_id=empresa.id, unidade_id=unidade_completa.id, label="Banco de Sangue", fila_id=fila_banco_sangue.id, ordem=2,
+    )
+    db.session.add_all([botao_completo, botao_sem_endereco, botao_banco_sangue])
     db.session.commit()
 
     ids = dict(
         totem_completo=totem_completo.id, botao_completo=botao_completo.id,
         totem_sem_endereco=totem_sem_endereco.id, botao_sem_endereco=botao_sem_endereco.id,
+        botao_banco_sangue=botao_banco_sangue.id,
     )
 
 c_totem = app.test_client()
@@ -249,33 +260,67 @@ assert "cupom-separador { font-size: .9rem; color: var(--gf-cinza-medio)" not in
 ok("CSS do cupom usa peso bold uniforme (font-weight:700 em .cupom p), sem .cupom-linha normal nem separador cinza")
 
 # ===========================================================================
-# D.4) Página com tamanho TOTALMENTE fixo no @page (10.40, supersede a largura-
-#      só-explícita da 10.38): a etiqueta física é de tamanho FIXO (7x8cm), não
-#      rolo contínuo - `size: 80mm auto` fixava a largura mas deixava a ALTURA
-#      em auto, que o motor de impressão resolve como Letter (279mm, validado
-#      via --print-to-pdf real) - uma página gigante mapeada numa etiqueta de
-#      7cm é o que provocava a faixa em branco no topo na impressão física.
-#      Com as DUAS dimensões fixas (`80mm 70mm`), a página sai determinística
-#      e do tamanho exato da etiqueta. Se a etiqueta desta clínica for outro
-#      tamanho, trocar largura E altura aqui e no CSS juntos.
+# D.4) Página com ALTURA "auto" no @page (10.44 - DECISÃO REVISTA, supersede
+#      a 10.40): a impressora real é um ROLO CONTÍNUO de 80mm de largura,
+#      retrato, corte automático rente ao conteúdo (confirmado nesta sessão:
+#      driver só oferece papel 80x297mm, referência visual da impressora
+#      padrão da Caixa Econômica) - NÃO uma etiqueta de tamanho fixo 7x8cm
+#      como a 10.40 assumiu por uma premissa física incorreta sobre o
+#      hardware. `size: 80mm auto` volta a ser o comportamento CERTO (o corte
+#      automático do rolo decide onde a etiqueta termina, não uma altura
+#      fixa no CSS) - não é o mesmo bug que a 10.40 corrigiu (naquele caso o
+#      hardware real era outro). Se esta impressora for trocada por uma de
+#      etiqueta fixa no futuro, a mudança certa é voltar a fixar as DUAS
+#      dimensões (como a 10.40 fazia), documentado no comentário do CSS.
 # ===========================================================================
-assert "@page { size: 80mm 70mm" in texto
-assert "@page { size: 80mm auto" not in texto  # decisão da 10.38 superseded pela 10.40 - não pode voltar
-assert "size: auto;" not in texto  # não pode voltar pro auto não-determinístico
-ok("CSS @page usa tamanho de página totalmente fixo (80mm x 70mm, largura E altura), não 'auto' na altura (10.40)")
+assert "@page { size: 80mm auto" in texto
+assert "@page { size: 80mm 70mm" not in texto  # decisão da 10.40 superseded pela 10.44 - não é o hardware real
+ok("CSS @page usa altura 'auto' (rolo contínuo, corte automático) - decisão revista na 10.44, não 'vai-e-volta' por capricho")
 
 # ===========================================================================
-# D.5) Colapso de altura do conteúdo escondido (10.40): `visibility:hidden`
-#      (usado pra isolar o cupom) NÃO tira os elementos do fluxo - sem isso, o
-#      cabeçalho/título/dígitos/botões escondidos continuavam ocupando altura
-#      normal, e com a página fixa em 70mm (D.4) isso gerava 3-4 páginas EXTRAS
-#      EM BRANCO por impressão (desperdício real de etiqueta física). `.totem`
-#      precisa de `min-height: 0` explícito - só `height: 0` não venceria o
-#      `min-height: 100vh` da folha de estilo base (_layout.html).
+# D.5) Colapso de altura do conteúdo escondido (10.40, MANTIDO na 10.44 -
+#      continua necessário independente do tamanho de página): `visibility:
+#      hidden` (usado pra isolar o cupom) NÃO tira os elementos do fluxo -
+#      sem isso, o cabeçalho/título/dígitos/botões escondidos continuariam
+#      ocupando altura normal, desperdiçando papel de rolo imprimindo espaço
+#      vazio antes do corte automático. `.totem` precisa de `min-height: 0`
+#      explícito - só `height: 0` não venceria o `min-height: 100vh` da
+#      folha de estilo base (_layout.html).
 # ===========================================================================
 assert "html, body { height: 0; overflow: hidden; }" in bloco_print
 assert ".totem { min-height: 0; height: 0;" in bloco_print
-ok("CSS @media print colapsa a altura do conteúdo escondido (html/body/.totem), evitando páginas extras em branco (10.40)")
+ok("CSS @media print colapsa a altura do conteúdo escondido (html/body/.totem) - mantido da 10.40, evita espaço vazio antes do corte")
+
+# ===========================================================================
+# D.6) Cenário REAL reportado em produção (10.44): fila "Recepção Banco de
+#      Sangue", unidade com endereço E telefone (o conteúdo mais alto do
+#      template - 8 linhas: empresa, separador, fila, código, separador,
+#      data/hora, endereço, telefone). Estrutural, não confirma "1 página"
+#      literalmente (isso exige motor de impressão real - print-to-pdf,
+#      rodado manualmente nesta sessão e documentado no adendo 10.44, mesmo
+#      padrão das validações da 10.38/10.40, nunca comitadas como
+#      teste automatizado - este projeto não depende de Chrome/PyMuPDF na
+#      suíte). O que ESTE caso trava: o conteúdo completo do incidente real
+#      chega certo no HTML, e as MESMAS regras de @page auto + colapso de
+#      altura (D.4/D.5) se aplicam também a essa página - nada específico
+#      desse cenário (nome da fila, combinação endereço+telefone) escapa das
+#      regras gerais já testadas.
+# ===========================================================================
+resp = c_totem.post(
+    f"/totem/totem-cupom-completo/gerar/{ids['botao_banco_sangue']}",
+    data={"qtd_acompanhantes": "0"},
+    follow_redirects=True,
+)
+assert resp.status_code == 200
+texto_banco_sangue = resp.data.decode("utf-8")
+assert "Clinica Cupom LTDA" in texto_banco_sangue
+assert "Recepcao Banco de Sangue" in texto_banco_sangue
+assert "RBS001" in texto_banco_sangue
+assert "Av. Teste, 100 - Centro, Cidade-UF" in texto_banco_sangue
+assert "(62) 3000-1111" in texto_banco_sangue
+assert "@page { size: 80mm auto" in texto_banco_sangue
+assert "html, body { height: 0; overflow: hidden; }" in texto_banco_sangue
+ok("Cenário real (Recepção Banco de Sangue, endereço+telefone) gera o cupom certo com as mesmas regras de @page auto + colapso de altura")
 
 # ===========================================================================
 # E) Retorno automático à tela inicial via setTimeout PRÓPRIO (não mais meta

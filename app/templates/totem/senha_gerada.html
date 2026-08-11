@@ -145,33 +145,37 @@
        watermark GESTFILA (evita o problema de cabeçalho/rodapé do próprio
        site aparecendo na prévia de impressão do navegador).
 
-       PÁGINA COM TAMANHO TOTALMENTE FIXO (`@page { size: 80mm 70mm }`, 10.40):
-       a etiqueta física usada é de tamanho FIXO (7cm altura x 8cm largura), não
-       um rolo contínuo - a versão anterior (`size: 80mm auto`) fixava a largura
-       mas deixava a ALTURA em "auto", pressupondo rolo contínuo. Validado via
-       --print-to-pdf real (Chrome, mesma técnica da 10.38, PyMuPDF): com altura
-       `auto` a página cai no fallback do motor (Letter, 279mm) - uma página
-       gigante mapeada numa etiqueta física de 7cm é o que provoca o driver
-       inserir espaço/avanço extra antes do conteúdo (faixa branca no topo,
-       reportada em produção). Com as DUAS dimensões fixas, a página sai
-       corretamente em 80x70mm, sem faixa em branco. SE A ETIQUETA/ROLO DESTA
-       CLÍNICA FOR OUTRO TAMANHO, trocar os dois valores aqui (largura E
-       altura) pelo tamanho físico real, e garantir que o tamanho de papel no
-       driver Windows bata com a etiqueta. (Obs.: o `--print-to-pdf` do Chrome
-       headless respeita `@page size` quando as DUAS dimensões são explícitas -
-       só ignora quando alguma fica `auto`, caindo no fallback Letter; ver 10.38
-       pra largura sozinha, 10.40 pra este caso.) */
+       PÁGINA COM ALTURA "AUTO" (`@page { size: 80mm auto }`, 10.44 - DECISÃO
+       REVISTA, não é vai-e-volta por capricho): a impressora é um ROLO
+       CONTÍNUO de 80mm de largura, retrato, com corte automático rente ao
+       conteúdo (igual à impressora de senha padrão da Caixa Econômica, formato
+       de referência confirmado nesta sessão) - NÃO uma etiqueta de tamanho
+       fixo 7x8cm. A 10.40 fixou `size: 80mm 70mm` em cima de uma premissa
+       física ERRADA sobre o hardware (uma etiqueta fixa que não existe nesta
+       instalação); essa premissa foi corrigida com dados novos (o driver desta
+       impressora só oferece a opção de papel 80x297mm - papel de rolo
+       contínuo padrão, nunca um tamanho fixo de 70mm) - por isso a decisão foi
+       revertida pra `auto`, que é o comportamento CERTO pra rolo contínuo (o
+       corte automático da impressora, não o CSS, é quem decide onde a etiqueta
+       termina). Ver adendo 10.44 no BLUEPRINT.md pra investigação completa e
+       a nota ligando esta decisão à 10.38/10.40 (marcadas como supersedidas,
+       não apagadas - o histórico de por que aquela decisão foi tomada na
+       época continua registrado). SE ESTA IMPRESSORA FOR TROCADA POR UMA DE
+       ETIQUETA FIXA no futuro, a mudança certa é usar as DUAS dimensões
+       explícitas de novo (como a 10.40 fazia), não só a largura. */
     @media print {
-      /* Colapsa a altura do que fica escondido (10.40): `body * {visibility:
-         hidden}` abaixo NÃO tira os elementos do fluxo (visibility != display),
-         então o cabeçalho/título/dígitos/botões escondidos continuavam
-         ocupando sua altura normal - com `size: auto` isso nunca estourava uma
-         página (Letter tem 279mm de sobra), mas com a página fixa em 70mm essa
-         altura invisível gerava 3-4 páginas EXTRAS EM BRANCO por senha (um
-         desperdício real de etiquetas numa impressora física). `min-height:0`
-         é necessário porque `.totem` tem `min-height:100vh` na folha base -
-         só `height:0` não venceria o `min-height`. `.cupom` continua vindo
-         via `position:absolute`, então não depende da altura do `.totem`. */
+      /* Colapsa a altura do que fica escondido (10.40, MANTIDO na 10.44 -
+         continua necessário independente do tamanho de página): `body *
+         {visibility: hidden}` abaixo NÃO tira os elementos do fluxo
+         (visibility != display), então o cabeçalho/título/dígitos/botões
+         escondidos continuariam ocupando sua altura normal - sem este
+         colapso, isso desperdiçaria papel de rolo imprimindo espaço vazio
+         antes do corte, mesmo com `size: auto` (o rolo seguiria alimentando
+         até acabar o conteúdo REAL da página, que incluiria essa altura
+         invisível). `min-height:0` é necessário porque `.totem` tem
+         `min-height:100vh` na folha base - só `height:0` não venceria o
+         `min-height`. `.cupom` continua vindo via `position:absolute`, então
+         não depende da altura do `.totem`. */
       html, body { height: 0; overflow: hidden; }
       .totem { min-height: 0; height: 0; padding: 0; overflow: hidden; }
       body * { visibility: hidden; }
@@ -187,7 +191,7 @@
         margin: 0; padding: 0; border: none; box-shadow: none;
         text-align: center; color: #000;
       }
-      @page { size: 80mm 70mm; margin: 0; }
+      @page { size: 80mm auto; margin: 0; }
     }
   </style>
 {% endblock %}
