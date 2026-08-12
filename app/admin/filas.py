@@ -1,5 +1,3 @@
-import re
-
 from flask import flash, redirect, render_template, request, url_for
 
 from app.admin import admin_bp
@@ -15,8 +13,6 @@ from app.extensions import db
 from app.models import Empresa, Fila, LocalRodizioFila, Senha, TotemBotao, Tv
 from app.models.associations import local_filas_destino
 from app.models.fila import DIAS_SEMANA
-
-SIGLA_RE = re.compile(r"^[A-Z]{2,4}$")
 
 
 def _tvs_da_empresa(empresa):
@@ -71,7 +67,6 @@ def nova_fila():
             empresa_id=empresa.id,
             unidade_id=dados["unidade_id"],
             nome=dados["nome"],
-            sigla=dados["sigla"],
             digitos_sequencial=dados["digitos_sequencial"],
             zera_diariamente=dados["zera_diariamente"],
             prioridade_padrao=dados["prioridade_padrao"],
@@ -121,7 +116,6 @@ def editar_fila(fila_id):
         tv_id_anterior = fila.tv_id
         fila.unidade_id = dados["unidade_id"]
         fila.nome = dados["nome"]
-        fila.sigla = dados["sigla"]
         fila.digitos_sequencial = dados["digitos_sequencial"]
         fila.zera_diariamente = dados["zera_diariamente"]
         fila.prioridade_padrao = dados["prioridade_padrao"]
@@ -226,7 +220,6 @@ def _ler_formulario():
     return {
         "nome": request.form.get("nome", "").strip(),
         "unidade_id": request.form.get("unidade_id", type=int),
-        "sigla": request.form.get("sigla", "").strip().upper(),
         "digitos_sequencial": request.form.get("digitos_sequencial", type=int) or 3,
         "zera_diariamente": request.form.get("zera_diariamente") == "on",
         "prioridade_padrao": request.form.get("prioridade_padrao", type=int) or 0,
@@ -249,9 +242,6 @@ def _validar_fila(dados, unidades, totens, tvs, fila_atual):
     if dados["unidade_id"] not in {u.id for u in unidades}:
         return "Selecione uma unidade válida."
 
-    if not SIGLA_RE.match(dados["sigla"]):
-        return "A sigla deve ter de 2 a 4 letras (A-Z)."
-
     if not (1 <= dados["digitos_sequencial"] <= 4):
         return "Dígitos do sequencial deve ser um número entre 1 e 4."
 
@@ -260,12 +250,6 @@ def _validar_fila(dados, unidades, totens, tvs, fila_atual):
 
     if not (0 <= dados["prioridade_rodizio"] <= 20):
         return "Quantidade de chamadas seguidas (rodízio) deve ser um número entre 0 e 20."
-
-    query = Fila.query.filter_by(unidade_id=dados["unidade_id"], sigla=dados["sigla"])
-    if fila_atual:
-        query = query.filter(Fila.id != fila_atual.id)
-    if query.first():
-        return "Já existe uma fila com essa sigla nessa unidade."
 
     if dados["totem_id"] is not None:
         totem = next((t for t in totens if t.id == dados["totem_id"]), None)

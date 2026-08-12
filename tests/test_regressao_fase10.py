@@ -74,8 +74,8 @@ with app.app_context():
     db.session.add_all([fila_a, fila_a2, fila_b])
     db.session.commit()
 
-    botao_a = TotemBotao(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, fila_id=fila_a.id, label="Laboratorio")
-    botao_b = TotemBotao(empresa_id=empresa_b.id, unidade_id=unidade_b1.id, fila_id=fila_b.id, label="Laboratorio B")
+    botao_a = TotemBotao(empresa_id=empresa_a.id, unidade_id=unidade_a1.id, fila_id=fila_a.id, label="Laboratorio", sigla="LB")
+    botao_b = TotemBotao(empresa_id=empresa_b.id, unidade_id=unidade_b1.id, fila_id=fila_b.id, label="Laboratorio B", sigla="LB")
     db.session.add_all([botao_a, botao_b])
     db.session.commit()
 

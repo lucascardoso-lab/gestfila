@@ -107,7 +107,7 @@ with app.app_context():
 
     nivel3_folha = TotemBotao(
         empresa_id=empresa_a.id, unidade_id=unidade_a1.id, label="ADMINISTRACAO M1",
-        parent_id=nivel2.id, fila_id=fila_lab.id, ordem=1,
+        parent_id=nivel2.id, fila_id=fila_lab.id, sigla="LAB", ordem=1,
     )
     db.session.add(nivel3_folha)
     db.session.commit()
@@ -115,11 +115,11 @@ with app.app_context():
     # botões-folha diretos na raiz, para as filas com tipos.
     botao_consulta = TotemBotao(
         empresa_id=empresa_a.id, unidade_id=unidade_a1.id, label="Atendimento Geral",
-        fila_id=fila_consulta.id, ordem=2,
+        fila_id=fila_consulta.id, sigla="CON", ordem=2,
     )
     botao_unico = TotemBotao(
         empresa_id=empresa_a.id, unidade_id=unidade_a1.id, label="Exame Unico",
-        fila_id=fila_unico.id, ordem=3,
+        fila_id=fila_unico.id, sigla="UNI", ordem=3,
     )
     db.session.add_all([botao_consulta, botao_unico])
     db.session.commit()

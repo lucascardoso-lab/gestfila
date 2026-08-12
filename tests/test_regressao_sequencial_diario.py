@@ -46,7 +46,7 @@ from zoneinfo import ZoneInfo
 
 from app import create_app
 from app.extensions import db
-from app.models import Empresa, Fila, Senha, Unidade
+from app.models import Empresa, Fila, Senha, TotemBotao, Unidade
 from app.totem.routes import _emitir_senha
 
 app = create_app("testing")
@@ -85,12 +85,22 @@ with app.app_context():
 
 
 def nova_fila(sigla, unidade_id, zera_diariamente=True, digitos=3, nome=None):
+    """Cria a Fila e um botão-folha único vinculado a ela com a mesma sigla -
+    desde o adendo 10.47 a sigla usada no código da senha vem do TotemBotao
+    clicado, não mais de Fila.sigla (aqui gravada só por compatibilidade
+    histórica do fixture, não é lida por _emitir_senha)."""
     with app.app_context():
         f = Fila(
             empresa_id=ids["empresa"], unidade_id=unidade_id, nome=nome or f"Fila {sigla}",
             sigla=sigla, zera_diariamente=zera_diariamente, digitos_sequencial=digitos,
         )
         db.session.add(f)
+        db.session.commit()
+        botao = TotemBotao(
+            empresa_id=ids["empresa"], unidade_id=unidade_id, fila_id=f.id,
+            label=f"Botao {sigla}", sigla=sigla,
+        )
+        db.session.add(botao)
         db.session.commit()
         return f.id
 
@@ -99,7 +109,19 @@ def emitir(fila_id, unidade_id):
     with app.app_context():
         fila = db.session.get(Fila, fila_id)
         unidade = db.session.get(Unidade, unidade_id)
-        senha = _emitir_senha(fila, unidade)
+        botao = TotemBotao.query.filter_by(fila_id=fila_id).first()
+        senha = _emitir_senha(fila, unidade, botao)
+        return senha.codigo, senha.sequencial
+
+
+def emitir_via_botao(fila_id, unidade_id, botao_id):
+    """Como emitir(), mas com um botão explícito - usado no cenário de dois
+    botões apontando pra mesma fila (siglas diferentes, sequencial compartilhado)."""
+    with app.app_context():
+        fila = db.session.get(Fila, fila_id)
+        unidade = db.session.get(Unidade, unidade_id)
+        botao = db.session.get(TotemBotao, botao_id)
+        senha = _emitir_senha(fila, unidade, botao)
         return senha.codigo, senha.sequencial
 
 
@@ -117,7 +139,8 @@ def emitir_com_relogio_fake(fila_id, unidade_id, instante_utc):
         with app.app_context():
             fila = db.session.get(Fila, fila_id)
             unidade = db.session.get(Unidade, unidade_id)
-            senha = _emitir_senha(fila, unidade)
+            botao = TotemBotao.query.filter_by(fila_id=fila_id).first()
+            senha = _emitir_senha(fila, unidade, botao)
             senha.criada_em = datetime(*instante_utc)
             db.session.commit()
             return senha.codigo, senha.sequencial
@@ -259,6 +282,39 @@ id_fila_g = nova_fila("CC", ids["unidade1"])
 sequenciais = [emitir(id_fila_g, ids["unidade1"])[1] for _ in range(15)]
 assert sequenciais == list(range(1, 16)), sequenciais
 ok("Concorrência (fallback): 15 chamadas sucessivas produzem sequencial 1..15 sem duplicar nem pular")
+
+# ===========================================================================
+# I) Adendo 10.47: dois botões diferentes (siglas diferentes) apontando pra
+#    MESMA fila - o sequencial numérico é COMPARTILHADO entre eles (nunca
+#    duplica um número), só o prefixo de sigla muda conforme o botão usado
+#    pra gerar. Fila criada direto (sem passar por nova_fila, que criaria um
+#    terceiro botão sozinho) - Fila.sigla fica deprecada/vestigial aqui, só
+#    pra deixar claro que ela não é mais lida por _emitir_senha.
+# ===========================================================================
+with app.app_context():
+    fila_i = Fila(
+        empresa_id=ids["empresa"], unidade_id=ids["unidade1"], nome="Fila Compartilhada",
+        sigla="IGNORAR",  # vestigial - não deveria influenciar o código gerado
+    )
+    db.session.add(fila_i)
+    db.session.commit()
+    id_fila_i = fila_i.id
+
+    botao_i1 = TotemBotao(empresa_id=ids["empresa"], unidade_id=ids["unidade1"], fila_id=id_fila_i, label="Botao 1", sigla="B1")
+    botao_i2 = TotemBotao(empresa_id=ids["empresa"], unidade_id=ids["unidade1"], fila_id=id_fila_i, label="Botao 2", sigla="B2")
+    db.session.add_all([botao_i1, botao_i2])
+    db.session.commit()
+    id_botao_i1, id_botao_i2 = botao_i1.id, botao_i2.id
+
+codigo_i1, seq_i1 = emitir_via_botao(id_fila_i, ids["unidade1"], id_botao_i1)
+assert seq_i1 == 1 and codigo_i1 == "B1001", (codigo_i1, seq_i1)
+
+codigo_i2, seq_i2 = emitir_via_botao(id_fila_i, ids["unidade1"], id_botao_i2)
+assert seq_i2 == 2 and codigo_i2 == "B2002", (codigo_i2, seq_i2)
+
+codigo_i3, seq_i3 = emitir_via_botao(id_fila_i, ids["unidade1"], id_botao_i1)
+assert seq_i3 == 3 and codigo_i3 == "B1003", (codigo_i3, seq_i3)
+ok("I) Dois botões (B1/B2) na mesma fila: sequencial compartilhado 1,2,3 (B1001, B2002, B1003) - sem colisão, prefixo muda por botão")
 
 print()
 print(f"TODOS OS {len(passos)} TESTES DE SEQUENCIAL DIARIO PASSARAM")

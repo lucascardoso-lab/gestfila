@@ -67,7 +67,7 @@ with app.app_context():
     db.session.commit()
 
     # botão-folha vinculado direto à fila (fila_id), sem servico_id
-    botao = TotemBotao(empresa_id=empresa.id, unidade_id=unidade.id, label="Laboratorio", fila_id=fila.id)
+    botao = TotemBotao(empresa_id=empresa.id, unidade_id=unidade.id, label="Laboratorio", fila_id=fila.id, sigla="LAB")
     db.session.add(botao)
     db.session.commit()
 
@@ -110,7 +110,7 @@ c_totem = app.test_client()
 resp = c_totem.post(f"/totem/{ids['unidade']}/{ids['totem']}/gerar/{ids['botao']}", follow_redirects=True)
 assert resp.status_code == 200
 assert "LAB001" in resp.data.decode("utf-8")
-ok("Botão do totem ligado direto a fila_id gera senha LAB001 (sigla/sequencial vêm da Fila)")
+ok("Botão do totem ligado direto a fila_id gera senha LAB001 (sigla vem do Botão, sequencial vem da Fila)")
 
 with app.app_context():
     senha1 = Senha.query.filter_by(codigo="LAB001").first()

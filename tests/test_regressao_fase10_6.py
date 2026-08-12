@@ -71,7 +71,7 @@ with app.app_context():
     db.session.commit()
 
     botao_sem = TotemBotao(
-        empresa_id=empresa.id, unidade_id=unidade.id, label="Laboratorio", fila_id=fila.id,
+        empresa_id=empresa.id, unidade_id=unidade.id, label="Laboratorio", fila_id=fila.id, sigla="LAB",
     )
     db.session.add(botao_sem)
     db.session.commit()

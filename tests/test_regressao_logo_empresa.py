@@ -93,7 +93,10 @@ with app.app_context():
     db.session.add_all([totem_a, tv_a])
     db.session.commit()
 
-    botao_a = TotemBotao(empresa_id=empresa_a.id, unidade_id=unidade_a.id, label="Recepcao", ordem=1, fila_id=fila_a.id, ativo=True)
+    botao_a = TotemBotao(
+        empresa_id=empresa_a.id, unidade_id=unidade_a.id, label="Recepcao", ordem=1, fila_id=fila_a.id,
+        sigla="RC", ativo=True,
+    )
     db.session.add(botao_a)
     db.session.commit()
 

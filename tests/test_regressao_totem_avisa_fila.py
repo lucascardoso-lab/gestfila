@@ -62,11 +62,21 @@ with app.app_context():
 
     botao_recepcao = TotemBotao(
         empresa_id=empresa.id, unidade_id=unidade.id, label="Recepção", ordem=1,
-        fila_id=fila_recepcao.id, ativo=True,
+        fila_id=fila_recepcao.id, sigla="RG", ativo=True,
     )
     db.session.add(botao_recepcao)
     db.session.commit()
     botao_recepcao_id = botao_recepcao.id
+
+    # botão-folha da fila de coleta - necessário desde o adendo 10.47 porque
+    # `_emitir_senha` passou a exigir o botão clicado (fornece a sigla).
+    botao_coleta = TotemBotao(
+        empresa_id=empresa.id, unidade_id=unidade.id, label="Coleta", ordem=2,
+        fila_id=fila_coleta.id, sigla="CG", ativo=True,
+    )
+    db.session.add(botao_coleta)
+    db.session.commit()
+    botao_coleta_id = botao_coleta.id
 
     local_coleta = Local(
         empresa_id=empresa.id, unidade_id=unidade.id, nome="Guiche Coleta", tipo="coleta",
@@ -87,7 +97,7 @@ with app.app_context():
     ids = dict(
         empresa=empresa.id, unidade=unidade.id,
         fila_recepcao=fila_recepcao.id, fila_coleta=fila_coleta.id,
-        totem_slug=totem.slug, botao_recepcao=botao_recepcao_id,
+        totem_slug=totem.slug, botao_recepcao=botao_recepcao_id, botao_coleta=botao_coleta_id,
         local_coleta=local_coleta.id, usuario="recepcao_totem",
     )
 
@@ -137,15 +147,15 @@ ws2.get_received(NAMESPACE)
 ws2.emit("entrar_fila", {"fila_id": ids["fila_coleta"]}, namespace=NAMESPACE)
 ws2.get_received(NAMESPACE)
 
-# gera diretamente via helper do totem (sem passar por um TotemBotao de coleta,
-# que não foi necessário criar pra este teste) - mesma função `_emitir_senha`
-# exercitada no cenário A, então cobre a mesma correção.
+# gera diretamente via helper do totem (mesma função `_emitir_senha` exercitada
+# no cenário A, então cobre a mesma correção).
 with app.app_context():
     from app.totem.routes import _emitir_senha
 
     fila_coleta_obj = db.session.get(Fila, ids["fila_coleta"])
     unidade_obj = db.session.get(Unidade, ids["unidade"])
-    _emitir_senha(fila_coleta_obj, unidade_obj)
+    botao_coleta_obj = db.session.get(TotemBotao, ids["botao_coleta"])
+    _emitir_senha(fila_coleta_obj, unidade_obj, botao_coleta_obj)
 
 recebidos2 = ws2.get_received(NAMESPACE)
 eventos_fila_atualizada2 = [ev for ev in recebidos2 if ev["name"] == "fila_atualizada"]

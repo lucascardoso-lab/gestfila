@@ -9,14 +9,13 @@
   <p class="subtitulo"><a class="botao" href="{{ url_for('admin.nova_fila', empresa_id=empresa.id) }}">+ Nova fila</a></p>
   <table>
     <thead>
-      <tr><th>Nome</th><th>Unidade</th><th>Sigla</th><th>Chamadas prioritárias seguidas</th><th>Status</th><th>Ações</th></tr>
+      <tr><th>Nome</th><th>Unidade</th><th>Chamadas prioritárias seguidas</th><th>Status</th><th>Ações</th></tr>
     </thead>
     <tbody>
       {% for fila in filas %}
         <tr>
           <td>{{ fila.nome }}</td>
           <td>{{ fila.unidade.nome }}</td>
-          <td>{{ fila.sigla }}</td>
           <td>{{ fila.prioridade_rodizio }}</td>
           <td><span class="badge {{ 'ativo' if fila.ativo else 'inativo' }}">{{ 'Ativa' if fila.ativo else 'Inativa' }}</span></td>
           <td class="acoes">
@@ -32,7 +31,7 @@
           </td>
         </tr>
       {% else %}
-        <tr><td colspan="6">Nenhuma fila cadastrada.</td></tr>
+        <tr><td colspan="5">Nenhuma fila cadastrada.</td></tr>
       {% endfor %}
     </tbody>
   </table>

@@ -25,7 +25,13 @@ class Fila(db.Model):
     servico_id = db.Column(db.Integer, db.ForeignKey("servicos.id"), nullable=True)  # legado - não usar
     nome = db.Column(db.String(150), nullable=False)
 
-    sigla = db.Column(db.String(4), nullable=False)
+    # DEPRECIADA desde o adendo 10.47: a sigla usada na composição do código da
+    # senha passou a viver em `TotemBotao.sigla` (permite dois botões apontarem
+    # pra mesma fila com siglas diferentes). Coluna mantida "morta" por 1 deploy
+    # (mesmo padrão da tabela `servicos` na 10.1) - código novo nunca deve
+    # ler/escrever este campo. Remoção prevista num adendo futuro após
+    # confirmar a migração limpa em produção.
+    sigla = db.Column(db.String(4), nullable=True)
     digitos_sequencial = db.Column(db.SmallInteger, default=3, nullable=False)
     zera_diariamente = db.Column(db.Boolean, default=True, nullable=False)
     prioridade_padrao = db.Column(db.SmallInteger, default=0, nullable=False)

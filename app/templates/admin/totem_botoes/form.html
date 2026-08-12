@@ -44,6 +44,10 @@
         {% endfor %}
       </select>
 
+      <label for="sigla">Sigla (usada no código da senha, ex.: LAB001 - obrigatória quando uma fila é selecionada acima; deixe em branco em botão apenas de navegação)</label>
+      {% set sigla_sel = valores.sigla if valores else (botao.sigla if botao else '') %}
+      <input type="text" id="sigla" name="sigla" maxlength="4" value="{{ sigla_sel or '' }}">
+
       <label for="ordem">Ordem de exibição</label>
       <input type="text" id="ordem" name="ordem"
              value="{{ valores.ordem if valores else (botao.ordem if botao else 0) }}">

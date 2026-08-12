@@ -98,13 +98,16 @@ with app.app_context():
     db.session.commit()
 
     botao_completo = TotemBotao(
-        empresa_id=empresa.id, unidade_id=unidade_completa.id, label="Recepcao", fila_id=fila_completa.id, ordem=1,
+        empresa_id=empresa.id, unidade_id=unidade_completa.id, label="Recepcao", fila_id=fila_completa.id,
+        sigla="RG", ordem=1,
     )
     botao_sem_endereco = TotemBotao(
-        empresa_id=empresa.id, unidade_id=unidade_sem_endereco.id, label="Laboratorio", fila_id=fila_sem_endereco.id, ordem=1,
+        empresa_id=empresa.id, unidade_id=unidade_sem_endereco.id, label="Laboratorio", fila_id=fila_sem_endereco.id,
+        sigla="LAB", ordem=1,
     )
     botao_banco_sangue = TotemBotao(
-        empresa_id=empresa.id, unidade_id=unidade_completa.id, label="Banco de Sangue", fila_id=fila_banco_sangue.id, ordem=2,
+        empresa_id=empresa.id, unidade_id=unidade_completa.id, label="Banco de Sangue", fila_id=fila_banco_sangue.id,
+        sigla="RBS", ordem=2,
     )
     db.session.add_all([botao_completo, botao_sem_endereco, botao_banco_sangue])
     db.session.commit()

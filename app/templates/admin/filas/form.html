@@ -25,9 +25,7 @@
         {% endfor %}
       </select>
 
-      <label for="sigla">Sigla (usada no código da senha, ex.: LAB001)</label>
-      <input type="text" id="sigla" name="sigla" maxlength="4"
-             value="{{ valores.sigla if valores else (fila.sigla if fila else '') }}" required>
+      <p class="subtitulo">A sigla usada no código da senha (ex.: LAB001) agora é definida no <strong>Botão do totem</strong> vinculado a esta fila, não aqui - cadastre/edite o botão em "Botões do totem" para configurá-la.</p>
 
       <label for="digitos_sequencial">Dígitos do sequencial</label>
       <input type="text" id="digitos_sequencial" name="digitos_sequencial"

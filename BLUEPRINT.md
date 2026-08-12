@@ -3910,6 +3910,87 @@ reordenação de blocos, sem mudança de conteúdo);
 
 ---
 
+## 10.47. ADENDO — Sigla passa de `Fila` para `TotemBotao` (realinha com a seção 2 original)
+
+> Mudança de arquitetura confirmada com o cliente: (1) a sigla usada na
+> composição do código da senha (seção 2) deixa de pertencer à Fila e passa a
+> pertencer ao Botão do totem - permite no futuro dois botões diferentes
+> apontarem pra mesma fila com siglas diferentes; (2) a tela de filas continua
+> permitindo criar fila SEM botão vinculado (fila órfã), com a sigla ficando
+> pendente até algum botão ser vinculado a ela.
+
+**1. Isso realinha com a intenção original da seção 2, perdida na fusão da
+10.1:** o texto original do BLUEPRINT já dizia "cada serviço tem uma sigla
+configurável, definida pelo admin **ao criar o botão do totem**" - mas a
+fusão de Serviço em Fila (10.1) migrou a sigla para `Fila.sigla` junto com o
+resto dos campos de `servicos`, sem essa distinção. Este adendo devolve a
+sigla para onde a seção 2 sempre disse que ela deveria estar.
+
+**2. `TotemBotao.sigla`** (nova coluna, `VARCHAR(4)`, nullable): só obrigatória
+em botões-FOLHA (`fila_id` preenchido) - botões-menu (ex.: "MEDICOS") nunca
+têm sigla, mesma convenção já usada para `fila_id` desde a 10.1. Constraint de
+unicidade `uq_totem_botao_unidade_sigla` (`unidade_id`, `sigla`) substitui a
+antiga `uq_fila_unidade_sigla` como fonte de verdade - `unidade_id` já existe
+diretamente em `TotemBotao` desde sempre (não precisou navegar por `fila` pra
+resolver o escopo).
+
+**3. `Fila.sigla` fica DEPRECIADA** (mesmo padrão da tabela `servicos` na
+10.1): coluna mantida "morta" por 1 deploy, virou nullable (fila pode ser
+criada/salva sem sigla e sem botão vinculado - órfã de verdade), não é mais
+lida nem escrita por nenhum código novo. Remoção da coluna prevista num
+adendo futuro, depois de confirmar a migração limpa em produção.
+
+**4. Migração de dados** (`migrations/versions/7a2e1c4f9b3d_...py`): para cada
+`totem_botao` folha existente (`fila_id IS NOT NULL`), copia `fila.sigla` pro
+novo `totem_botao.sigla` - ponto de partida, nenhuma sigla já cadastrada se
+perde.
+
+**5. `_emitir_senha`/`_compor_codigo`** (`app/totem/routes.py`): passam a
+receber o `botao` clicado (sempre disponível - toda geração de senha no totem
+passa por um botão-folha específico) e usam `botao.sigla` na composição do
+código, não mais `fila.sigla`. O contador/sequencial **continua** escopado
+por `fila_id + unidade + dia`, exatamente como na 10.39 - não muda. Efeito
+intencional: se dois botões diferentes (siglas diferentes) apontarem pra
+mesma fila, o sequencial numérico é COMPARTILHADO entre eles (nunca duplica
+um número), só o prefixo de sigla muda conforme o botão usado pra gerar -
+provado em `tests/test_regressao_sequencial_diario.py` (caso I).
+
+**6. Bloqueio defensivo:** se um botão-folha tiver `fila_id` mas `sigla`
+vazia (não deveria acontecer, já que o formulário de botão passa a exigir a
+sigla nesse caso - ver item 8), a geração é bloqueada com a mesma tela/
+mensagem padrão de "atendimento não configurado" já usada em `app/templates/
+totem/erro_configuracao.html`, em vez de gerar um código corrompido.
+
+**7. Admin - tela de filas:** campo sigla REMOVIDO do formulário (`app/
+templates/admin/filas/form.html`) - fila não exige mais sigla pra ser criada/
+salva. Coluna "Sigla" removida da listagem de filas também (dado agora vive
+no botão).
+
+**8. Admin - tela de botões:** campo sigla ADICIONADO ao formulário (`app/
+templates/admin/totem_botoes/form.html`), obrigatório e validado (2-4 letras
+A-Z, mesma regra de sempre) quando uma fila é selecionada; descartado
+(sempre `None`) quando o botão é de navegação (sem fila). Vincular uma fila a
+um botão sem preencher a sigla bloqueia o salvamento com mensagem clara.
+
+**9. Testes:** `tests/test_regressao_sequencial_diario.py` (fixture `nova_fila`
+passa a criar um botão-folha companheiro; caso I novo: dois botões, mesma
+fila, siglas diferentes, sequencial compartilhado sem colisão) e o novo
+`tests/test_regressao_sigla_botao_totem.py` (sigla obrigatória/formato/
+unicidade no CRUD de botão, botão-menu nunca exige sigla, geração usa a sigla
+do botão e não da fila deprecada, fila órfã de sigla e botão, migração de
+dados simulada, RBAC de edição de botão). Os 8 arquivos de teste que já
+exercitavam geração de senha via botão-folha ganharam `sigla=` nas fixtures
+de `TotemBotao` para continuar batendo os códigos esperados.
+
+**Arquivos alterados:** `migrations/versions/7a2e1c4f9b3d_sigla_passa_de_
+fila_para_totem_botao.py` (nova); `app/models/totem_botao.py`, `app/models/
+fila.py`; `app/totem/routes.py`; `app/admin/filas.py`, `app/admin/
+totem_botoes.py`; `app/templates/admin/filas/form.html`, `app/templates/
+admin/filas/listar.html`, `app/templates/admin/totem_botoes/form.html`,
+`app/templates/admin/totem_botoes/listar.html`; testes listados no item 9.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da
@@ -3931,3 +4012,15 @@ reordenação de blocos, sem mudança de conteúdo);
   relatórios que agrupam por setor). Não implementar sem demanda real
   identificada (ex.: precisar restringir médico a só a própria fila/
   consultório, diferente de um operador de coleta genérico).
+- **`flask db upgrade` do zero falha em SQLite na migration `2f153fe29e46`**
+  (achado durante a verificação da 10.47, não corrigido - fora do escopo
+  daquela tarefa): `batch_alter_table('filas', ...)` nessa migration cria uma
+  foreign key sem nome explícito, e o modo batch do SQLite (usado só em
+  ambiente de desenvolvimento/teste, sem servidor MySQL disponível) exige
+  `ValueError: Constraint must have a name` ao tentar recriar a tabela do
+  zero. Não afeta produção (MySQL não usa batch mode) nem a suíte de testes
+  (que usa `db.create_all()`, não `flask db upgrade`) - só apareceria numa
+  tentativa de rodar a cadeia de migrations completa do zero num banco
+  SQLite local. Corrigir nomeando a constraint na migration original (ou
+  documentar `db.create_all()` como o caminho suportado para SQLite) se for
+  necessário validar upgrades encadeados fora de MySQL no futuro.

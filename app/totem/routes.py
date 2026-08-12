@@ -198,6 +198,12 @@ def confirmar_geracao(slug, botao_id):
             mensagem="Este atendimento está fora do horário de funcionamento. Procure a recepção.",
         )
 
+    if not botao.sigla:
+        return render_template(
+            "totem/erro_configuracao.html", unidade=unidade, totem=totem,
+            mensagem="Este atendimento ainda não está configurado para gerar senhas. Procure a recepção.",
+        )
+
     tipos_ativos = _tipos_ativos(fila)
 
     tipo_escolhido = None
@@ -238,6 +244,16 @@ def gerar_senha(slug, botao_id):
             mensagem="Este atendimento está fora do horário de funcionamento. Procure a recepção.",
         )
 
+    if not botao.sigla:
+        # defensivo: a tela de admin (item 7) já bloqueia salvar um botão-folha
+        # sem sigla, então este caso não deveria ocorrer na prática - mas gerar
+        # uma senha sem sigla corromperia o código impresso, por isso trava aqui
+        # também em vez de confiar só na validação do formulário.
+        return render_template(
+            "totem/erro_configuracao.html", unidade=unidade, totem=totem,
+            mensagem="Este atendimento ainda não está configurado para gerar senhas. Procure a recepção.",
+        )
+
     tipos_ativos = _tipos_ativos(fila)
     tipo_senha_id = request.form.get("tipo_senha_id", type=int)
     tipo_escolhido = None
@@ -250,7 +266,7 @@ def gerar_senha(slug, botao_id):
     if not (0 <= qtd_acompanhantes <= QTD_ACOMPANHANTES_MAXIMO):
         abort(400)
 
-    senha = _emitir_senha(fila, unidade, tipo_senha=tipo_escolhido, qtd_acompanhantes=qtd_acompanhantes)
+    senha = _emitir_senha(fila, unidade, botao, tipo_senha=tipo_escolhido, qtd_acompanhantes=qtd_acompanhantes)
 
     # Impressão física (antes: win32print/ESC-POS em background, seção 10.6) -
     # agora é responsabilidade da própria tela (totem/senha_gerada.html), via
@@ -261,21 +277,30 @@ def gerar_senha(slug, botao_id):
     return render_template("totem/senha_gerada.html", unidade=unidade, totem=totem, senha=senha, fila=fila)
 
 
-def _compor_codigo(fila, tipo_senha, proximo_sequencial):
-    """Regra de composição do código (seção 10.4): sigla da fila + prefixo do tipo
-    escolhido (se houver) + sequencial. O prefixo de um tipo "padrão" (peso_prioridade
-    == 0, ex.: "Normal") só aparece se a fila estiver configurada para exibi-lo
+def _compor_codigo(botao, fila, tipo_senha, proximo_sequencial):
+    """Regra de composição do código (seção 2/10.4, sigla realocada pelo adendo
+    10.47): sigla do BOTÃO clicado (não mais da fila - permite dois botões
+    apontarem pra mesma fila com siglas diferentes) + prefixo do tipo escolhido
+    (se houver) + sequencial. O prefixo de um tipo "padrão" (peso_prioridade ==
+    0, ex.: "Normal") só aparece se a fila estiver configurada para exibi-lo
     (`exibir_prefixo_tipo_quando_normal`) - evita redundância tipo "LABN001" por
     padrão, mas sempre mostra o prefixo de tipos com peso > 0 (ex.: "Idoso" -> LABI001)."""
     prefixo_efetivo = ""
     if tipo_senha is not None and tipo_senha.prefixo:
         if tipo_senha.peso_prioridade > 0 or fila.exibir_prefixo_tipo_quando_normal:
             prefixo_efetivo = tipo_senha.prefixo
-    return f"{fila.sigla}{prefixo_efetivo}{proximo_sequencial:0{fila.digitos_sequencial}d}"
+    return f"{botao.sigla}{prefixo_efetivo}{proximo_sequencial:0{fila.digitos_sequencial}d}"
 
 
-def _emitir_senha(fila, unidade, tipo_senha=None, qtd_acompanhantes=0):
+def _emitir_senha(fila, unidade, botao, tipo_senha=None, qtd_acompanhantes=0):
     """Calcula o próximo sequencial e grava a senha + log 'gerada', tudo em uma única transação.
+
+    `botao` é o botão-folha do totem que o paciente tocou - fornece a sigla usada
+    no código (adendo 10.47). O sequencial continua escopado por `fila_id`, não
+    por botão: se dois botões diferentes apontarem pra mesma fila (siglas
+    diferentes), o número é COMPARTILHADO entre eles (nunca duplica), só o
+    prefixo de sigla muda conforme o botão usado - comportamento intencional,
+    ver tests/test_regressao_sequencial_diario.py.
 
     Trava a linha da fila antes de ler o maior sequencial já emitido - sob MySQL/InnoDB
     isso serializa toques simultâneos na mesma fila/unidade, evitando que dois pacientes
@@ -311,7 +336,7 @@ def _emitir_senha(fila, unidade, tipo_senha=None, qtd_acompanhantes=0):
 
     ultimo_sequencial = consulta_sequencial.scalar() or 0
     proximo_sequencial = ultimo_sequencial + 1
-    codigo = _compor_codigo(fila, tipo_senha, proximo_sequencial)
+    codigo = _compor_codigo(botao, fila, tipo_senha, proximo_sequencial)
 
     # seção 10.4: o peso_prioridade do tipo escolhido alimenta o rodízio de prioridade já
     # existente - sem tipo escolhido, mantém o comportamento original (prioridade_padrao).

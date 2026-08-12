@@ -12,7 +12,7 @@
     {% for botao in botoes | sort(attribute='ordem') %}
       <tr>
         <td style="padding-left: {{ nivel * 1.5 }}rem;">{{ '↳ ' if nivel > 0 else '' }}{{ botao.label }}</td>
-        <td>{{ botao.fila.sigla if botao.fila else '—' }}</td>
+        <td>{{ botao.sigla if botao.sigla else '—' }}</td>
         <td>{{ botao.ordem }}</td>
         <td><span class="badge {{ 'ativo' if botao.ativo else 'inativo' }}">{{ 'Ativo' if botao.ativo else 'Inativo' }}</span></td>
         <td class="acoes">

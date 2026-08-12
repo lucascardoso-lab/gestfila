@@ -1,3 +1,5 @@
+import re
+
 from flask import flash, redirect, render_template, request, url_for
 
 from app.admin import admin_bp
@@ -10,6 +12,8 @@ from app.admin.helpers import (
 )
 from app.extensions import db
 from app.models import Empresa, TotemBotao
+
+SIGLA_RE = re.compile(r"^[A-Z]{2,4}$")
 
 
 @admin_bp.route("/totem-botoes")
@@ -55,7 +59,7 @@ def novo_totem_botao():
 
     if request.method == "POST":
         dados = _ler_formulario()
-        erro = _validar_totem_botao(dados, unidades, filas, candidatos_pai)
+        erro = _validar_totem_botao(dados, unidades, filas, candidatos_pai, botao_atual=None)
         if erro:
             flash(erro, "error")
             return render_template(
@@ -70,6 +74,7 @@ def novo_totem_botao():
             parent_id=dados["parent_id"],
             fila_id=dados["fila_id"],
             label=dados["label"],
+            sigla=dados["sigla"],
             ordem=dados["ordem"],
         )
         db.session.add(botao)
@@ -95,7 +100,7 @@ def editar_totem_botao(botao_id):
 
     if request.method == "POST":
         dados = _ler_formulario()
-        erro = _validar_totem_botao(dados, unidades, filas, candidatos_pai)
+        erro = _validar_totem_botao(dados, unidades, filas, candidatos_pai, botao_atual=botao)
         if erro:
             flash(erro, "error")
             return render_template(
@@ -108,6 +113,7 @@ def editar_totem_botao(botao_id):
         botao.parent_id = dados["parent_id"]
         botao.fila_id = dados["fila_id"]
         botao.label = dados["label"]
+        botao.sigla = dados["sigla"]
         botao.ordem = dados["ordem"]
         db.session.commit()
         flash("Botão atualizado.", "info")
@@ -174,16 +180,21 @@ def _candidatos_pai(empresa, botao_atual):
 
 
 def _ler_formulario():
+    fila_id = request.form.get("fila_id", type=int) or None
     return {
         "label": request.form.get("label", "").strip(),
         "unidade_id": request.form.get("unidade_id", type=int),
         "parent_id": request.form.get("parent_id", type=int) or None,
-        "fila_id": request.form.get("fila_id", type=int) or None,
+        "fila_id": fila_id,
+        # sigla (adendo 10.47) só faz sentido em botão-folha (fila_id preenchido) -
+        # botão-menu nunca tem sigla, mesma convenção do próprio fila_id desde a
+        # 10.1, então ela é descartada aqui se não houver fila selecionada.
+        "sigla": (request.form.get("sigla", "").strip().upper() or None) if fila_id is not None else None,
         "ordem": request.form.get("ordem", type=int) or 0,
     }
 
 
-def _validar_totem_botao(dados, unidades, filas, candidatos_pai):
+def _validar_totem_botao(dados, unidades, filas, candidatos_pai, botao_atual):
     if not dados["label"]:
         return "Informe o texto do botão."
 
@@ -203,5 +214,19 @@ def _validar_totem_botao(dados, unidades, filas, candidatos_pai):
             return "Selecione uma fila válida (ou nenhuma, para botão apenas de navegação)."
         if fila.unidade_id != dados["unidade_id"]:
             return "A fila selecionada pertence a outra unidade."
+
+        # adendo 10.47: botão-folha (com fila vinculada) exige sigla - sem ela o
+        # totem não teria como compor o código da senha (ver bloqueio defensivo
+        # em app/totem/routes.py::gerar_senha).
+        if not dados["sigla"]:
+            return "Informe a sigla do botão (obrigatória quando uma fila é selecionada)."
+        if not SIGLA_RE.match(dados["sigla"]):
+            return "A sigla deve ter de 2 a 4 letras (A-Z)."
+
+        query = TotemBotao.query.filter_by(unidade_id=dados["unidade_id"], sigla=dados["sigla"])
+        if botao_atual:
+            query = query.filter(TotemBotao.id != botao_atual.id)
+        if query.first():
+            return "Já existe um botão com essa sigla nessa unidade."
 
     return None
