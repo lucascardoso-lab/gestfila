@@ -3928,11 +3928,30 @@ sigla para onde a seção 2 sempre disse que ela deveria estar.
 
 **2. `TotemBotao.sigla`** (nova coluna, `VARCHAR(4)`, nullable): só obrigatória
 em botões-FOLHA (`fila_id` preenchido) - botões-menu (ex.: "MEDICOS") nunca
-têm sigla, mesma convenção já usada para `fila_id` desde a 10.1. Constraint de
-unicidade `uq_totem_botao_unidade_sigla` (`unidade_id`, `sigla`) substitui a
-antiga `uq_fila_unidade_sigla` como fonte de verdade - `unidade_id` já existe
-diretamente em `TotemBotao` desde sempre (não precisou navegar por `fila` pra
-resolver o escopo).
+têm sigla, mesma convenção já usada para `fila_id` desde a 10.1.
+
+**2.1. Unicidade — achado real de produção corrigiu a primeira versão desta
+migration:** a primeira tentativa criava uma `UNIQUE(unidade_id, sigla)` de
+banco (`uq_totem_botao_unidade_sigla`), espelhando a antiga `uq_fila_unidade_
+sigla`. Ao rodar `flask db upgrade` em produção, ela quebrou: a fila "Recepção
+Banco de Sangue" já tinha **5 botões-folha diferentes** ("Doação de
+Plaquetas", "Preferencial", "Doação de Sangue", "Resultados", "Sangria")
+apontando pra ela, todos compartilhando de propósito a mesma sigla "BSG" (mesma
+fila, mesmo sequencial, mesmo prefixo - configuração legítima, não duplicidade
+acidental). A migração de dados (item 4) copia `fila.sigla` pra cada um desses
+5 botões igualmente, e a constraint nova rejeitava a segunda linha em diante.
+A regra que faz sentido não é "todo botão precisa de sigla exclusiva", é
+**"duas FILAS diferentes não podem usar a mesma sigla na mesma unidade"**
+(código ambíguo entre filas de verdade diferentes) - o que não é uma unique
+key simples, já que múltiplos botões da MESMA fila podem legitimamente
+repetir a sigla dela. Correção: a migration não cria mais nenhuma unique
+constraint de banco em `totem_botoes`; a checagem (sigla já usada por um
+botão de OUTRA fila na mesma unidade) fica só em `app/admin/totem_botoes.py::
+_validar_totem_botao`. Prova em `tests/test_regressao_sigla_botao_totem.py`
+(caso E): sigla repetida entre FILAS diferentes continua bloqueada; sigla
+repetida entre botões da MESMA fila é permitida (replica o caso real do
+Banco de Sangue). `unidade_id` já existe diretamente em `TotemBotao` desde
+sempre (não precisou navegar por `fila` pra resolver o escopo da checagem).
 
 **3. `Fila.sigla` fica DEPRECIADA** (mesmo padrão da tabela `servicos` na
 10.1): coluna mantida "morta" por 1 deploy, virou nullable (fila pode ser

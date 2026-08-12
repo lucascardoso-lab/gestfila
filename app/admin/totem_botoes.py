@@ -223,10 +223,18 @@ def _validar_totem_botao(dados, unidades, filas, candidatos_pai, botao_atual):
         if not SIGLA_RE.match(dados["sigla"]):
             return "A sigla deve ter de 2 a 4 letras (A-Z)."
 
-        query = TotemBotao.query.filter_by(unidade_id=dados["unidade_id"], sigla=dados["sigla"])
+        # unicidade: duas FILAS diferentes não podem usar a mesma sigla na
+        # mesma unidade (código ambíguo entre filas de verdade diferentes) -
+        # mas vários botões da MESMA fila podem compartilhar a sigla dela de
+        # propósito (ex.: "Recepção Banco de Sangue" com 5 botões-folha
+        # diferentes, todos sigla "BSG", mesmo sequencial) - caso real de
+        # produção, não duplicidade a ser bloqueada.
+        query = TotemBotao.query.filter_by(unidade_id=dados["unidade_id"], sigla=dados["sigla"]).filter(
+            TotemBotao.fila_id != dados["fila_id"]
+        )
         if botao_atual:
             query = query.filter(TotemBotao.id != botao_atual.id)
         if query.first():
-            return "Já existe um botão com essa sigla nessa unidade."
+            return "Essa sigla já está em uso por outra fila nessa unidade."
 
     return None

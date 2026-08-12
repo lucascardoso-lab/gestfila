@@ -166,8 +166,14 @@ with app.app_context():
 ok("Botão-menu (sem fila vinculada) nunca tem sigla, mesmo se o form enviar uma")
 
 # ===========================================================================
-# E) Unicidade de sigla por unidade, agora escopada em TotemBotao: dois
-#    botões-folha na MESMA unidade com a MESMA sigla é bloqueado.
+# E) Unicidade de sigla por unidade: bloqueada só entre FILAS diferentes -
+#    achado real durante a verificação deste adendo, produção já tinha uma
+#    fila ("Recepção Banco de Sangue") com 5 botões-folha diferentes
+#    compartilhando de propósito a mesma sigla "BSG" (mesma fila, mesmo
+#    sequencial). Uma unique key simples em (unidade_id, sigla) quebraria
+#    esse caso legítimo - a regra certa é "duas FILAS diferentes não podem
+#    usar a mesma sigla na mesma unidade", não "todo botão precisa de sigla
+#    exclusiva".
 # ===========================================================================
 fila2 = Fila(empresa_id=ids["empresa"], unidade_id=ids["unidade"], nome="Consulta")
 with app.app_context():
@@ -179,10 +185,23 @@ resp = c_admin.post(
     f"/admin/totem-botoes/novo?empresa_id={ids['empresa']}",
     data={"label": "Consulta", "unidade_id": ids["unidade"], "fila_id": id_fila2, "sigla": "NEW"},
 )
-assert "Já existe um botão com essa sigla nessa unidade".encode("utf-8") in resp.data
+assert "Essa sigla já está em uso por outra fila nessa unidade".encode("utf-8") in resp.data
 with app.app_context():
     assert db.session.query(TotemBotao).filter_by(fila_id=id_fila2).first() is None
-ok("Dois botões-folha na mesma unidade com a mesma sigla ('NEW'): segundo bloqueado")
+ok("Sigla 'NEW' já usada por OUTRA fila (fila2) na mesma unidade: bloqueado")
+
+# a MESMA fila, por outro lado, pode ter um segundo botão-folha com a MESMA
+# sigla, sem bloqueio - é exatamente o caso real do Banco de Sangue.
+resp = c_admin.post(
+    f"/admin/totem-botoes/novo?empresa_id={ids['empresa']}",
+    data={"label": "Laboratorio - Preferencial", "unidade_id": ids["unidade"], "fila_id": ids["fila"], "sigla": "NEW"},
+    follow_redirects=True,
+)
+assert resp.status_code == 200
+with app.app_context():
+    botoes_mesma_fila = TotemBotao.query.filter_by(fila_id=ids["fila"], sigla="NEW").all()
+    assert len(botoes_mesma_fila) == 2  # botao_lab + este novo
+ok("Segundo botão-folha na MESMA fila com a MESMA sigla ('NEW'): permitido (caso real do Banco de Sangue)")
 
 # editar o próprio botão mantendo a mesma sigla continua permitido (exclusão
 # do próprio id na checagem de unicidade).

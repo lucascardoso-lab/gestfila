@@ -19,6 +19,15 @@ class TotemBotao(db.Model):
     # convenção já usada para `fila_id` desde a 10.1. Permite dois botões
     # diferentes apontarem pra mesma fila com siglas diferentes - o sequencial
     # numérico continua compartilhado (escopado por fila_id), só o prefixo muda.
+    #
+    # SEM unique constraint de banco em (unidade_id, sigla): dado real de
+    # produção já tinha vários botões-folha DIFERENTES apontando pra MESMA
+    # fila e compartilhando de propósito a mesma sigla (ex.: "Recepção Banco
+    # de Sangue" com 5 botões, todos sigla "BSG") - isso é legítimo, não
+    # duplicidade. A regra que faz sentido ("duas FILAS diferentes não podem
+    # usar a mesma sigla na mesma unidade") não é uma unique key simples
+    # (dois botões podem repetir sigla desde que apontem pra mesma fila), por
+    # isso a validação fica só em app/admin/totem_botoes.py::_validar_totem_botao.
     sigla = db.Column(db.String(4), nullable=True)
 
     ordem = db.Column(db.Integer, default=0, nullable=False)
@@ -30,10 +39,6 @@ class TotemBotao(db.Model):
     filhos = db.relationship("TotemBotao", back_populates="pai")
     servico = db.relationship("Servico")  # legado - não usar em código novo
     fila = db.relationship("Fila")
-
-    __table_args__ = (
-        db.UniqueConstraint("unidade_id", "sigla", name="uq_totem_botao_unidade_sigla"),
-    )
 
     def __repr__(self):
         return f"<TotemBotao {self.id} {self.label}>"

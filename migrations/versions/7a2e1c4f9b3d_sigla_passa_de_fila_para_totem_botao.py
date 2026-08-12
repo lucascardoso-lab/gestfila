@@ -16,6 +16,20 @@ no model `Fila`) mas NÃO é dropada ainda - mantida "morta" por 1 deploy antes 
 remover, mesmo padrão da tabela `servicos` na 10.1. Por isso vira NULLABLE aqui
 (a tela de filas deixa de exigir sigla para criar/salvar - fila pode ficar
 órfã de sigla até ganhar um botão).
+
+SEM UNIQUE CONSTRAINT de banco em (unidade_id, sigla): a primeira versão desta
+migration tentou criar uma, e ela quebrou contra dado real de produção - uma
+mesma fila ("Recepção Banco de Sangue") já tinha 5 botões-folha diferentes
+("Doação de Plaquetas", "Preferencial", "Doação de Sangue", "Resultados",
+"Sangria") compartilhando de propósito a mesma sigla "BSG" (mesma fila, mesmo
+sequencial, mesmo prefixo - configuração legítima, não duplicidade acidental).
+A regra de unicidade que faz sentido é "duas FILAS diferentes não podem usar a
+mesma sigla na mesma unidade" (códigos ambíguos entre filas de verdade
+diferentes) - não "todo botão precisa de uma sigla exclusiva". Essa regra não é
+uma unique key simples (dois botões podem legitimamente repetir sigla desde
+que apontem pra mesma fila), então a validação fica só em
+`app/admin/totem_botoes.py::_validar_totem_botao` (compara contra botões de
+OUTRA fila na mesma unidade), sem espelho no schema.
 """
 from alembic import op
 import sqlalchemy as sa
@@ -35,7 +49,9 @@ def upgrade():
         batch_op.add_column(sa.Column('sigla', sa.String(length=4), nullable=True))
 
     # --- migração de dados: copia filas.sigla -> totem_botoes.sigla para cada
-    # botão-folha (fila_id IS NOT NULL) já existente ------------------------
+    # botão-folha (fila_id IS NOT NULL) já existente - inclusive quando vários
+    # botões apontam pra mesma fila, todos recebem a mesma sigla dela (mantém
+    # o comportamento de impressão de hoje, sem mudar nenhum código já em uso) --
     totem_botoes_t = sa.table(
         'totem_botoes',
         sa.column('id', sa.Integer), sa.column('fila_id', sa.Integer), sa.column('sigla', sa.String),
@@ -49,9 +65,6 @@ def upgrade():
         if sigla is not None:
             bind.execute(totem_botoes_t.update().where(totem_botoes_t.c.id == botao.id).values(sigla=sigla))
 
-    with op.batch_alter_table('totem_botoes', schema=None) as batch_op:
-        batch_op.create_unique_constraint('uq_totem_botao_unidade_sigla', ['unidade_id', 'sigla'])
-
     # filas.sigla: depreciada, mantida como coluna "morta" - deixa de ser exigida
     # na criação/edição de fila (tela de filas não pede mais este campo).
     with op.batch_alter_table('filas', schema=None) as batch_op:
@@ -63,5 +76,4 @@ def downgrade():
         batch_op.alter_column('sigla', existing_type=sa.String(length=4), nullable=False)
 
     with op.batch_alter_table('totem_botoes', schema=None) as batch_op:
-        batch_op.drop_constraint('uq_totem_botao_unidade_sigla', type_='unique')
         batch_op.drop_column('sigla')
