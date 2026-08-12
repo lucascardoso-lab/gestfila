@@ -4001,6 +4001,39 @@ dados simulada, RBAC de edição de botão). Os 8 arquivos de teste que já
 exercitavam geração de senha via botão-folha ganharam `sigla=` nas fixtures
 de `TotemBotao` para continuar batendo os códigos esperados.
 
+**10. Risco de concorrência ACEITO conscientemente, não fechado (diferente da
+10.41):** `_validar_totem_botao` (item 2.1) faz um `SELECT` de conflito e o
+`INSERT`/`UPDATE` do botão acontece num commit separado, sem lock de linha,
+sem `UPDATE` atômico e sem tratamento de `IntegrityError` - é um TOCTOU
+clássico. Duas requisições `POST /admin/totem-botoes/novo` (ou `/editar`)
+genuinamente simultâneas, para FILAS DIFERENTES com a MESMA sigla na mesma
+unidade, podem ambas passar pelo `SELECT` antes de qualquer uma commitar, e
+as duas gravações acontecem - o app-level check não pega essa janela. E,
+diferente da 10.41 (que tinha um `UPDATE` atômico como saída direta), aqui
+NÃO existe mais nenhuma rede de segurança no banco: a constraint de banco
+(item 2.1) foi removida de propósito, porque ela também bloqueava o caso
+legítimo de vários botões da MESMA fila compartilhando sigla (Banco de
+Sangue) - uma unique key simples não consegue expressar "só entre filas
+diferentes", então não há substituto de banco pronto pra fechar esta fresta.
+
+**Por que aceito sem fix agora:** cadastro de botão do totem é uma ação
+administrativa rara (não é um fluxo de alto tráfego como emissão de senha,
+`_emitir_senha`, que TEM lock de linha real - seção 8) - dois admins da
+mesma empresa cadastrando botões-folha com a mesma sigla, para filas
+diferentes, no mesmo instante, é uma janela de colisão extremamente estreita
+na prática. O pior caso de uma colisão não detectada é um código de senha
+ambíguo entre duas filas (mesmo problema que a validação existe pra evitar,
+só que sem ser pega) - não perda de dado, não segurança, não duplicação de
+senha (isso continua protegido por `_emitir_senha`). Se algum dia isso virar
+um fluxo de alto tráfego ou multi-operador simultâneo, fechar com um dos
+padrões já estabelecidos no projeto: `SELECT ... FOR UPDATE`/`UPDATE` atômico
+bloqueando a fila em questão antes do `SELECT` de conflito (mesmo idioma da
+seção 8/10.41), ou capturar `IntegrityError` de uma constraint de banco mais
+específica (ex.: um índice único parcial/filtrado, se o dialeto usado em
+produção suportar - MySQL não suporta unique index parcial nativamente, só
+via coluna gerada/trigger, o que precisaria de investigação própria antes de
+implementar).
+
 **Arquivos alterados:** `migrations/versions/7a2e1c4f9b3d_sigla_passa_de_
 fila_para_totem_botao.py` (nova); `app/models/totem_botao.py`, `app/models/
 fila.py`; `app/totem/routes.py`; `app/admin/filas.py`, `app/admin/
