@@ -64,6 +64,16 @@
       const MAX_ITENS_HISTORICO = 5;
       const RECARGA_DIARIA_MS = 24 * 60 * 60 * 1000;
 
+      // Instrumentação de timing (investigação de corte de início de fala em
+      // hardware fraco): fica atrás de ?debug=1 na URL pra não sujar o console
+      // em produção normal - liga só quando alguém precisa medir de propósito
+      // (ex.: pedir pro cliente rodar https://.../painel/tv/<slug>?debug=1 na
+      // máquina Celeron reportada, depois desta correção, e mandar o print do
+      // console). Mede só o trabalho SÍNCRONO do handler do evento 'chamada'
+      // (não captura quando o áudio de fato começa a soar - isso é assíncrono/
+      // interno ao motor de voz, fora do alcance do JS).
+      const DEBUG_TIMING = new URLSearchParams(window.location.search).get("debug") === "1";
+
       const elStatus = document.getElementById("status-conexao");
       const elRelogio = document.getElementById("relogio");
       const elData = document.getElementById("data");
@@ -120,10 +130,19 @@
       // evento, a chamada ficava muda pra sempre nessa aba (o desvio "sem voz
       // pt -> não fala" nunca revertia). Poll de segurança: tenta de novo por
       // alguns segundos após o load, sem depender de nenhuma interação manual.
+      // Investigação de corte de início de fala em hardware fraco (adendo que
+      // documenta esta correção): vozPtPreferida() fazia filter()+sort() do
+      // zero em TODA chamada, dentro do caminho síncrono que antecede
+      // speak() - trabalho redundante, já que o resultado só muda quando
+      // vozesCache muda. `vozPreferidaCache` guarda o resultado já calculado;
+      // recalculado só aqui, junto com vozesCache, nunca dentro de
+      // falarChamada() (ver mais abaixo).
       let vozesCache = [];
+      let vozPreferidaCache = null;
       if ("speechSynthesis" in window) {
         const atualizarVozesCache = () => {
           vozesCache = speechSynthesis.getVoices();
+          vozPreferidaCache = vozPtPreferida();
         };
         atualizarVozesCache();
         speechSynthesis.onvoiceschanged = atualizarVozesCache;
@@ -256,7 +275,7 @@
           return; // sem suporte a TTS - degrada graciosamente
         }
 
-        const voz = vozPtPreferida();
+        const voz = vozPreferidaCache;
         if (!voz) {
           // Nenhuma voz pt-* instalada neste navegador/SO (ex.: Edge no Windows
           // usa as vozes OneCore do próprio SO - se só o pacote de voz em
@@ -277,6 +296,28 @@
         fala.volume = TV_VOLUME / 100;
         fala.voice = voz;
 
+        // cancel()+speak() SÍNCRONOS, um logo após o outro (revertido de um
+        // setTimeout(fn, 0) intermediário - ver nota abaixo): a causa
+        // PRIMÁRIA confirmada na investigação (reflow forçado +
+        // box-shadow de inserirChamada() competindo por CPU bem no momento
+        // em que a fala deveria começar) só fica de fato resolvida se
+        // speak() rodar de verdade ANTES do trabalho síncrono de
+        // inserirChamada() no handler do evento 'chamada' - não só
+        // textualmente antes, mas na ORDEM REAL DE EXECUÇÃO.
+        //
+        // Contradição encontrada e corrigida: um setTimeout(fn, 0) ao redor
+        // do speak() transforma essa chamada numa macrotask, que só roda
+        // DEPOIS que TODO o código síncrono do handler termina - incluindo
+        // inserirChamada(), que passou a rodar em seguida (handler síncrono,
+        // não usa await). Isso desfazia silenciosamente a reordenação
+        // acima: falarChamada() "rodava primeiro" só até a linha do
+        // cancel(); o speak() de fato só era chamado DEPOIS do reflow/
+        // animação pesados, exatamente o cenário que a reordenação existe
+        // pra evitar. Escolhida a correção da causa primária (comprovada
+        // pela investigação) em vez da mitigação do fator secundário
+        // (bug do Chromium em cancel()+speak() no mesmo tick, nunca
+        // confirmado neste caso) - as duas não podiam conviver do jeito que
+        // foram implementadas na primeira tentativa.
         speechSynthesis.cancel(); // evita empilhar falas se varias chamadas chegarem rapido
         speechSynthesis.speak(fala);
       }
@@ -505,9 +546,32 @@
 
       // evento principal desta tela: {tipo: 'senha'|'nome', local, senha|nome_paciente, cor?, repetir?}
       // emitido pelo backend nas salas tv_<id>/fila_<id>.
+      //
+      // ORDEM invertida de propósito (investigação de corte de início de fala
+      // em hardware fraco, adendo correspondente no BLUEPRINT): falarChamada()
+      // roda ANTES de inserirChamada(). inserirChamada() dispara
+      // dispararAnimacaoDestaque(), que força um reflow síncrono
+      // (`elChamadaAtual.offsetWidth`) e inicia uma animação CSS de 3s que
+      // anima `box-shadow` (propriedade cara, força repaint a cada frame, não
+      // é compositor-only como transform/opacity) - em CPU fraca, esse
+      // trabalho competia bem no momento em que a fala deveria começar,
+      // cortando o início do áudio. falarChamada() não depende de nada que
+      // inserirChamada() atualiza (só usa `dados`), então a troca de ordem é
+      // segura - o áudio começa a inicializar sem concorrência de reflow/
+      // repaint, e a atualização visual (que o olho não percebe faltar por
+      // uns milissegundos) vem logo depois.
       socket.on("chamada", (dados) => {
-        inserirChamada(dados);
+        const t0 = DEBUG_TIMING ? performance.now() : 0;
         falarChamada(dados);
+        const t1 = DEBUG_TIMING ? performance.now() : 0;
+        inserirChamada(dados);
+        if (DEBUG_TIMING) {
+          const t2 = performance.now();
+          console.log(
+            `[GESTFILA debug] falarChamada=${(t1 - t0).toFixed(1)}ms ` +
+            `inserirChamada=${(t2 - t1).toFixed(1)}ms total=${(t2 - t0).toFixed(1)}ms`
+          );
+        }
       });
 
       // Smart TVs ficam com o navegador aberto por dias - recarregar 1x/dia evita

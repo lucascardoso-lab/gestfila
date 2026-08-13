@@ -4043,6 +4043,122 @@ admin/filas/listar.html`, `app/templates/admin/totem_botoes/form.html`,
 
 ---
 
+## 10.48. ADENDO — Corte de início da fala no painel de TV em hardware fraco (Celeron + 4GB)
+
+> Reportado: a fala da chamada (painel de TV) corta o INÍCIO em TODA
+> chamada (não só a primeira do dia), em TODOS os navegadores, mas só numa
+> máquina específica (Celeron + 4GB RAM) - outras máquinas mais potentes não
+> têm o problema. Esse padrão descarta o bug clássico de "cold start" do
+> Chromium em `speechSynthesis` (só afeta a primeira fala após período
+> ocioso - já registrado como descartado/revertido na 10.13, não
+> reintroduzido aqui) e aponta pra hardware fraco disputando CPU no momento
+> exato em que a fala deveria começar.
+
+**1. Investigação (código lido, sem runtime de navegador disponível neste
+ambiente - mesma limitação já registrada em outros testes de JS do
+projeto):** em `painel/tv.html`, o handler do evento `chamada` rodava
+`inserirChamada(dados)` (atualização visual) e `falarChamada(dados)`
+(`speechSynthesis.speak()`) **no mesmo tick síncrono, sem nenhum
+`setTimeout`/`requestAnimationFrame` entre os dois.** Antes de `speak()` ser
+sequer chamado, `inserirChamada()` já tinha disparado
+`dispararAnimacaoDestaque()`, que:
+- força um **reflow síncrono** (`void elChamadaAtual.offsetWidth`) -
+  bloqueia a thread principal até o navegador recomputar layout, em TODA
+  chamada (não só a primeira), igual em qualquer engine (Chromium/Gecko) -
+  bate com o padrão relatado ("todo navegador, toda chamada");
+- dispara uma animação CSS de 3s (`chamada-destaque`,
+  `app/templates/painel/_layout.html`) que anima **`box-shadow`** -
+  propriedade que força repaint a cada frame (não é compositor-only como
+  `transform`/`opacity`, usada na outra animação do mesmo elemento), bem
+  mais cara num Celeron do que numa máquina forte.
+
+Além disso, `vozPtPreferida()` (seleção de voz, 10.13) era recalculada do
+zero (`filter()` + `sort()`) em **toda** chamada, dentro do mesmo caminho
+síncrono - trabalho redundante, já que o resultado só muda quando a lista de
+vozes do navegador muda (evento `voiceschanged`). E `falarChamada()` fazia
+`speechSynthesis.cancel()` imediatamente seguido de `speechSynthesis.speak()`
+no mesmo tick - padrão com bug conhecido (não confirmado neste caso
+específico) no Chromium, onde o `speak()` novo pode começar a ser processado
+antes do cancelamento anterior propagar internamente, cortando o início do
+áudio novo.
+
+**Causa mais provável, por eliminação e pelo padrão exato relatado:** o
+reflow forçado + a animação de `box-shadow` de 3s, disparados no mesmo tick
+síncrono imediatamente antes de `speak()`, competem por CPU bem no momento
+em que a fala deveria começar - em hardware fraco essa janela de contenção é
+grande o suficiente pra cortar o início do áudio; em hardware forte o mesmo
+trabalho termina rápido demais pra ser perceptível.
+
+**2. Correção aplicada** (`app/templates/painel/tv.html`):
+- **Ordem invertida:** `falarChamada(dados)` roda ANTES de
+  `inserirChamada(dados)` no handler do evento `chamada` - o áudio começa a
+  inicializar sem concorrência do reflow/repaint da animação, que passa a
+  rodar só depois. `falarChamada()` não depende de nada que
+  `inserirChamada()` atualiza (só usa `dados`), então a troca é segura.
+- **`vozPreferidaCache`:** o resultado de `vozPtPreferida()` passa a ser
+  calculado só quando `vozesCache` é atualizado (dentro de
+  `atualizarVozesCache()` - load inicial, `voiceschanged`, poll de
+  segurança), não mais em toda `falarChamada()`. A função `vozPtPreferida()`
+  em si não mudou (continua pura, só lê `vozesCache`) - só passou a ser
+  chamada com menos frequência.
+- **`cancel()`+`speak()` continuam SÍNCRONOS**, um logo após o outro, sem
+  nenhum `setTimeout` entre eles - ver item 2.1 abaixo (contradição
+  encontrada e corrigida na revisão desta correção).
+
+**2.1. Contradição encontrada e corrigida antes de fechar este adendo:** a
+primeira versão desta correção também envolveu o `speak()` num
+`setTimeout(() => speechSynthesis.speak(fala), 0)` logo após o `cancel()`,
+como tentativa preventiva de baixo risco pro fator secundário (bug do
+Chromium com `cancel()`+`speak()` no mesmo tick, item 1) - **isso desfazia
+silenciosamente a correção da causa PRIMÁRIA**, sem os dois efeitos serem
+percebidos como conflitantes numa primeira leitura textual. `setTimeout(fn,
+0)` transforma a chamada de `speak()` numa **macrotask**: ela só roda depois
+que TODO o código síncrono do handler termina - incluindo `inserirChamada()`,
+que roda logo em seguida (o handler é síncrono, não usa `await`). Na prática,
+`falarChamada()` só "rodava primeiro" até a linha do `cancel()`; o `speak()`
+de fato só era chamado DEPOIS do reflow síncrono e da animação de
+`box-shadow` de `inserirChamada()` - exatamente o cenário que a reordenação
+do item 2 existe pra evitar, cancelando o ganho pretendido sem nenhum erro
+visível (nem nos testes estruturais, que não checam ordem real de execução -
+ver item 5). Corrigido revertendo `cancel()`+`speak()` pra síncronos: prioriza
+a causa PRIMÁRIA confirmada pela investigação (item 1) em vez da mitigação do
+fator secundário nunca confirmado neste caso - as duas mitigações, do jeito
+que foram implementadas na primeira tentativa, eram mutuamente exclusivas na
+prática, não aditivas.
+
+**3. Instrumentação de timing, atrás de flag** (`?debug=1` na URL, não
+`localStorage` - não deve sujar console em produção normal): mede com
+`performance.now()` só o trabalho SÍNCRONO do handler (`falarChamada` +
+`inserirChamada`), não quando o áudio de fato começa a soar (isso é
+assíncrono/interno ao motor de voz, fora do alcance do JS). Uso:
+`https://.../painel/tv/<slug>?debug=1`, ler o console do navegador na
+própria máquina.
+
+**4. PENDÊNCIA FÍSICA - mesmo padrão dos adendos de impressão (10.38/10.42):**
+não há como medir o ganho real sem rodar na máquina Celeron reportada. Não
+foi possível provar numericamente a melhora aqui (sem runtime de navegador
+neste ambiente) - a confirmação final depende de reproduzir o problema
+nessa máquina física, com e sem o parâmetro `?debug=1`, comparando os tempos
+antes/depois desta correção e confirmando de ouvido se o corte de início
+sumiu. Se o corte persistir mesmo com os números do `?debug=1` mostrando
+melhora no tempo síncrono, a causa real estaria em outro lugar (ex.: dentro
+do próprio motor de voz do SO/navegador, fora do alcance do JS) - próximo
+passo de diagnóstico nesse cenário, fora do escopo desta correção.
+
+**5. Testes:** suíte estrutural existente (`tests/test_regressao_painel_tv_
+redesign.py`, `tests/test_regressao_audio_pregravado.py`,
+`tests/test_regressao_som_configuravel.py`) já cobre a presença/isolamento
+de `falarChamada`/`inserirChamada`/`vozPtPreferida` via checagem de string/
+corpo de função no HTML renderizado - não depende da ORDEM de chamada dentro
+do handler nem do valor cacheado, então continuou passando sem alteração
+após a reordenação. Suíte completa (49 arquivos) sem falhas. Nenhum teste
+novo dedicado (não dá pra medir performance real sem runtime de navegador -
+mesma limitação já aceita em outros testes de JS do projeto).
+
+**Arquivos alterados:** `app/templates/painel/tv.html`.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da
