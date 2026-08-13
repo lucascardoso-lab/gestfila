@@ -4278,6 +4278,111 @@ completa (50 arquivos) sem falhas.
 
 ---
 
+## 10.50. ADENDO — EXPERIMENTAL: heartbeat periódico do motor de speechSynthesis (corte de início após ociosidade, causa diferente da 10.48/10.49)
+
+> Terceiro problema relacionado a corte de início de fala no painel de TV,
+> com causa e correção distintas das duas anteriores. **Não confundir com a
+> 10.48** (CPU fraca disputando com reflow/animação, específica de hardware,
+> já contida) **nem com a 10.49** (perda sistemática da primeira sílaba em
+> uso contínuo, corrigida com prefixo de priming). Dado de campo confirmado
+> com o cliente: o corte de início volta a acontecer toda vez que a TV fica
+> um tempo sem chamar nenhuma senha (não é só 1x por dia/sessão) - a
+> PRIMEIRA chamada depois de um período ocioso corta, a segunda em diante
+> (enquanto continuar chamando) sai normal.
+
+**1. Base do raciocínio (não verificável empiricamente neste ambiente, sem
+runtime de navegador - documentado como fundamentação, não como prova):** o
+padrão "só a 1ª chamada após ociosidade corta, as seguintes saem normais" é
+consistente com a literatura conhecida sobre o Web Speech API - o
+engine/pipeline de síntese de alguns navegadores (Chromium/SAPI Windows)
+pode ser desalocado ou suspenso pelo próprio SO/navegador depois de um
+período sem uso (economia de recursos), precisando reinicializar no próximo
+`speak()` - a mesma reinicialização que, na 10.49, mostrou engolir os
+primeiros ~100-300ms de uma utterance. A 10.49 tratou o sintoma "toda
+chamada corta um pouco" (motor sempre frio no início de cada fala); este é
+um sintoma relacionado mas mais específico: "motor esfria de verdade depois
+de ficar OCIOSO por um tempo maior, e demora mais pra 'esquentar' de volta
+na primeira chamada seguinte" - daí a proposta de mantê-lo aquecido de
+propósito com um heartbeat, em vez de só amortecer o corte com um prefixo.
+
+**2. Por que NÃO é o workaround da 10.13 reintroduzido** (revisado com
+cuidado antes de implementar, por pedido explícito - não reintroduzir sem
+aprovação): a nota daquele adendo registra um keep-alive especulativo de
+`speechSynthesis.pause()/resume()`, testado e **revertido** por não ser
+verificável no ambiente de teste e ter relatos de TAMBÉM causar cortes em
+vez de só preveni-los. A razão do risco: `pause()`/`resume()` manipulam o
+estado de síntese AMBIENTE do motor inteiro - pausam/retomam o que quer que
+esteja tocando OU PRESTES A TOCAR, real ou não. Se uma chamada real
+começasse a falar bem no instante de um `pause()` especulativo, o `resume()`
+seguinte não tinha garantia de retomar do jeito certo (bug conhecido do
+Chrome) - o keep-alive podia cortar uma fala que não teria cortado sozinha.
+**Esta correção é estruturalmente diferente:** o heartbeat só chama
+`speak()` de uma utterance PRÓPRIA, curtíssima e quase inaudível - nunca
+manipula o que já está em andamento (nem `pause()`, nem `resume()`, nem
+`cancel()` de propósito). Se uma chamada real chegar durante um heartbeat,
+o `cancel()` que `falarChamada()` já faz - mecanismo existente desde antes
+desta correção, "evita empilhar falas se várias chamadas chegarem rápido" -
+cancela o heartbeat exatamente como cancelaria qualquer fala anterior; não é
+um caminho de interação novo nem um estado adicional pra gerenciar, é o
+mesmo cancelamento que já protege contra chamadas reais em sequência
+rápida.
+
+**3. Correção aplicada** (`app/templates/painel/tv.html`), **EXPERIMENTAL**
+- mesmo status inicial do workaround da 10.13, que precisou ser revertido:
+- `HEARTBEAT_TTS_INTERVALO_MS = 12000` (12s, dentro da faixa 10-15s
+  sugerida) - `setInterval(dispararHeartbeatTts, HEARTBEAT_TTS_INTERVALO_MS)`
+  dentro do mesmo bloco `if ("speechSynthesis" in window)` da configuração
+  de voz existente.
+- `dispararHeartbeatTts()`: checagem de `speechSynthesis.speaking`
+  OBRIGATÓRIA antes de qualquer disparo (não um timer solto) - nunca deve
+  tocar por cima de uma fala real (ou de outro heartbeat) em andamento.
+  Guardada pelos MESMOS gates de `falarChamada()` (`TV_SOM_ATIVO`,
+  `TV_USA_AUDIO_PREGRAVADO`, suporte a `speechSynthesis`) - sem som ligado
+  ou nesta TV usando o fallback de áudio pré-gravado, manter o motor
+  "aquecido" não serve pra nada.
+- `HEARTBEAT_TTS_VOLUME = 0.02` (baixo, mas **não zero** - decisão
+  documentada no código: volume 0 evitaria ruído perceptível, mas corre o
+  risco de o motor otimizar o caminho e nunca de fato exercitar o pipeline
+  de áudio real, o que anularia o propósito do heartbeat).
+- `HEARTBEAT_TTS_TEXTO = "a"` (uma vogal curta, não pontuação nem espaço
+  puro) - objetivo OPOSTO ao `PRIMING_TTS_PREFIXO` da 10.49 (que quer ser
+  descartável): aqui o motor precisa genuinamente sintetizar e tocar um
+  fonema real, não só processar um caractere de pausa que algum motor
+  poderia resolver como silêncio sem exercitar a saída de áudio de verdade.
+- Log opcional atrás do `?debug=1` já existente (10.48/10.49): cada disparo
+  de heartbeat loga no console quando `DEBUG_TIMING` estiver ativo, pra dar
+  pra ver na máquina real se está disparando quando esperado (e com que
+  frequência de fato, já que `setInterval` não garante precisão sob carga).
+
+**4. PENDÊNCIA FÍSICA + STATUS EXPERIMENTAL - mesmo padrão dos adendos de
+impressão (10.38/10.42) e da 10.48/10.49, com uma ressalva a mais:** esta
+correção pode precisar ser **revertida**, assim como o workaround da 10.13,
+se o teste físico mostrar que o heartbeat interfere negativamente (áudio de
+fundo audível demais mesmo em volume baixo, engasgo perceptível quando uma
+chamada real coincide com um heartbeat, ou qualquer efeito colateral não
+previsto). Não é uma promessa de que vai funcionar - é uma tentativa
+fundamentada, estruturalmente diferente do workaround já revertido, mas
+ainda não validada em hardware real. Confirmação pendente: (1) o corte após
+ociosidade sumiu; (2) o heartbeat em si não é perceptível/incômodo; (3) uma
+chamada real que coincida com um heartbeat em andamento sai limpa (sem
+engasgo, sem corte adicional).
+
+**5. Testes:** novo arquivo `tests/test_regressao_heartbeat_tts.py` (10
+casos, estrutural, mesma limitação de sempre sem runtime de navegador -
+confirma presença/config da técnica, não prova que o corte sumiu nem que o
+heartbeat é inaudível): constantes de intervalo/volume/texto com os valores
+decididos; `dispararHeartbeatTts()` checa `speechSynthesis.speaking` ANTES
+de chamar `speak()`; usa as constantes certas; respeita os mesmos gates de
+`falarChamada()`; `setInterval` liga a função no intervalo configurado; log
+de debug presente; comportamento em runtime (via `TV_SOM_ATIVO`/
+`TV_USA_AUDIO_PREGRAVADO`) confirmado para TV com som desligado e TV com
+áudio pré-gravado. Suíte completa (51 arquivos) sem falhas.
+
+**Arquivos alterados:** `app/templates/painel/tv.html`; novo
+`tests/test_regressao_heartbeat_tts.py`.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da

@@ -84,6 +84,50 @@
       // normalização de texto antes de sintetizar), por isso um só.
       const PRIMING_TTS_PREFIXO = ", ";
 
+      // "Heartbeat" do motor de speechSynthesis (adendo que documenta esta
+      // correção - EXPERIMENTAL, causa e mecanismo diferentes da 10.48 e da
+      // 10.49, ver BLUEPRINT): corte de início voltava a acontecer toda vez
+      // que a TV ficava um tempo sem chamar nenhuma senha - a PRIMEIRA
+      // chamada depois de um período ocioso cortava, as seguintes (enquanto
+      // continuasse chamando) saíam normais. Consistente com o motor de TTS
+      // "esfriando"/desalocando recursos internos após um período sem uso e
+      // precisando reinicializar no próximo speak() - mesma classe de bug já
+      // descrita na 10.13 (aba recém-carregada sem 'voiceschanged'), só que
+      // recorrente ao longo do dia, não só uma vez no load da página.
+      //
+      // NÃO é o workaround de pause()/resume() já tentado e REVERTIDO na
+      // 10.13 (ver nota daquele adendo) - propositalmente. pause()/resume()
+      // manipula o estado de síntese AMBIENTE do motor inteiro (pausa/retoma
+      // o que quer que esteja tocando ou prestes a tocar, real ou não) - se
+      // uma chamada real começasse a falar bem no instante de um pause()
+      // especulativo, o resume() seguinte não tinha garantia de retomar do
+      // jeito certo (bug conhecido do Chrome), podendo cortar uma fala que
+      // não teria cortado sozinha. Este heartbeat só chama speak() de uma
+      // utterance PRÓPRIA, curtíssima e quase inaudível - nunca toca no que
+      // já está em andamento. Se uma chamada real chegar durante um
+      // heartbeat, o cancel() que falarChamada() já faz (existente desde
+      // antes desta correção, "evita empilhar falas") cancela o heartbeat
+      // como cancelaria qualquer fala anterior e começa a real - mesmo
+      // mecanismo já usado pra várias chamadas reais em sequência rápida,
+      // não um caminho novo de interação.
+      const HEARTBEAT_TTS_INTERVALO_MS = 12000; // 12s - dentro da faixa 10-15s sugerida
+      // Não-zero de propósito: volume 0 evita ruído perceptível, mas corre o
+      // risco de o motor otimizar o caminho e nunca de fato exercitar o
+      // pipeline de áudio real (mesma suspeita levantada sobre o utterance de
+      // volume 0 já existente no load, mais abaixo - aqui, como o objetivo é
+      // literalmente manter esse pipeline "quente", um volume mínimo não-zero
+      // é a escolha mais segura, mesmo que tecnicamente audível em silêncio
+      // total). Valor bem baixo pra ficar abaixo do ruído ambiente típico de
+      // uma recepção/sala de espera.
+      const HEARTBEAT_TTS_VOLUME = 0.02;
+      // Uma vogal curta, não pontuação nem espaço puro: o objetivo aqui é o
+      // OPOSTO do PRIMING_TTS_PREFIXO (que quer ser descartável) - o
+      // heartbeat precisa que o motor genuinamente sintetize e toque um
+      // fonema real, não só processe um caractere de pausa/pontuação que
+      // algum motor poderia resolver como silêncio sem exercitar a saída de
+      // áudio de verdade.
+      const HEARTBEAT_TTS_TEXTO = "a";
+
       // Instrumentação de timing (investigação de corte de início de fala em
       // hardware fraco): fica atrás de ?debug=1 na URL pra não sujar o console
       // em produção normal - liga só quando alguém precisa medir de propósito
@@ -185,6 +229,17 @@
         const aquecimento = new SpeechSynthesisUtterance(" ");
         aquecimento.volume = 0;
         speechSynthesis.speak(aquecimento);
+
+        // Heartbeat periódico (função dispararHeartbeatTts() definida mais
+        // abaixo, hoisted - disponível aqui independente da ordem textual)
+        // - diferente do "aquecimento" logo acima (dispara UMA vez só, no
+        // load, pra acordar o evento 'voiceschanged' do Chrome, seção 10.13):
+        // este roda a cada HEARTBEAT_TTS_INTERVALO_MS pela vida inteira da
+        // aba, pra manter o motor "quente" mesmo depois de longos períodos
+        // sem nenhuma chamada real - é exatamente esse cenário (TV ociosa
+        // por um tempo, motor "esfria") que o aquecimento de load único não
+        // cobre.
+        setInterval(dispararHeartbeatTts, HEARTBEAT_TTS_INTERVALO_MS);
       }
 
       // Escolhe a melhor voz pt disponível, em vez da primeira que aparecer -
@@ -345,6 +400,33 @@
         // foram implementadas na primeira tentativa.
         speechSynthesis.cancel(); // evita empilhar falas se varias chamadas chegarem rapido
         speechSynthesis.speak(fala);
+      }
+
+      // Heartbeat periódico (ver constantes HEARTBEAT_TTS_* acima) - dispara
+      // só quando NADA está sendo falado no momento (checagem de
+      // speechSynthesis.speaking OBRIGATÓRIA antes de cada disparo, não um
+      // timer solto): nunca deve tocar por cima de uma fala real em
+      // andamento. Chamado de dentro de um setInterval, guardado por TV_SOM_
+      // ATIVO/TV_USA_AUDIO_PREGRAVADO/suporte a speechSynthesis (mesmos gates
+      // de falarChamada() - sem som ligado ou sem speechSynthesis nesta TV,
+      // não faz sentido manter nada "aquecido").
+      function dispararHeartbeatTts() {
+        if (!TV_SOM_ATIVO || TV_USA_AUDIO_PREGRAVADO || !("speechSynthesis" in window)) {
+          return;
+        }
+        if (speechSynthesis.speaking) {
+          return; // fala real (ou heartbeat anterior) ainda em andamento - não interfere
+        }
+        const aquecimento = new SpeechSynthesisUtterance(HEARTBEAT_TTS_TEXTO);
+        aquecimento.volume = HEARTBEAT_TTS_VOLUME;
+        if (vozPreferidaCache) {
+          aquecimento.lang = vozPreferidaCache.lang;
+          aquecimento.voice = vozPreferidaCache;
+        }
+        if (DEBUG_TIMING) {
+          console.log(`[GESTFILA debug] heartbeat TTS disparado às ${new Date().toLocaleTimeString("pt-BR")}`);
+        }
+        speechSynthesis.speak(aquecimento);
       }
 
       // valor central do card: código da senha, ou o nome (chamada por nome,
