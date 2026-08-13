@@ -4159,6 +4159,125 @@ mesma limitação já aceita em outros testes de JS do projeto).
 
 ---
 
+## 10.49. ADENDO — Corte de início da fala no painel de TV: causa DIFERENTE da 10.48 (atraso de warm-up do motor de TTS, não CPU)
+
+> Reportado depois da 10.48 já aplicada: hardware TROCADO (máquina nova,
+> mais potente), código já com a correção da 10.48 em produção, e o corte de
+> início PERSISTIU. Dado novo do cliente: corta tanto em chamada por NOME
+> ("Lucas Cardoso" saindo como "cas Cardoso" - perde "Lu") quanto em chamada
+> só por CÓDIGO de senha (ex.: "BSG009") - sistêmico em toda `falarChamada()`,
+> não específico de um fluxo. Como já não é mais CPU fraca disputando com
+> reflow/animação (causa da 10.48, contida por hardware), a causa mais
+> provável passa a ser um bug diferente: **atraso de "aquecimento" do próprio
+> motor de `speechSynthesis`** - documentado no Chromium/SAPI Windows, onde
+> os primeiros ~100-300ms de CADA utterance são engolidos porque o pipeline
+> de áudio ainda não terminou de inicializar quando o navegador começa a
+> tocar - independente de CPU, acontece em toda chamada, não só a primeira
+> do dia. **Não confundir com a 10.48** (essa era CPU/reflow, específica de
+> hardware fraco, já resolvida e contida) - este é um problema novo,
+> encontrado depois, com mecanismo diferente.
+
+**1. Investigação (código lido, sem runtime de navegador disponível neste
+ambiente - mesma limitação já aceita em outros testes de JS do projeto):**
+
+- **Texto exato da Utterance:** `montarTextoChamada(dados)` (`painel/tv.html`)
+  substitui `{nome}`/`{senha}`/`{local}` no template configurável por
+  empresa (`Empresa.texto_chamada_nome_template`/`texto_chamada_senha_
+  template`, default `"{nome}, por favor, dirija-se a {local}."` e
+  `"Atenção, senha {senha}. Por favor, dirija-se a {local}."`) - **sem
+  nenhum prefixo/pausa embutido antes desta correção**. O texto que chegava
+  em `fala.text` começava DIRETO na primeira sílaba do nome ou (dependendo
+  do template configurado por cada empresa) potencialmente direto no
+  código, sem nenhuma margem de segurança contra esse atraso de warm-up.
+- **`fala.rate`/`fala.pitch`:** nenhum dos dois é definido em nenhum lugar
+  do código - ambos ficam no default do navegador (`1.0`), sem
+  customização que amplifique ou mitigue o corte.
+- **`fala.volume`:** o único parâmetro customizado (`TV_VOLUME / 100`,
+  cadastro por TV) - não interage com o atraso de warm-up, só com o volume
+  final do áudio já iniciado.
+- **`onstart`/`onboundary`:** nenhum dos dois eventos está em uso em
+  nenhum lugar do arquivo - não existia nenhuma instrumentação capaz de
+  medir quando o áudio de fato começa a soar vs. quando `speak()` foi
+  chamado (limitação que continua existindo mesmo depois desta correção -
+  ver item 4).
+
+**2. Correção aplicada** (`app/templates/painel/tv.html`) - técnica de
+"priming" (padrão documentado pra esse bug específico, escolhida a mais
+simples primeiro, conforme pedido: prefixo de texto, não uma segunda
+utterance separada):
+- Nova constante `PRIMING_TTS_PREFIXO = ", "` (vírgula + espaço, não
+  espaço puro - espaço no início costuma ser descartado pelo parser do
+  motor sem gerar nenhum áudio de "sacrifício" real). **Vírgula, não
+  reticências** (escolha revisada antes de fechar este adendo): entre os
+  sinais de pontuação, vírgula é o marcador de pausa mais universal entre
+  motores de TTS - praticamente todo motor trata "," como pausa breve,
+  nunca soletra. Reticências ("...") têm histórico conhecido de serem
+  verbalizadas por extenso ("reticências") em alguns motores PT-BR, o que
+  anularia o efeito pretendido (viraria conteúdo audível real, não um
+  "sacrifício" neutro) - risco desnecessário pra uma técnica cujo único
+  objetivo é ser descartável. Espaço extra depois da vírgula não teria
+  efeito garantido (motores tendem a colapsar espaços múltiplos na
+  normalização de texto antes de sintetizar), por isso um só.
+- Aplicado dentro de `falarChamada()`, no único ponto onde toda
+  `SpeechSynthesisUtterance` é construída: `new SpeechSynthesisUtterance
+  (PRIMING_TTS_PREFIXO + montarTextoChamada(dados))` - cobre nome E código
+  automaticamente, sem duplicar lógica (mesma função já central pros dois
+  fluxos, ver não-duplicação de áudio provada na 10.13).
+- `montarTextoChamada()` continua só compondo o TEXTO da mensagem (nome/
+  código + local) - o priming é uma preocupação de motor de TTS, mantida
+  isolada em `falarChamada()`, não misturada na função de composição de
+  texto (separação de camadas).
+- **Não aplicado** ao caminho de áudio pré-gravado
+  (`falarChamadaPregravada()`, `Tv.usa_audio_pregravado`) - esse fluxo
+  concatena clipes `.wav` reais, não usa `speechSynthesis`, então não sofre
+  desse bug de warm-up de motor.
+
+**3. Alternativa mais robusta, NÃO implementada agora** (registrada pra
+referência futura, caso o prefixo de texto não seja suficiente): disparar
+uma `SpeechSynthesisUtterance` quase-vazia (ex.: um único espaço, volume
+baixo) imediatamente ANTES da utterance real, só pra "acordar" o motor - a
+real só seria chamada no evento `onend` da primeira (ou com um pequeno delay
+medido). Mais complexa (duas utterances encadeadas, mais um ponto de falha
+possível) - deliberadamente não aplicada nesta rodada, seguindo a orientação
+de testar a técnica mais simples primeiro.
+
+**4. PENDÊNCIA FÍSICA DUPLA - mesmo padrão dos adendos de impressão
+(10.38/10.42) e da 10.48:** duas coisas distintas só a máquina real confirma,
+nenhuma das duas verificável aqui (sem runtime de navegador neste ambiente):
+1. **O corte de início realmente sumiu** - reproduzir numa máquina real
+   (nome E código, algumas chamadas seguidas).
+2. **A vírgula de priming não está sendo percebida/falada de forma audível**
+   - ou seja, que a escolha do item 2 (vírgula em vez de reticências) de
+   fato funciona como pausa neutra nos motores reais em uso (SAPI Windows/
+   Chrome/Edge), sem ser lida como conteúdo ("vírgula") nem soar como um
+   estalo/ruído perceptível antes de cada chamada.
+
+Partimos da opção com menor risco conhecido entre as alternativas de
+pontuação (item 2), mas "menor risco" não é "risco zero" - por isso ainda é
+pendência, não confirmação. Se o corte persistir mesmo com o prefixo de
+priming, ou se a vírgula for percebida como ruído/fala indesejada, os
+próximos passos de diagnóstico seriam: (a) instrumentar `onstart`/
+`onboundary` pra medir de verdade o atraso entre `speak()` e o início real
+do áudio (item 1 confirma que essa instrumentação não existe hoje); (b)
+partir pra a alternativa mais robusta do item 3 (utterance de aquecimento
+separada, que sacrifica uma utterance inteira em vez de um único caractere,
+com controle maior sobre o que exatamente é ouvido).
+
+**5. Testes:** novo arquivo `tests/test_regressao_priming_tts.py` (4 casos,
+estrutural, mesmo padrão dos outros testes de `tv.html` - confirma presença/
+isolamento da técnica no código renderizado, não prova numericamente que o
+corte sumiu, mesma limitação de sempre sem runtime de navegador): constante
+`PRIMING_TTS_PREFIXO` presente com o valor esperado; `falarChamada()` aplica
+o prefixo na `Utterance`, cobrindo nome e código pelo mesmo ponto;
+`montarTextoChamada()` não conhece o priming (responsabilidade isolada);
+`falarChamadaPregravada()` (fallback `.wav`) não usa o priming. Suíte
+completa (50 arquivos) sem falhas.
+
+**Arquivos alterados:** `app/templates/painel/tv.html`; novo
+`tests/test_regressao_priming_tts.py`.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da

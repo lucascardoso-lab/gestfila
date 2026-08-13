@@ -64,6 +64,26 @@
       const MAX_ITENS_HISTORICO = 5;
       const RECARGA_DIARIA_MS = 24 * 60 * 60 * 1000;
 
+      // "Priming" do motor de speechSynthesis (adendo que documenta esta
+      // correção - causa DIFERENTE da 10.48, ver BLUEPRINT): bug documentado
+      // do Chromium/SAPI Windows onde os primeiros ~100-300ms de CADA
+      // utterance são engolidos porque o pipeline de áudio ainda não terminou
+      // de inicializar quando o navegador começa a "tocar" - sistêmico (toda
+      // chamada, nome ou código), independente de CPU. Prefixo neutro
+      // consumido pelo motor no lugar da primeira sílaba real do nome/código -
+      // técnica padrão documentada pra esse bug. Vírgula (não espaço puro, e
+      // não reticências): espaço no início costuma ser descartado pelo parser
+      // do motor sem gerar nenhum áudio de "sacrifício" real. Entre os sinais
+      // de pontuação, vírgula é o marcador de pausa mais universal entre
+      // motores de TTS (praticamente todo motor trata "," como pausa breve,
+      // nunca soletra) - reticências ("...") têm histórico conhecido de
+      // serem verbalizadas por extenso ("reticências") em alguns motores
+      // PT-BR, o que anularia o efeito (viraria conteúdo audível real, não
+      // um "sacrifício" neutro). Espaço extra depois da vírgula não teria
+      // efeito garantido (motores tendem a colapsar espaços múltiplos na
+      // normalização de texto antes de sintetizar), por isso um só.
+      const PRIMING_TTS_PREFIXO = ", ";
+
       // Instrumentação de timing (investigação de corte de início de fala em
       // hardware fraco): fica atrás de ?debug=1 na URL pra não sujar o console
       // em produção normal - liga só quando alguém precisa medir de propósito
@@ -291,7 +311,12 @@
           return;
         }
 
-        const fala = new SpeechSynthesisUtterance(montarTextoChamada(dados));
+        // Prefixo de priming (ver PRIMING_TTS_PREFIXO acima) aplicado aqui -
+        // único ponto por onde toda fala (nome e código) passa, cobre os
+        // dois fluxos automaticamente sem duplicar lógica em
+        // montarTextoChamada() (que fica só com a composição do TEXTO da
+        // mensagem, sem se misturar com uma preocupação de motor de TTS).
+        const fala = new SpeechSynthesisUtterance(PRIMING_TTS_PREFIXO + montarTextoChamada(dados));
         fala.lang = voz.lang;
         fala.volume = TV_VOLUME / 100;
         fala.voice = voz;
