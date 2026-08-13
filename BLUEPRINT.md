@@ -4383,6 +4383,67 @@ de debug presente; comportamento em runtime (via `TV_SOM_ATIVO`/
 
 ---
 
+## 10.51. ADENDO — EXPERIMENTAL: "despertar" o hardware de saída de áudio via Web Audio API (quarta tentativa, causa diferente das anteriores)
+
+> Quarta tentativa pra corte de início no painel de TV, causa diferente das
+> três anteriores: enquanto 10.48 (CPU/reflow), 10.49 (warm-up do motor de
+> TTS a cada fala) e 10.50 (motor de TTS esfriando após ociosidade) atacam o
+> pipeline de `speechSynthesis`, esta ataca o **hardware/driver de saída de
+> áudio em si**, via um pipeline separado (Web Audio API). Convive com a
+> 10.50 - não a substitui, os dois continuam ativos.
+
+**1. Mecanismo:** `despertarSaidaAudio(callback)` (`app/templates/painel/
+tv.html`) cria (ou reaproveita) um `AudioContext`, garante `resume()` se o
+estado estiver `'suspended'`, toca um tom curto via `OscillatorNode` +
+`GainNode` (`DESPERTAR_AUDIO_DURACAO_MS = 130`, dentro de 120-150ms;
+`DESPERTAR_AUDIO_FREQUENCIA_HZ = 150`; `DESPERTAR_AUDIO_VOLUME = 0.02` -
+mesmo valor e mesma justificativa do `HEARTBEAT_TTS_VOLUME` da 10.50: baixo
+o bastante pra não incomodar, alto o bastante pra exercitar a saída de
+áudio de verdade). `callback()` só roda no evento `oscillator.onended`
+REAL, não um `setTimeout` estimado - a fala real só começa depois que o tom
+efetivamente terminou.
+
+**2. Integração:** `socket.on("chamada", ...)` troca `falarChamada(dados)`
+direto por `despertarSaidaAudio(() => falarChamada(dados))`.
+`inserirChamada()` mantém a posição já estabelecida na 10.48 (depois de
+`falarChamada()`, dentro do mesmo callback).
+
+**3. Fallback gracioso:** sem `AudioContext`/`webkitAudioContext`
+disponível, ou qualquer erro na criação/uso do contexto (`try`/`catch`),
+cai direto pra `callback()` - `falarChamada()` roda normalmente, sem o tom.
+
+**3.1. Guard de dupla-chamada (revisão pós-review, mesmo padrão de `feito`
+em `falarChamadaPregravada()`):** existem vários pontos de saída possíveis
+(sem Web Audio API, `catch` de `resume()` rejeitado, `catch` externo de
+qualquer outra falha, e o `onended` real do oscilador) - numa janela
+estreita (algo lançar exceção DEPOIS de `oscilador.start()` já ter sido
+chamado com sucesso, ex.: na própria linha `oscilador.stop()` logo abaixo),
+tanto o `catch` quanto o `onended` poderiam chamar `callback()` pro MESMO
+evento, disparando `falarChamada()` duas vezes (fala duplicada, não
+silêncio - mas ainda um bug real, identificado em revisão antes do
+commit). `chamarUmaVez()` (variável `chamado`, guard local à função) garante
+uma única execução de `callback()` não importa qual caminho dispare
+primeiro - `callback()` em si só é invocado de dentro dela, nunca
+diretamente em nenhum dos pontos de saída.
+
+**4. Log atrás de `?debug=1`** (já existente desde a 10.48): dispara/termina
+do tom.
+
+**5. EXPERIMENTAL - pendência física, mesmo padrão dos adendos anteriores
+desta série:** nenhuma prova de que resolve, nem de que o tom não é
+perceptível. Se interferir negativamente, pode precisar ser revertido.
+
+**6. Testes:** novo `tests/test_regressao_despertar_audio.py` (6 casos,
+estrutural, mínimo por pedido explícito - presença da função, encadeamento
+via `onended`, fallback gracioso em todos os caminhos de falha, guard de
+dupla-chamada, heartbeat da 10.50 intocado). Suíte completa (52 arquivos)
+sem falhas.
+
+**Arquivos alterados:** `app/templates/painel/tv.html`; novo
+`tests/test_regressao_despertar_audio.py`.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da

@@ -128,6 +128,19 @@
       // áudio de verdade.
       const HEARTBEAT_TTS_TEXTO = "a";
 
+      // "Despertar" o hardware de saída de áudio via Web Audio API (adendo
+      // que documenta esta correção - EXPERIMENTAL, quarta tentativa pra
+      // corte de início, causa diferente das anteriores: hardware de áudio,
+      // não motor de TTS). Pipeline SEPARADO do speechSynthesis (10.48/10.49/
+      // 10.50) - convive com o heartbeat, não substitui: o heartbeat mantém o
+      // MOTOR de TTS quente, isto aqui acorda o DISPOSITIVO/driver de áudio
+      // em si logo antes de cada chamada. Mesmo volume do heartbeat (0.02) e
+      // mesma justificativa: baixo o bastante pra não incomodar, alto o
+      // bastante pra realmente exercitar a saída de áudio.
+      const DESPERTAR_AUDIO_DURACAO_MS = 130; // dentro da faixa 120-150ms pedida
+      const DESPERTAR_AUDIO_FREQUENCIA_HZ = 150;
+      const DESPERTAR_AUDIO_VOLUME = 0.02;
+
       // Instrumentação de timing (investigação de corte de início de fala em
       // hardware fraco): fica atrás de ?debug=1 na URL pra não sujar o console
       // em produção normal - liga só quando alguém precisa medir de propósito
@@ -429,6 +442,84 @@
         speechSynthesis.speak(aquecimento);
       }
 
+      // AudioContext reaproveitado entre chamadas (não recriado a cada vez) -
+      // criar um novo a cada chamada seria trabalho redundante e a maioria
+      // dos navegadores limita quantos contextos podem existir ao mesmo tempo.
+      let audioContextDespertar = null;
+
+      // Toca um tom curto e baixo via Web Audio API (Oscillator+Gain) só pra
+      // exercitar o hardware/driver de saída de áudio ANTES de falarChamada()
+      // tentar de fato falar - pipeline diferente do speechSynthesis, então
+      // não interfere nem depende do heartbeat (dispararHeartbeatTts()) ou do
+      // priming (PRIMING_TTS_PREFIXO), que atacam o motor de TTS, não o
+      // dispositivo de áudio em si. `callback` só roda no evento `onended`
+      // REAL do oscilador (não um setTimeout estimado) - a fala real só
+      // começa depois que o tom efetivamente terminou de tocar.
+      function despertarSaidaAudio(callback) {
+        // Guard de dupla-chamada (mesmo padrão de `feito` em
+        // falarChamadaPregravada() acima): existem vários pontos de saída
+        // possíveis (sem Web Audio API, catch de resume() rejeitado, catch
+        // externo de qualquer outra falha, e o onended real do oscilador) -
+        // numa janela estreita (algo lançar exceção DEPOIS de
+        // oscilador.start() já ter sido chamado com sucesso, ex.: na própria
+        // linha oscilador.stop() logo abaixo), tanto o catch quanto o
+        // onended poderiam chamar callback() pro MESMO evento, disparando
+        // falarChamada() duas vezes. `chamado` garante uma única execução
+        // não importa qual caminho dispare primeiro.
+        let chamado = false;
+        const chamarUmaVez = () => {
+          if (chamado) return;
+          chamado = true;
+          callback();
+        };
+
+        const AudioContextClasse = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClasse) {
+          chamarUmaVez(); // sem Web Audio API - degrada graciosamente pra falarChamada() direto
+          return;
+        }
+        try {
+          if (!audioContextDespertar) {
+            audioContextDespertar = new AudioContextClasse();
+          }
+          const ctx = audioContextDespertar;
+
+          const iniciarTom = () => {
+            const oscilador = ctx.createOscillator();
+            const ganho = ctx.createGain();
+            oscilador.frequency.value = DESPERTAR_AUDIO_FREQUENCIA_HZ;
+            ganho.gain.value = DESPERTAR_AUDIO_VOLUME;
+            oscilador.connect(ganho);
+            ganho.connect(ctx.destination);
+
+            oscilador.onended = () => {
+              if (DEBUG_TIMING) {
+                console.log(`[GESTFILA debug] despertarSaidaAudio: tom terminou às ${new Date().toLocaleTimeString("pt-BR")}`);
+              }
+              chamarUmaVez();
+            };
+
+            if (DEBUG_TIMING) {
+              console.log(`[GESTFILA debug] despertarSaidaAudio: tom disparado às ${new Date().toLocaleTimeString("pt-BR")}`);
+            }
+            oscilador.start();
+            oscilador.stop(ctx.currentTime + DESPERTAR_AUDIO_DURACAO_MS / 1000);
+          };
+
+          // AudioContext nasce (ou fica) 'suspended' até algum gesto do
+          // usuário em vários navegadores (política de autoplay) - resume()
+          // é assíncrono (retorna Promise); só inicia o tom depois dele
+          // resolver, pra não tentar tocar num contexto ainda suspenso.
+          if (ctx.state === "suspended") {
+            ctx.resume().then(iniciarTom).catch(() => chamarUmaVez());
+          } else {
+            iniciarTom();
+          }
+        } catch (erro) {
+          chamarUmaVez(); // qualquer falha do AudioContext - degrada graciosamente
+        }
+      }
+
       // valor central do card: código da senha, ou o nome (chamada por nome,
       // 2ª etapa da coleta) - mesmo card, só troca o conteúdo, sem variação
       // visual própria (decisão explícita, ver Sessão A).
@@ -667,18 +758,28 @@
       // segura - o áudio começa a inicializar sem concorrência de reflow/
       // repaint, e a atualização visual (que o olho não percebe faltar por
       // uns milissegundos) vem logo depois.
+      //
+      // despertarSaidaAudio() (adendo que documenta esta correção -
+      // EXPERIMENTAL) envolve falarChamada() num callback: o tom de
+      // "despertar" o hardware de áudio toca primeiro, e falarChamada() só
+      // roda no onended REAL do oscilador - inserirChamada() continua depois
+      // de falarChamada(), preservando a ordem já estabelecida na 10.48.
       socket.on("chamada", (dados) => {
         const t0 = DEBUG_TIMING ? performance.now() : 0;
-        falarChamada(dados);
-        const t1 = DEBUG_TIMING ? performance.now() : 0;
-        inserirChamada(dados);
-        if (DEBUG_TIMING) {
-          const t2 = performance.now();
-          console.log(
-            `[GESTFILA debug] falarChamada=${(t1 - t0).toFixed(1)}ms ` +
-            `inserirChamada=${(t2 - t1).toFixed(1)}ms total=${(t2 - t0).toFixed(1)}ms`
-          );
-        }
+        despertarSaidaAudio(() => {
+          const t1 = DEBUG_TIMING ? performance.now() : 0;
+          falarChamada(dados);
+          const t2 = DEBUG_TIMING ? performance.now() : 0;
+          inserirChamada(dados);
+          if (DEBUG_TIMING) {
+            const t3 = performance.now();
+            console.log(
+              `[GESTFILA debug] despertarSaidaAudio=${(t1 - t0).toFixed(1)}ms ` +
+              `falarChamada=${(t2 - t1).toFixed(1)}ms inserirChamada=${(t3 - t2).toFixed(1)}ms ` +
+              `total=${(t3 - t0).toFixed(1)}ms`
+            );
+          }
+        });
       });
 
       // Smart TVs ficam com o navegador aberto por dias - recarregar 1x/dia evita
