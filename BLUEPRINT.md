@@ -1677,6 +1677,20 @@ sempre).
 > ideia "pula se já tem turno" reintroduziria, só neste link, o comportamento
 > que a 10.23 removeu de propósito do fluxo de login). Teste em
 > `tests/test_regressao_menu_filas_atendimento.py`.
+>
+> **Segunda ocorrência do mesmo bug, achada depois em uso real:** o item
+> "🎫 Atendimento" do nav em `core/dashboard.html` (visível no Dashboard,
+> perfis atendente/executor/atendente_executor/admin) tinha o MESMO problema
+> - apontava pra `atendimento.listar_filas`. Corrigido pro mesmo destino
+> (`atendimento.iniciar_turno`), mesmo padrão, sem lógica condicional nova.
+> Grep final em todo o projeto (`atendimento.listar_filas`) confirmou que só
+> sobrou o link "🎫 Filas" (restrito a admin/super_admin, item 1 acima) e o
+> uso interno da própria rota (`app/atendimento/filas.py`, redireciona pra
+> si mesma após salvar) - `app/atendimento/local.py::escolher_local` também
+> tem uma referência (fallback quando o Local escolhido não tem rodízio
+> configurado), mas é lógica de negócio legítima do fluxo legado
+> `escolher_local`, não um link de menu com destino desatualizado - fora do
+> escopo desta correção, não alterado.
 
 **4. Encerrar turno** (`POST /atendimento/turno/encerrar`, botão "Encerrar
 turno" nas telas de atendimento, ao lado de "Sair"): marca

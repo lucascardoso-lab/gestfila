@@ -93,8 +93,13 @@
       {% if current_user.is_super_admin or current_user.tem_perfil('admin', 'gerencial') %}
         <a href="{{ url_for('relatorios.index') }}">📈 Relatórios</a>
       {% endif %}
+      {# Corrigido: apontava pra atendimento.listar_filas (tela "Filas" legada,
+         pré-10.19) - mesma classe de bug já corrigida no link "Ir para
+         atendimento" de core/index.html. Destino correto pós-10.23 é sempre
+         atendimento.iniciar_turno (mesmo destino único que login() usa pra
+         estes perfis), sem lógica condicional de TurnoAtivo. #}
       {% if current_user.tem_perfil('atendente', 'executor', 'atendente_executor', 'admin') %}
-        <a href="{{ url_for('atendimento.listar_filas') }}">🎫 Atendimento</a>
+        <a href="{{ url_for('atendimento.iniciar_turno') }}">🎫 Atendimento</a>
       {% endif %}
     </div>
     <a href="{{ url_for('auth.logout') }}">Sair ({{ current_user.nome }})</a>

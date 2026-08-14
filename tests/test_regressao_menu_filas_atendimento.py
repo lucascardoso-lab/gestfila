@@ -16,6 +16,10 @@ Teste de regressão: dois ajustes relacionados no fluxo do perfil operacional
    confirmado explicitamente com o cliente antes de implementar, não
    reintroduzir aqui o comportamento antigo de pular pro painel_local.
 
+3. Mesmo bug do item 2, segunda ocorrência achada depois em uso real: item
+   "🎫 Atendimento" do nav em core/dashboard.html também apontava pra
+   atendimento.listar_filas - mesma correção, mesmo destino único.
+
 Execução: python -m tests.test_regressao_menu_filas_atendimento (a partir da
 raiz do projeto, com o virtualenv ativado).
 """
@@ -156,6 +160,24 @@ assert resp.status_code == 200
 texto = resp.data.decode("utf-8")
 assert 'href="/atendimento/iniciar-turno"' in texto
 ok("core.index (admin): link 'Ir para atendimento' continua presente, com o href corrigido")
+
+# ===========================================================================
+# 3) Segunda ocorrência do mesmo bug, achada depois em uso real: item
+#    "🎫 Atendimento" do nav em core/dashboard.html tinha o MESMO problema
+#    (apontava pra listar_filas) - mesmo destino corrigido, mesmo padrão.
+# ===========================================================================
+resp = c_atendente.get("/dashboard")
+assert resp.status_code == 200
+texto = resp.data.decode("utf-8")
+assert 'href="/atendimento/iniciar-turno"' in texto
+assert 'href="/atendimento/filas"' not in texto
+ok("core.dashboard (atendente): item 'Atendimento' do nav aponta pra /atendimento/iniciar-turno, não mais /atendimento/filas")
+
+resp = c_atendente_com_turno.get("/dashboard")
+assert resp.status_code == 200
+texto = resp.data.decode("utf-8")
+assert 'href="/atendimento/iniciar-turno"' in texto
+ok("core.dashboard (atendente COM turno ativo): mesmo destino, sem pular pro painel_local")
 
 print()
 print(f"TODOS OS {len(passos)} TESTES DE MENU FILAS/ATENDIMENTO PASSARAM")
