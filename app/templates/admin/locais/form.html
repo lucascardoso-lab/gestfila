@@ -48,9 +48,19 @@
 
       <label>Filas de destino permitidas para redirecionar daqui (opcional)</label>
       <p class="subtitulo" style="margin:.35rem 0 .5rem;">Deixe em branco para não restringir - o bloco "Redirecionar" da tela de Atendimento mostrará todas as filas ativas da unidade escolhida acima. Só filas da MESMA unidade podem ser selecionadas.</p>
-      <div class="checkboxes">
+      {# `filas` continua vindo da empresa INTEIRA (filas_da_empresa(), sem
+         filtro de unidade) - o campo "Unidade" acima é um <select> dentro do
+         MESMO formulário, que pode mudar antes de salvar sem reload, então um
+         filtro estático de servidor não daria conta. O filtro por unidade
+         acontece aqui no cliente: cada <label> carrega data-unidade-id, e o
+         JS abaixo esconde (nunca remove do DOM) os itens que não são da
+         unidade selecionada no momento, tanto no load quanto a cada troca do
+         select. A regra "mesma unidade" continua validada de verdade no
+         servidor (_validar_local, app/admin/locais.py) - isto aqui é só UX,
+         pra não mostrar opção que o submit rejeitaria depois. #}
+      <div class="checkboxes" id="checkboxes-filas-destino">
         {% for fila in filas %}
-          <label>
+          <label data-unidade-id="{{ fila.unidade_id }}">
             <input type="checkbox" name="filas_destino" value="{{ fila.id }}" {{ 'checked' if fila.id in filas_destino_selecionadas else '' }}>
             {{ fila.nome }} ({{ fila.unidade.nome }})
           </label>
@@ -88,6 +98,33 @@
       elIdentificador.addEventListener("input", () => { identificadorEditadoManualmente = true; });
 
       if (!identificadorEditadoManualmente) sugerirIdentificador();
+
+      // Filtro por unidade do checklist "Filas de destino permitidas" (achado
+      // nesta sessão: a lista trazia filas de TODAS as unidades da empresa,
+      // sem filtro nenhum - a regra "mesma unidade" só era aplicada no
+      // submit). `filas` continua vindo inteiro do servidor de propósito (ver
+      // comentário no HTML) - aqui só escondemos/mostramos com base na
+      // unidade escolhida no momento, sem remover nada do DOM.
+      const itensChecklistFilas = document.querySelectorAll("#checkboxes-filas-destino label[data-unidade-id]");
+
+      function filtrarFilasPorUnidade() {
+        const unidadeSelecionada = elUnidade.value;
+        itensChecklistFilas.forEach((item) => {
+          const mesmaUnidade = item.dataset.unidadeId === unidadeSelecionada;
+          item.hidden = !mesmaUnidade;
+          if (!mesmaUnidade) {
+            // Um checkbox marcado que sai de vista não pode continuar
+            // "contando" silenciosamente até o submit - mesmo que o backend
+            // rejeitasse (_validar_local), a UX de marcar algo que some da
+            // tela e ainda assim permanece marcado é confusa.
+            const checkbox = item.querySelector('input[type="checkbox"]');
+            if (checkbox) checkbox.checked = false;
+          }
+        });
+      }
+
+      elUnidade.addEventListener("change", filtrarFilasPorUnidade);
+      filtrarFilasPorUnidade();
     })();
   </script>
 {% endblock %}

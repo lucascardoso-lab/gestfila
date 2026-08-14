@@ -98,7 +98,7 @@ def editar_tv(tv_id):
             flash(erro, "error")
             return render_template(
                 "admin/tvs/form.html", empresa=empresa, tv=tv, unidades=unidades, filas=filas,
-                valores=dados, filas_selecionadas=dados["fila_ids"],
+                valores=dados, filas_selecionadas=dados["fila_ids"], esconder_seletor_contexto=True,
             )
 
         tv.unidade_id = dados["unidade_id"]
@@ -115,7 +115,7 @@ def editar_tv(tv_id):
     filas_selecionadas = {f.id for f in tv.filas}
     return render_template(
         "admin/tvs/form.html", empresa=empresa, tv=tv, unidades=unidades, filas=filas,
-        valores=None, filas_selecionadas=filas_selecionadas,
+        valores=None, filas_selecionadas=filas_selecionadas, esconder_seletor_contexto=True,
     )
 
 

@@ -144,6 +144,7 @@ def editar_usuario(usuario_id):
                 unidades=unidades,
                 perfis_selecionados=perfil_ids,
                 unidades_selecionadas=unidade_ids,
+                esconder_seletor_contexto=True,
             )
 
         usuario.nome = nome
@@ -166,6 +167,7 @@ def editar_usuario(usuario_id):
         unidades=unidades,
         perfis_selecionados=perfis_selecionados,
         unidades_selecionadas=unidades_selecionadas,
+        esconder_seletor_contexto=True,
     )
 
 

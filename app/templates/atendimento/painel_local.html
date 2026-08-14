@@ -175,19 +175,20 @@
           const segundosEspera = (Date.now() - criadaEm) / 1000;
           el.textContent = formatarHHMMSS(segundosEspera);
 
-          // Destaque calculado por LINHA (não uma constante global como em
+          // Limite lido POR LINHA (não uma constante global como em
           // painel_fila.html) - o rodízio agrega candidatas de várias filas,
           // cada uma com o próprio tempo_espera_maximo_min (data-tempo-maximo-min
           // vem tanto do render inicial via Jinja quanto de linhaEspera() no
-          // refresh via WebSocket).
+          // refresh via WebSocket) - mas o destaque em si é aplicado no
+          // PRÓPRIO elemento do valor (`el`, o .t-espera), não mais na
+          // linha inteira (revisado a pedido do cliente, badge sobre o
+          // tempo em vez de linha/borda).
+          el.classList.remove("espera-atencao", "espera-estourada");
           const linha = el.closest("tr");
-          if (linha) {
-            linha.classList.remove("espera-atencao", "espera-estourada");
-            const bruto = linha.dataset.tempoMaximoMin;
-            const tempoMaximoMin = bruto ? Number(bruto) : null;
-            const classe = classeDestaqueEspera(segundosEspera, tempoMaximoMin);
-            if (classe) linha.classList.add(classe);
-          }
+          const bruto = linha ? linha.dataset.tempoMaximoMin : "";
+          const tempoMaximoMin = bruto ? Number(bruto) : null;
+          const classe = classeDestaqueEspera(segundosEspera, tempoMaximoMin);
+          if (classe) el.classList.add(classe);
         });
         document.querySelectorAll(".hora-relogio[data-hora-de]").forEach((el) => {
           el.textContent = "· " + formatarHoraLocal(el.dataset.horaDe);

@@ -4551,6 +4551,123 @@ templates/atendimento/painel_local.html`, `app/atendimento/chamada.py`
 (`_serializar_espera_local`); novo `tests/test_regressao_destaque_tempo_
 espera.py`.
 
+> **Revisão (mesma sessão, pedido do cliente com referência visual):** o
+> ALVO do destaque mudou. A primeira versão aplicava a classe na `<tr>`
+> inteira (`tr.espera-atencao td:first-child` - borda esquerda só na coluna
+> "Senha" - e `tr.espera-estourada` - fundo na linha inteira) - dois alvos
+> inconsistentes entre si, nenhum no lugar pedido. Corrigido pra um badge/
+> marca-texto aplicado só no elemento `.t-espera` (o valor do cronômetro em
+> si, ex. "00:18:27"), com o mesmo tratamento visual pros dois níveis
+> (padding, cantos arredondados), só a cor mudando - reaproveitando os
+> mesmos tokens de cor já usados em `.flash.aviso` (atenção) e `.flash.
+> error`/`.badge.prioridade` (estourado). A escala 70%/100% e o cálculo em
+> `classeDestaqueEspera()` **não mudaram** - só onde a classe resultante é
+> aplicada (`el.classList` no próprio `.t-espera`, não mais `linha.
+> classList` na `<tr>`). Estrutura HTML já tinha o valor do tempo isolado
+> num `<span class="t-espera">` próprio (separado do horário pequeno "·
+> 12:24", que fica num `<span class="hora-relogio">` distinto) nos dois
+> templates - não precisou de nenhum elemento novo, só trocar o alvo do
+> `classList`. Testes atualizados pra checar o seletor novo (`.t-espera.
+> espera-*`) E confirmar que o antigo (`tr.espera-*`) foi removido, não só
+> deixado ao lado.
+
+---
+
+## 10.53. ADENDO — Dois bugs independentes na tela "Editar local": checklist de filas fora de escopo + barra de contexto sem efeito em telas de editar
+
+> Dois problemas relatados juntos na tela "Editar local" (admin), com causas
+> CONFIRMADAS independentes (investigado antes de corrigir - não presumido):
+> (1) o checklist "Filas de destino permitidas" mostrava filas de TODAS as
+> unidades da empresa, não só da unidade do Local; (2) o seletor "Empresa" no
+> topo não trocava os dados ao mudar de empresa. A correção do item 2, ao ser
+> generalizada, revelou o MESMO padrão repetido em outras 9 rotas de editar
+> objeto do admin - corrigidas todas juntas nesta sessão (mesmo princípio já
+> visto antes: o botão "Chamar" faltando num template irmão, os 3 links
+> apontando pro destino errado - um achado pontual vira varredura completa).
+
+**1. Checklist "Filas de destino permitidas" sem filtro de unidade (bug de
+EXIBIÇÃO, não de integridade):** `filas_da_empresa()` (`app/admin/helpers.py`)
+usada em `novo_local()`/`editar_local()` traz TODA a empresa, sem
+`unidade_id` - diferente de `rodizio_local()` (mesmo arquivo), que já
+filtrava corretamente (`Fila.query.filter_by(..., unidade_id=local.unidade_id)`),
+com um comentário próprio admitindo essa diferença desde que foi escrito. A
+regra "mesma unidade" **já era** validada no submit (`_validar_local`) -
+nenhuma seleção cruzada era de fato salva, só EXIBIDA como opção possível.
+
+Como o campo "Unidade" é um `<select>` dentro do MESMO formulário (pode
+mudar antes de salvar, sem reload), a correção não filtra a query do
+servidor (que continua trazendo a empresa inteira, de propósito) - filtra em
+tempo real no cliente: cada item do checklist (`admin/locais/form.html`)
+ganhou `data-unidade-id="{{ fila.unidade_id }}"`, e um `filtrarFilasPorUnidade()`
+esconde (`hidden`, nunca remove do DOM) os itens que não batem com o
+`<select id="unidade_id">` atual, tanto no load quanto a cada `change`.
+Checkbox marcado que sai de vista é desmarcado também - não deixa uma
+seleção escondida sobreviver silenciosamente até o submit (mesmo que o
+backend já rejeitasse, a UX de "marquei algo que sumiu mas continua
+contando" é confusa). Mesmo template (`admin/locais/form.html`) serve
+`novo_local()` e `editar_local()` - a correção cobre as duas rotas de graça.
+
+**2. Barra de contexto (Empresa/Unidade) sem efeito em telas de editar um
+objeto - levantamento COMPLETO, não só Local:** confirmado que
+`editar_local()` deriva `empresa` sempre de `local.empresa_id`, nunca da
+querystring/sessão da barra de contexto - **comportamento intencional**,
+documentado desde antes em `app/admin/__init__.py::unidades_do_contexto`
+("nunca de um valor de sessão à parte, o que poderia divergir do que a
+página está realmente mostrando"). O bug real não é a rota ignorar o
+parâmetro (isso está certo) - é o seletor continuar interativo e visível,
+sem indicar que a troca não tem efeito nenhum ali.
+
+Levantamento de TODAS as rotas do admin com esse padrão (deriva a empresa
+de um objeto específico, `objeto.empresa_id`/`objeto.empresa`, ignora o
+contexto do topo) - 10 no total, todas corrigidas:
+
+| Rota | Arquivo |
+|---|---|
+| `editar_empresa` | `app/admin/empresas.py` |
+| `editar_fila` | `app/admin/filas.py` |
+| `editar_local` | `app/admin/locais.py` |
+| `rodizio_local` | `app/admin/locais.py` |
+| `editar_tipo_senha` | `app/admin/tipos_senha.py` |
+| `editar_totem_botao` | `app/admin/totem_botoes.py` |
+| `editar_totem` | `app/admin/totens.py` |
+| `editar_tv` | `app/admin/tvs.py` |
+| `editar_unidade` | `app/admin/unidades.py` |
+| `editar_usuario` | `app/admin/usuarios.py` |
+
+Decisão do cliente: **esconder** o seletor nessas telas (não desabilitar com
+aviso). Nova flag de template `esconder_seletor_contexto` - cada uma das 10
+rotas acima passa `esconder_seletor_contexto=True` em TODOS os
+`render_template()` daquela função (inclusive nos caminhos de erro que
+re-renderizam o form, não só o GET inicial). `admin/_layout.html` mudou a
+condição da barra de `{% if empresa %}` pra `{% if empresa and not
+esconder_seletor_contexto %}` - default (sem passar a flag) continua
+mostrando a barra normalmente em todas as telas de LISTAGEM, sem nenhuma
+mudança de comportamento nelas.
+
+**Rotas fora do escopo, confirmadas de propósito:** `novo_local`/demais
+rotas `novo_*` (chamam `resolver_empresa_contexto()` de verdade, o seletor
+funciona ali - contexto legítimo pra escolher em qual empresa criar);
+`listar_locais`/ocupacao de locais/demais listagens (idem); `_editar_usuario_
+global` (super admin sem empresa - `empresa` já é `None`, barra não aparece
+mesmo sem a flag).
+
+**3. Testes:** novo `tests/test_regressao_admin_editar_contexto.py` (14
+casos) - item 1: `data-unidade-id` presente pras filas das duas unidades e o
+JS de filtro no HTML renderizado, confirmado em `novo_local` E
+`editar_local` (mesmo template); item 2: as 10 rotas da tabela acima, uma
+por uma, confirmando ausência da barra de contexto - mais um caso de
+controle (`listar_locais`) provando que a barra continua aparecendo
+normalmente numa listagem comum, não foi escondida globalmente. Suíte
+completa (55 arquivos) sem falhas.
+
+**Arquivos alterados:** `app/templates/admin/_layout.html` (flag
+`esconder_seletor_contexto`), `app/templates/admin/locais/form.html`
+(filtro por unidade do checklist); `app/admin/empresas.py`, `app/admin/
+filas.py`, `app/admin/locais.py`, `app/admin/tipos_senha.py`, `app/admin/
+totem_botoes.py`, `app/admin/totens.py`, `app/admin/tvs.py`, `app/admin/
+unidades.py`, `app/admin/usuarios.py` (flag em todos os `render_template`
+das 10 rotas); novo `tests/test_regressao_admin_editar_contexto.py`.
+
 ---
 
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+

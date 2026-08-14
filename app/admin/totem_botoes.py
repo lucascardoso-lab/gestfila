@@ -107,6 +107,7 @@ def editar_totem_botao(botao_id):
                 "admin/totem_botoes/form.html",
                 empresa=empresa, botao=botao, unidades=unidades,
                 filas=filas, candidatos_pai=candidatos_pai, valores=dados,
+                esconder_seletor_contexto=True,
             )
 
         botao.unidade_id = dados["unidade_id"]
@@ -123,6 +124,7 @@ def editar_totem_botao(botao_id):
         "admin/totem_botoes/form.html",
         empresa=empresa, botao=botao, unidades=unidades,
         filas=filas, candidatos_pai=candidatos_pai, valores=None,
+        esconder_seletor_contexto=True,
     )
 
 

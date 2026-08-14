@@ -100,7 +100,7 @@ def editar_local(local_id):
             return render_template(
                 "admin/locais/form.html", empresa=empresa, local=local, unidades=unidades, filas=filas,
                 valores=dados, filas_destino_selecionadas=dados["fila_destino_ids"],
-                unidades_siglas=_siglas_por_unidade(unidades),
+                unidades_siglas=_siglas_por_unidade(unidades), esconder_seletor_contexto=True,
             )
 
         local.unidade_id = dados["unidade_id"]
@@ -118,7 +118,7 @@ def editar_local(local_id):
     return render_template(
         "admin/locais/form.html", empresa=empresa, local=local, unidades=unidades, filas=filas,
         valores=None, filas_destino_selecionadas=filas_destino_selecionadas,
-        unidades_siglas=_siglas_por_unidade(unidades),
+        unidades_siglas=_siglas_por_unidade(unidades), esconder_seletor_contexto=True,
     )
 
 
@@ -240,6 +240,7 @@ def rodizio_local(local_id):
             return render_template(
                 "admin/locais/rodizio.html", empresa=empresa, unidade=local.unidade, local=local, filas=filas,
                 fila_ids_selecionadas=dados["fila_ids"], valores_por_fila=valores_por_fila,
+                esconder_seletor_contexto=True,
             )
 
         # substitui a lista inteira (mesmo padrão já usado em filas_destino_permitidas/
@@ -272,6 +273,7 @@ def rodizio_local(local_id):
     return render_template(
         "admin/locais/rodizio.html", empresa=empresa, unidade=local.unidade, local=local, filas=filas,
         fila_ids_selecionadas=fila_ids_selecionadas, valores_por_fila=valores_por_fila,
+        esconder_seletor_contexto=True,
     )
 
 

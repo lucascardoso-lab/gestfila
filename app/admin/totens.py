@@ -78,7 +78,8 @@ def editar_totem(totem_id):
         if erro:
             flash(erro, "error")
             return render_template(
-                "admin/totens/form.html", empresa=empresa, totem=totem, unidades=unidades, valores=dados
+                "admin/totens/form.html", empresa=empresa, totem=totem, unidades=unidades, valores=dados,
+                esconder_seletor_contexto=True,
             )
 
         totem.unidade_id = dados["unidade_id"]
@@ -89,7 +90,8 @@ def editar_totem(totem_id):
         return redirect(url_for("admin.listar_totens", empresa_id=empresa.id))
 
     return render_template(
-        "admin/totens/form.html", empresa=empresa, totem=totem, unidades=unidades, valores=None
+        "admin/totens/form.html", empresa=empresa, totem=totem, unidades=unidades, valores=None,
+        esconder_seletor_contexto=True,
     )
 
 

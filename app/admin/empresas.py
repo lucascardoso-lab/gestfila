@@ -47,7 +47,7 @@ def editar_empresa(empresa_id):
         erro = _validar_empresa(nome, cnpj, empresa_atual=empresa)
         if erro:
             flash(erro, "error")
-            return render_template("admin/empresas/form.html", empresa=empresa)
+            return render_template("admin/empresas/form.html", empresa=empresa, esconder_seletor_contexto=True)
 
         # Logo (adendo 10.43) - opcional, só troca se um arquivo novo foi de
         # fato enviado neste POST (campo vazio = mantém o logo atual, não
@@ -60,7 +60,7 @@ def editar_empresa(empresa_id):
                 empresa.logo_filename = salvar_logo_empresa(empresa.id, arquivo_logo)
             except ValueError as erro_logo:
                 flash(str(erro_logo), "error")
-                return render_template("admin/empresas/form.html", empresa=empresa)
+                return render_template("admin/empresas/form.html", empresa=empresa, esconder_seletor_contexto=True)
 
         empresa.nome = nome
         empresa.cnpj = cnpj
@@ -68,7 +68,7 @@ def editar_empresa(empresa_id):
         flash("Empresa atualizada.", "info")
         return redirect(url_for("admin.listar_empresas"))
 
-    return render_template("admin/empresas/form.html", empresa=empresa)
+    return render_template("admin/empresas/form.html", empresa=empresa, esconder_seletor_contexto=True)
 
 
 @admin_bp.route("/empresas/<int:empresa_id>/logo/remover", methods=["POST"])

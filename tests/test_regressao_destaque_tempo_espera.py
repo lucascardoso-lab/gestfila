@@ -21,6 +21,14 @@ atributo por linha em painel_local.html, já que ali o rodízio agrega
 candidatas de várias filas com limites potencialmente diferentes) e que a
 função/CSS da técnica estão presentes nos dois templates.
 
+Revisado (pedido do cliente, com referência visual): o ALVO do destaque
+mudou de linha/borda (`tr.espera-atencao`/`tr.espera-estourada`) pra um
+badge sobre o próprio valor do tempo (`.t-espera.espera-atencao`/
+`.t-espera.espera-estourada`) - a escala de 70%/100% e o cálculo em si não
+mudaram, só onde a classe calculada é aplicada. Testes atualizados pra
+checar o seletor novo E confirmar que o antigo foi removido (não só
+adicionado ao lado).
+
 Execução: python -m tests.test_regressao_destaque_tempo_espera (a partir da
 raiz do projeto, com o virtualenv ativado).
 """
@@ -139,10 +147,27 @@ assert resp_local.status_code == 200
 texto_local = resp_local.data.decode("utf-8")
 
 for nome_tela, texto in [("painel_fila", texto_fila), ("painel_local", texto_local)]:
-    assert "espera-atencao" in texto, nome_tela
-    assert "espera-estourada" in texto, nome_tela
+    # alvo do destaque é o PRÓPRIO elemento do valor (badge sobre ".t-espera",
+    # revisado a pedido do cliente) - não mais a linha inteira nem uma borda
+    # em outra coluna. Checa o seletor CSS exato, não só a substring do nome
+    # da classe (que passaria mesmo se o alvo estivesse errado).
+    assert ".t-espera.espera-atencao" in texto, nome_tela
+    assert ".t-espera.espera-estourada" in texto, nome_tela
+    # os seletores antigos (linha/borda) não podem ter sobrado - prova que
+    # foram REMOVIDOS, não só que o novo foi adicionado ao lado.
+    assert "tr.espera-atencao" not in texto, nome_tela
+    assert "tr.espera-estourada" not in texto, nome_tela
     assert "function classeDestaqueEspera(" in texto, nome_tela
-    ok(f"{nome_tela}: CSS/função da escala de 3 níveis presentes")
+    ok(f"{nome_tela}: CSS aplica o destaque em .t-espera (badge sobre o valor), não mais na linha/borda")
+
+# a classe também precisa ser aplicada no elemento certo em tempo de execução
+# (não só existir no CSS) - confirma que o JS usa `el.classList` (o próprio
+# .t-espera) em vez de `linha.classList`/`tr` pra adicionar a classe.
+for nome_tela, texto in [("painel_fila", texto_fila), ("painel_local", texto_local)]:
+    assert 'el.classList.remove("espera-atencao", "espera-estourada")' in texto, nome_tela
+    assert "el.classList.add(classe)" in texto, nome_tela
+    assert "linha.classList.add(classe)" not in texto, nome_tela
+    ok(f"{nome_tela}: JS aplica a classe no elemento .t-espera (el), não mais na linha (tr)")
 
 # ===========================================================================
 # B) painel_fila.html: constante ÚNICA (mesma fila em todas as linhas) com o

@@ -62,7 +62,10 @@ def editar_tipo_senha(tipo_id):
         erro = _validar_tipo_senha(dados)
         if erro:
             flash(erro, "error")
-            return render_template("admin/tipos_senha/form.html", empresa=empresa, tipo=tipo, valores=dados)
+            return render_template(
+                "admin/tipos_senha/form.html", empresa=empresa, tipo=tipo, valores=dados,
+                esconder_seletor_contexto=True,
+            )
 
         tipo.nome = dados["nome"]
         tipo.prefixo = dados["prefixo"]
@@ -73,7 +76,9 @@ def editar_tipo_senha(tipo_id):
         flash("Tipo de senha atualizado.", "info")
         return redirect(url_for("admin.listar_tipos_senha", empresa_id=empresa.id))
 
-    return render_template("admin/tipos_senha/form.html", empresa=empresa, tipo=tipo, valores=None)
+    return render_template(
+        "admin/tipos_senha/form.html", empresa=empresa, tipo=tipo, valores=None, esconder_seletor_contexto=True,
+    )
 
 
 @admin_bp.route("/tipos-senha/<int:tipo_id>/toggle-ativo", methods=["POST"])

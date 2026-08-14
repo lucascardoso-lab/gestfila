@@ -110,7 +110,7 @@
     </div>
     <a href="{{ url_for('auth.logout') }}">Sair ({{ current_user.nome }})</a>
   </nav>
-  {% if empresa %}
+  {% if empresa and not esconder_seletor_contexto %}
     {# Barra de contexto (item 1 da UX de contexto multi-unidade): Empresa (só
        super admin - admin de empresa já está implicitamente restrito à própria)
        + Unidade (opcional, "Todas as unidades" = sem filtro), sempre visíveis
@@ -119,7 +119,20 @@
        (reload leve, sem JS de filtragem em cada listagem) - resolver_empresa_
        contexto()/resolver_unidade_contexto() (app/admin/helpers.py) persistem a
        escolha na sessão, então navegar por outros links do menu principal
-       continua respeitando o mesmo contexto sem precisar reselecionar. #}
+       continua respeitando o mesmo contexto sem precisar reselecionar.
+
+       `esconder_seletor_contexto` (achado nesta sessão): em telas de EDITAR um
+       objeto específico (fila/local/totem/tv/unidade/usuário/empresa/rodízio -
+       ver app/admin/*.py, cada `editar_*`/`rodizio_local`), a empresa exibida
+       vem sempre do PRÓPRIO objeto sendo editado (`objeto.empresa`), nunca da
+       querystring/sessão desta barra - comportamento intencional (documentado
+       em app/admin/__init__.py::unidades_do_contexto), pra nunca divergir do
+       que a página realmente mostra. Mas o seletor continuava aparecendo,
+       interativo, sem nenhum efeito ao ser trocado (o GET recarrega a MESMA
+       página, que ignora o parâmetro) - parecia quebrado. Cada rota
+       `editar_*`/`rodizio_local` passa `esconder_seletor_contexto=True` pro
+       template pra esconder a barra inteira nessas telas, em vez de mostrar um
+       controle que não faz nada. #}
     <div class="barra-contexto">
       <form method="get" action="{{ request.path }}" class="form-contexto">
         {% if current_user.is_super_admin %}

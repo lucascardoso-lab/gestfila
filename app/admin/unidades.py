@@ -57,7 +57,9 @@ def editar_unidade(unidade_id):
         nome = request.form.get("nome", "").strip()
         if not nome:
             flash("Informe o nome da unidade.", "error")
-            return render_template("admin/unidades/form.html", empresa=empresa, unidade=unidade)
+            return render_template(
+                "admin/unidades/form.html", empresa=empresa, unidade=unidade, esconder_seletor_contexto=True,
+            )
 
         unidade.nome = nome
         unidade.endereco = request.form.get("endereco", "").strip() or None
@@ -66,7 +68,9 @@ def editar_unidade(unidade_id):
         flash("Unidade atualizada.", "info")
         return redirect(url_for("admin.listar_unidades", empresa_id=empresa.id))
 
-    return render_template("admin/unidades/form.html", empresa=empresa, unidade=unidade)
+    return render_template(
+        "admin/unidades/form.html", empresa=empresa, unidade=unidade, esconder_seletor_contexto=True,
+    )
 
 
 @admin_bp.route("/unidades/<int:unidade_id>/toggle-ativo", methods=["POST"])

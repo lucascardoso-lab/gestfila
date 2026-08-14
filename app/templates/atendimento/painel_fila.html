@@ -196,12 +196,12 @@
           const segundosEspera = (Date.now() - criadaEm) / 1000;
           el.textContent = formatarHHMMSS(segundosEspera);
 
-          const linha = el.closest("tr");
-          if (linha) {
-            linha.classList.remove("espera-atencao", "espera-estourada");
-            const classe = classeDestaqueEspera(segundosEspera, TEMPO_ESPERA_MAXIMO_MIN);
-            if (classe) linha.classList.add(classe);
-          }
+          // Destaque aplicado no PRÓPRIO elemento do valor (não mais na
+          // linha inteira - revisado a pedido do cliente, badge sobre o
+          // tempo em vez de linha/borda).
+          el.classList.remove("espera-atencao", "espera-estourada");
+          const classe = classeDestaqueEspera(segundosEspera, TEMPO_ESPERA_MAXIMO_MIN);
+          if (classe) el.classList.add(classe);
         });
         document.querySelectorAll(".hora-relogio[data-hora-de]").forEach((el) => {
           el.textContent = "· " + formatarHoraLocal(el.dataset.horaDe);

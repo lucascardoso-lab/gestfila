@@ -111,6 +111,7 @@ def editar_fila(fila_id):
             return render_template(
                 "admin/filas/form.html", empresa=empresa, fila=fila, unidades=unidades,
                 totens=totens, tvs=tvs, tipos_senha=tipos_senha, valores=dados, dias_semana=DIAS_SEMANA,
+                esconder_seletor_contexto=True,
             )
 
         tv_id_anterior = fila.tv_id
@@ -136,6 +137,7 @@ def editar_fila(fila_id):
     return render_template(
         "admin/filas/form.html", empresa=empresa, fila=fila, unidades=unidades,
         totens=totens, tvs=tvs, tipos_senha=tipos_senha, valores=None, dias_semana=DIAS_SEMANA,
+        esconder_seletor_contexto=True,
     )
 
 
