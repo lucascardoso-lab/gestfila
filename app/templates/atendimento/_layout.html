@@ -92,7 +92,16 @@
       <span class="gf-logo gf-logo--navbar gf-logo--claro"><span class="gf-logo-gest">GEST</span><span class="gf-logo-fila">FILA</span></span>
       <a href="{{ url_for('core.index') }}">🏠 Painel de Senhas</a>
       <a href="{{ url_for('core.dashboard') }}">📊 Dashboard</a>
-      <a href="{{ url_for('atendimento.listar_filas') }}">🎫 Filas</a>
+      {# Item 1 da sessão: link "Filas" escondido do menu pra atendente/executor/
+         atendente_executor - a tela legada (listar_filas, pré-10.19) não faz
+         parte do fluxo deles (Iniciar Turno -> painel_local), só confundia.
+         Admin continua vendo normalmente (mesmo padrão de is_super_admin or
+         tem_perfil('admin') já usado em core/index.html). Rota NÃO ganhou
+         nenhum bloqueio de RBAC novo - continua acessível por URL direta pra
+         quem já podia acessá-la (PERFIS_OPERACIONAIS), só sai do menu. #}
+      {% if current_user.is_super_admin or current_user.tem_perfil('admin') %}
+        <a href="{{ url_for('atendimento.listar_filas') }}">🎫 Filas</a>
+      {% endif %}
     </div>
     <a href="{{ url_for('auth.logout') }}">Sair ({{ current_user.nome }})</a>
   </nav>

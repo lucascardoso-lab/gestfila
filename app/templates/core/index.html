@@ -21,8 +21,18 @@
   {% if is_super_admin or usuario.tem_perfil('admin') %}
     <p><a href="{{ url_for('admin.painel') }}">Ir para administração →</a></p>
   {% endif %}
-  {% if usuario.tem_perfil('atendente', 'executor', 'atendente_executor', 'admin') %}
-    <p><a href="{{ url_for('atendimento.listar_filas') }}">Ir para atendimento (chamada de senhas) →</a></p>
+  {# Corrigido: apontava pra atendimento.listar_filas (tela legada pré-10.19) -
+     desde a 10.19/10.23 o ponto de entrada do fluxo operacional é sempre
+     "Iniciar Turno" (mesmo destino que login() usa pra estes perfis,
+     auth/routes.py::_deve_ir_direto_para_turno) - iniciar_turno() sempre
+     mostra o formulário, mesmo com turno ativo (decisão deliberada da 10.23,
+     "nunca contornada silenciosamente"), então não há lógica condicional de
+     turno aqui: um destino único, igual ao login. `is_super_admin` somado à
+     condição (faltava antes, inconsistente com os outros links desta
+     página) - super admin já tem acesso à rota via roles_required, só não
+     via o menu. #}
+  {% if is_super_admin or usuario.tem_perfil('atendente', 'executor', 'atendente_executor', 'admin') %}
+    <p><a href="{{ url_for('atendimento.iniciar_turno') }}">Ir para atendimento (chamada de senhas) →</a></p>
   {% endif %}
   {% if is_super_admin or usuario.tem_perfil('gerencial', 'admin') %}
     <p><a href="{{ url_for('core.dashboard') }}">Ir para o dashboard →</a></p>

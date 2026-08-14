@@ -109,11 +109,13 @@ def turno_ativo_do_usuario(usuario):
     """O turno em andamento deste operador (seção 10.19, tela 'Iniciar Turno') -
     None se ele nunca iniciou um, ou se o último foi encerrado (ativo=False, seja
     pelo botão 'Encerrar turno' ou pelo encerramento automático às 23h). Usada tanto
-    pela própria tela (GET: pula direto pro painel_local se já houver um turno ativo
-    - recuperação de estado após reload/crash, adendo 10.11) quanto pelo motor de
-    rodízio (ver `_itens_rotacao`), que prioriza a configuração do turno sobre o
-    rodízio admin-configurado do Local quando o operador tem um turno ativo para
-    aquele Local especificamente."""
+    pela própria tela (GET: pré-popula o formulário com a configuração já salva se
+    houver turno ativo, mas SEMPRE renderiza o formulário - não pula mais direto
+    pro painel_local desde a 10.23, "nunca contornado silenciosamente"; docstring
+    corrigida aqui, estava desatualizada descrevendo o comportamento pré-10.23)
+    quanto pelo motor de rodízio (ver `_itens_rotacao`), que prioriza a
+    configuração do turno sobre o rodízio admin-configurado do Local quando o
+    operador tem um turno ativo para aquele Local especificamente."""
     return TurnoAtivo.query.filter_by(usuario_id=usuario.id, ativo=True).first()
 
 

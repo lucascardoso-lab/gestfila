@@ -1651,13 +1651,32 @@ perfil recebem 403):
   legada e com a tela administrativa de ocupação de locais), e redireciona
   pra `painel_local` (a tela unificada por-Local do adendo 10.8).
 
-**3. Turno já ativo → pula a tela:** GET em `iniciar_turno` com um
-`TurnoAtivo.ativo=True` do operador redireciona direto pra `painel_local` —
-tanto no primeiro acesso do dia quanto após reload/crash (recuperação de
-estado, mesmo princípio do adendo 10.11: o estado vive no banco, não só na
-sessão do navegador). `?reconfigurar=1` (link discreto "Reconfigurar turno"
-nas telas de atendimento, ao lado de "Trocar local") contorna esse pulo e
-mostra o formulário pré-populado com a configuração atual, sem deslogar.
+**3. Turno já ativo → pula a tela** ~~(SUPERSEDIDO pela 10.23 - GET em
+`iniciar_turno` deixou de pular pra `painel_local` mesmo com turno ativo,
+sempre mostra o formulário; ver seção 10.23 pro texto completo da reversão.
+Texto original mantido abaixo só como registro histórico do motivo original
+da tela)~~: GET em `iniciar_turno` com um `TurnoAtivo.ativo=True` do operador
+redireciona direto pra `painel_local` — tanto no primeiro acesso do dia
+quanto após reload/crash (recuperação de estado, mesmo princípio do adendo
+10.11: o estado vive no banco, não só na sessão do navegador).
+`?reconfigurar=1` (link discreto "Reconfigurar turno" nas telas de
+atendimento, ao lado de "Trocar local") contorna esse pulo e mostra o
+formulário pré-populado com a configuração atual, sem deslogar - também
+removido na 10.23 (deixou de ter efeito, já que o GET simples já faz isso
+sempre).
+
+> **Correção pontual (mesma sessão desta nota):** o link "Ir para atendimento
+> (chamada de senhas)" em `core/index.html` apontava pra
+> `atendimento.listar_filas` (a tela "Filas" legada, pré-esta seção) - achado
+> ao investigar um pedido pra esconder o link "Filas" do menu de
+> `atendimento/_layout.html` pra atendente/executor/atendente_executor
+> (permanece visível só pra admin, rota sem RBAC novo). Corrigido pra
+> `atendimento.iniciar_turno` - MESMO destino único que `login()` já usa pra
+> estes perfis (item 1 acima), sem nenhuma lógica condicional de `TurnoAtivo`
+> (confirmado explicitamente com o cliente antes de implementar: replicar a
+> ideia "pula se já tem turno" reintroduziria, só neste link, o comportamento
+> que a 10.23 removeu de propósito do fluxo de login). Teste em
+> `tests/test_regressao_menu_filas_atendimento.py`.
 
 **4. Encerrar turno** (`POST /atendimento/turno/encerrar`, botão "Encerrar
 turno" nas telas de atendimento, ao lado de "Sair"): marca
