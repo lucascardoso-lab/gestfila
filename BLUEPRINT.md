@@ -4477,6 +4477,82 @@ sem falhas.
 
 ---
 
+## 10.52. ADENDO — Destaque visual por tempo de espera (escala de 3 níveis) na tabela "Senhas em espera"
+
+> Pedido: destaque visual na tabela "Senhas em espera" quando uma senha
+> ultrapassa 70% (atenção) ou 100% (estourado) do `Fila.tempo_espera_maximo_
+> min`. Escopo explícito, com precedente citado: precisa aparecer em
+> `painel_fila.html` E `painel_local.html` - a mesma tabela existe nas duas
+> telas, sem `{% include %}` compartilhado entre elas, e uma feature dessa
+> tabela (o botão "Chamar" por linha) já tinha ficado só numa das duas antes
+> de ser corrigido pra existir nas duas (ver `tests/test_regressao_botao_
+> chamar_por_linha.py`).
+
+**1. Investigação confirmada antes de implementar:** `painel_fila.html` e
+`painel_local.html` são templates SEPARADOS - nenhum `{% include %}` cobre a
+tabela "Senhas em espera" nos dois de uma vez (só `_redirecionar_busca.html`
+é compartilhado, e é outro bloco da tela). O que os dois compartilham é o
+`<style>` de `atendimento/_layout.html` (`{% extends %}` em ambos) - CSS novo
+lá cobre as duas telas de graça, mas a lógica JS (cálculo do nível a cada
+segundo) precisa ser implementada nos DOIS arquivos explicitamente, o que foi
+feito. `Fila.tempo_espera_maximo_min` já chegava ao contexto de render das
+duas telas (`fila`/`s.fila` já eram objetos `Fila` completos em ambas) - só
+não estava sendo lido ainda.
+
+**2. Escala de 3 níveis, calculada no cliente** (mesmo cronômetro "T. Espera"
+que já roda a cada segundo, `atualizarRelogios()`): `classeDestaqueEspera
+(segundosEspera, tempoMaximoMin)` retorna `null` (normal), `"espera-atencao"`
+(≥70% do limite) ou `"espera-estourada"` (≥100%). Fallback explícito: fila
+sem `tempo_espera_maximo_min` configurado (`NULL`) nunca recebe destaque
+nenhum, não importa quanto tempo a senha espere.
+
+**3. CSS compartilhado** (`atendimento/_layout.html`): borda esquerda
+discreta (`.espera-atencao`/`.espera-estourada`, mesmo princípio já usado no
+indicador de prioridade da lista do painel de TV, seção 10.4 - "borda, não
+o preenchimento inteiro", menor ruído visual) + fundo mais forte só no nível
+"estourado" (o que exige ação imediata).
+
+**4. `painel_fila.html` (uma fila só na tela):** `TEMPO_ESPERA_MAXIMO_MIN` é
+uma constante JS ÚNICA (`{{ fila.tempo_espera_maximo_min | tojson }}`) -
+todas as linhas são da mesma fila, sem necessidade de repetir o valor por
+linha.
+
+**5. `painel_local.html` (rodízio agrega N filas, cada uma com seu próprio
+limite):** o valor vai POR LINHA, não uma constante global - `data-tempo-
+maximo-min` na `<tr>`, tanto no render inicial (Jinja, `s.fila.tempo_espera_
+maximo_min`) quanto na regeneração via WebSocket (`linhaEspera(s)`, JS).
+`_serializar_espera_local` (`app/atendimento/chamada.py`) ganhou o campo
+`tempo_espera_maximo_min` no JSON de `dados_local` - sem isso, o destaque
+sumiria a cada refresh em tempo real (evento `fila_atualizada`).
+
+**6. Recálculo em tempo real:** a tabela já atualiza por dois caminhos - o
+cronômetro "T. Espera" via `setInterval(atualizarRelogios, 1000)` (a cada
+segundo) e o conteúdo da tabela via WebSocket (`fila_atualizada` →
+`atualizarDados()` → `renderizarDados()` → chama `atualizarRelogios()` no
+final). O destaque foi encaixado dentro do próprio `atualizarRelogios()` (o
+mesmo laço que já calcula o tempo decorrido de cada `.t-espera`) - nenhum
+timer novo, reaproveita o que já rodava a cada segundo.
+
+**7. Testes:** novo `tests/test_regressao_destaque_tempo_espera.py` (7
+casos) - cobre EXPLICITAMENTE os dois templates (não só "a feature
+funciona"): CSS/função presentes nas duas telas; constante única em
+`painel_fila.html` (com e sem limite configurado); atributo por linha em
+`painel_local.html` com um Local cujo rodízio agrega uma fila COM limite e
+uma SEM limite (prova que cada linha usa o limite da SUA PRÓPRIA fila, não
+uma constante errada pra uma delas); JSON de `dados_local` carregando o
+campo por item. Limitação de sempre: sem runtime de navegador, o cálculo em
+si (`classeDestaqueEspera`) não é executado nos testes - só confirma que os
+dados certos chegam ao HTML/JSON, no lugar certo. Suíte completa (54
+arquivos) sem falhas.
+
+**Arquivos alterados:** `app/templates/atendimento/_layout.html` (CSS
+compartilhado), `app/templates/atendimento/painel_fila.html`, `app/
+templates/atendimento/painel_local.html`, `app/atendimento/chamada.py`
+(`_serializar_espera_local`); novo `tests/test_regressao_destaque_tempo_
+espera.py`.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da

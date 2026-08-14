@@ -79,9 +79,16 @@ def _serializar_senha_atual(senha):
 def _serializar_espera_local(senha):
     """Mesmo formato de _serializar_espera, mais o nome da fila - necessário na tela
     por-Local (adendo 10.8) porque a lista agrega candidatas de várias filas, ao
-    contrário da tela por-fila (que já sabe de qual fila é, sem precisar repetir)."""
+    contrário da tela por-fila (que já sabe de qual fila é, sem precisar repetir).
+
+    `tempo_espera_maximo_min` também vai por linha aqui (diferente da tela por-fila,
+    que usa uma constante JS única - todas as linhas são da MESMA fila lá) - o
+    destaque de tempo de espera (escala de 3 níveis) precisa do limite da fila
+    ESPECÍFICA de cada senha, já que o rodízio agrega candidatas de várias filas
+    com limites potencialmente diferentes."""
     dados = _serializar_espera(senha)
     dados["fila"] = senha.fila.nome
+    dados["tempo_espera_maximo_min"] = senha.fila.tempo_espera_maximo_min
     return dados
 
 

@@ -40,6 +40,24 @@
     .badge.em-atendimento { background: var(--gf-primaria-clara); color: var(--gf-primaria-escura); font-weight: 600; }
     .badge.aguardando { background: #eaf2f8; color: var(--gf-info); }
     .badge.finalizado { background: #e5e8ea; color: var(--gf-cinza-escuro); }
+
+    /* Destaque de tempo de espera (escala de 3 níveis, "Senhas em espera" -
+       painel_fila.html e painel_local.html, ambos estendendo este layout):
+       nível 1 (normal) não tem classe nenhuma; nível 2 (>=70% de
+       Fila.tempo_espera_maximo_min) e nível 3 (>=100%, "estourado") ganham a
+       classe correspondente na <tr> via JS (calculado a cada segundo, junto
+       com o próprio cronômetro "T. Espera" - ver atualizarRelogios() em
+       cada template). Borda esquerda discreta (mesmo princípio já usado no
+       indicador de prioridade da lista do painel de TV, seção 10.4: "borda,
+       não o preenchimento inteiro" - menor ruído visual) + fundo mais forte
+       só no nível "estourado", que é o que exige ação imediata. Fila sem
+       tempo_espera_maximo_min configurado (NULL) nunca recebe nenhuma classe
+       - sem limite definido, não há o que comparar. */
+    tr.espera-atencao td:first-child { border-left: 4px solid var(--gf-alerta); }
+    tr.espera-estourada td:first-child { border-left: 4px solid var(--gf-primaria-escura); }
+    tr.espera-estourada { background: var(--gf-primaria-clara); }
+    tr.espera-estourada:hover { background: var(--gf-primaria-clara); }
+
     .acoes a, .acoes form { margin-right: .75rem; display: inline-block; }
     form.inline { display: inline; }
     .botao {

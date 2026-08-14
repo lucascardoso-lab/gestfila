@@ -76,7 +76,7 @@
       </thead>
       <tbody id="corpo-espera">
         {% for s in espera %}
-          <tr data-senha-id="{{ s.id }}">
+          <tr data-senha-id="{{ s.id }}" data-tempo-maximo-min="{{ s.fila.tempo_espera_maximo_min if s.fila.tempo_espera_maximo_min is not none else '' }}">
             <td>{{ s.codigo }}{% if s.prioridade %} <span class="badge prioridade">P</span>{% endif %}</td>
             <td>{{ s.fila.nome }}</td>
             <td>
@@ -157,10 +157,37 @@
         return new Date(isoUtc + "Z").toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
       }
 
+      // Escala de 3 níveis (normal / atenção 70% / estourado 100% do limite
+      // configurado na fila) - null (fila sem tempoMaximoMin) ou limite <= 0
+      // nunca destaca nada, mesmo com a senha esperando há muito tempo.
+      function classeDestaqueEspera(segundosEspera, tempoMaximoMin) {
+        if (tempoMaximoMin == null) return null;
+        const limiteSegundos = tempoMaximoMin * 60;
+        if (limiteSegundos <= 0) return null;
+        if (segundosEspera >= limiteSegundos) return "espera-estourada";
+        if (segundosEspera >= limiteSegundos * 0.7) return "espera-atencao";
+        return null;
+      }
+
       function atualizarRelogios() {
         document.querySelectorAll(".t-espera").forEach((el) => {
           const criadaEm = new Date(el.dataset.criadaEm + "Z").getTime();
-          el.textContent = formatarHHMMSS((Date.now() - criadaEm) / 1000);
+          const segundosEspera = (Date.now() - criadaEm) / 1000;
+          el.textContent = formatarHHMMSS(segundosEspera);
+
+          // Destaque calculado por LINHA (não uma constante global como em
+          // painel_fila.html) - o rodízio agrega candidatas de várias filas,
+          // cada uma com o próprio tempo_espera_maximo_min (data-tempo-maximo-min
+          // vem tanto do render inicial via Jinja quanto de linhaEspera() no
+          // refresh via WebSocket).
+          const linha = el.closest("tr");
+          if (linha) {
+            linha.classList.remove("espera-atencao", "espera-estourada");
+            const bruto = linha.dataset.tempoMaximoMin;
+            const tempoMaximoMin = bruto ? Number(bruto) : null;
+            const classe = classeDestaqueEspera(segundosEspera, tempoMaximoMin);
+            if (classe) linha.classList.add(classe);
+          }
         });
         document.querySelectorAll(".hora-relogio[data-hora-de]").forEach((el) => {
           el.textContent = "· " + formatarHoraLocal(el.dataset.horaDe);
@@ -212,7 +239,8 @@
 
       function linhaEspera(s) {
         const atributosBloqueio = bloqueado ? `disabled title="${MENSAGEM_BLOQUEIO}"` : "";
-        return `<tr data-senha-id="${s.id}">
+        const tempoMaximoMinAttr = s.tempo_espera_maximo_min != null ? s.tempo_espera_maximo_min : "";
+        return `<tr data-senha-id="${s.id}" data-tempo-maximo-min="${tempoMaximoMinAttr}">
           <td>${escapeHtml(s.codigo)}${s.prioridade ? ' <span class="badge prioridade">P</span>' : ""}</td>
           <td>${escapeHtml(s.fila)}</td>
           <td>

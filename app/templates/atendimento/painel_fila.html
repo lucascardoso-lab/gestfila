@@ -154,6 +154,13 @@
       const URL_CHAMAR = {{ url_for('atendimento.chamar', setor=setor, fila_id=fila.id)|tojson }};
       const URL_OBSERVACOES_BASE = {{ url_for('atendimento.salvar_observacoes', setor=setor, senha_id=0)|tojson }};
       const CSRF = {{ csrf_token()|tojson }};
+      // Destaque de tempo de espera (escala de 3 níveis): única fila nesta tela,
+      // então um valor só serve pra todas as linhas - diferente de painel_local.html
+      // (várias filas no rodízio, cada uma com o próprio limite, por isso ali o
+      // valor vai por linha em vez de uma constante global). `null` quando a fila
+      // não tem tempo_espera_maximo_min configurado - nesse caso nenhuma linha
+      // nunca recebe destaque nenhum (fallback explícito, ver classeDestaqueEspera).
+      const TEMPO_ESPERA_MAXIMO_MIN = {{ fila.tempo_espera_maximo_min | tojson }};
 
       function formatarHHMMSS(segundosTotais) {
         const s = Math.max(0, Math.floor(segundosTotais));
@@ -171,10 +178,30 @@
         return new Date(isoUtc + "Z").toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
       }
 
+      // Escala de 3 níveis (normal / atenção 70% / estourado 100% do limite
+      // configurado na fila) - null (fila sem tempoMaximoMin) ou limite <= 0
+      // nunca destaca nada, mesmo com a senha esperando há muito tempo.
+      function classeDestaqueEspera(segundosEspera, tempoMaximoMin) {
+        if (tempoMaximoMin == null) return null;
+        const limiteSegundos = tempoMaximoMin * 60;
+        if (limiteSegundos <= 0) return null;
+        if (segundosEspera >= limiteSegundos) return "espera-estourada";
+        if (segundosEspera >= limiteSegundos * 0.7) return "espera-atencao";
+        return null;
+      }
+
       function atualizarRelogios() {
         document.querySelectorAll(".t-espera").forEach((el) => {
           const criadaEm = new Date(el.dataset.criadaEm + "Z").getTime();
-          el.textContent = formatarHHMMSS((Date.now() - criadaEm) / 1000);
+          const segundosEspera = (Date.now() - criadaEm) / 1000;
+          el.textContent = formatarHHMMSS(segundosEspera);
+
+          const linha = el.closest("tr");
+          if (linha) {
+            linha.classList.remove("espera-atencao", "espera-estourada");
+            const classe = classeDestaqueEspera(segundosEspera, TEMPO_ESPERA_MAXIMO_MIN);
+            if (classe) linha.classList.add(classe);
+          }
         });
         document.querySelectorAll(".hora-relogio[data-hora-de]").forEach((el) => {
           el.textContent = "· " + formatarHoraLocal(el.dataset.horaDe);
