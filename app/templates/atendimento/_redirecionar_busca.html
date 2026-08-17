@@ -47,7 +47,7 @@
   .campo-busca-redirecionar { position: relative; max-width: 420px; }
   .busca-redirecionar {
     width: 100%; padding: .8rem .9rem; font-size: 1.05rem; min-height: 44px;
-    border: 1px solid #d0d4dc; border-radius: 8px; box-sizing: border-box;
+    border: 1px solid var(--gf-borda); border-radius: 8px; box-sizing: border-box;
   }
   .busca-redirecionar:focus { outline: 2px solid var(--gf-primaria); outline-offset: 1px; }
   .selecionado-redirecionar {
@@ -68,18 +68,18 @@
   .dropdown-redirecionar {
     list-style: none; margin: .3rem 0 0; padding: .3rem 0; position: absolute; z-index: 20;
     left: 0; right: 0; max-height: 320px; overflow-y: auto;
-    background: #fff; border: 1px solid #d0d4dc; border-radius: 8px;
+    background: var(--gf-superficie); border: 1px solid var(--gf-borda); border-radius: 8px;
     box-shadow: 0 6px 18px rgba(0,0,0,.12);
   }
   .item-dropdown-redirecionar {
     display: flex; align-items: center; justify-content: space-between; gap: .75rem;
     min-height: 44px; padding: .55rem 1rem; font-size: 1rem; cursor: pointer;
   }
-  .item-dropdown-redirecionar:hover, .item-dropdown-redirecionar.destacado { background: #f1f3f6; }
+  .item-dropdown-redirecionar:hover, .item-dropdown-redirecionar.destacado { background: var(--gf-borda); }
   .item-dropdown-redirecionar .marcador-aberta { color: #1d7a3a; font-size: .8rem; white-space: nowrap; }
-  .item-dropdown-redirecionar .marcador-fechada { color: #999; font-size: .8rem; white-space: nowrap; }
-  .divisor-dropdown-redirecionar { border-top: 1px solid #eceef2; margin: .3rem 0; list-style: none; }
-  .dropdown-vazio { padding: .7rem 1rem; color: #999; font-size: .9rem; min-height: 44px; box-sizing: border-box; display: flex; align-items: center; }
+  .item-dropdown-redirecionar .marcador-fechada { color: var(--gf-texto-secundario); font-size: .8rem; white-space: nowrap; }
+  .divisor-dropdown-redirecionar { border-top: 1px solid var(--gf-borda); margin: .3rem 0; list-style: none; }
+  .dropdown-vazio { padding: .7rem 1rem; color: var(--gf-texto-secundario); font-size: .9rem; min-height: 44px; box-sizing: border-box; display: flex; align-items: center; }
 </style>
 
 <script>

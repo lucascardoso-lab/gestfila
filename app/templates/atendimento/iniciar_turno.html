@@ -83,7 +83,7 @@
     .grade-turno { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; max-width: none; }
     #tabela-filas-turno th, #tabela-filas-turno td { font-size: .85rem; }
     #tabela-filas-turno .botao-remover { background: none; border: none; color: var(--gf-primaria-escura); cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 0; }
-    .vazio { color: #999; font-size: .9rem; }
+    .vazio { color: var(--gf-texto-secundario); font-size: .9rem; }
 
     /* Busca com autocomplete (mesmo padrão da seção 10.10, atendimento/
        _redirecionar_busca.html) - duas instâncias nesta tela (Fila e Local),
@@ -92,7 +92,7 @@
     .campo-busca-turno { position: relative; max-width: 420px; }
     .busca-turno {
       width: 100%; padding: .8rem .9rem; font-size: 1.05rem; min-height: 44px;
-      border: 1px solid #d0d4dc; border-radius: 8px; box-sizing: border-box;
+      border: 1px solid var(--gf-borda); border-radius: 8px; box-sizing: border-box;
     }
     .busca-turno:focus { outline: 2px solid var(--gf-primaria); outline-offset: 1px; }
     .selecionado-turno {
@@ -107,18 +107,18 @@
     .dropdown-turno {
       list-style: none; margin: .3rem 0 0; padding: .3rem 0; position: absolute; z-index: 20;
       left: 0; right: 0; max-height: 280px; overflow-y: auto;
-      background: #fff; border: 1px solid #d0d4dc; border-radius: 8px;
+      background: var(--gf-superficie); border: 1px solid var(--gf-borda); border-radius: 8px;
       box-shadow: 0 6px 18px rgba(0,0,0,.12);
     }
     .item-dropdown-turno {
       display: flex; align-items: center; justify-content: space-between; gap: .75rem;
       min-height: 44px; padding: .55rem 1rem; font-size: 1rem; cursor: pointer;
     }
-    .item-dropdown-turno:hover, .item-dropdown-turno.destacado { background: #f1f3f6; }
+    .item-dropdown-turno:hover, .item-dropdown-turno.destacado { background: var(--gf-borda); }
     .item-dropdown-turno .marcador-aberta { color: #1d7a3a; font-size: .8rem; white-space: nowrap; }
-    .item-dropdown-turno .marcador-fechada { color: #999; font-size: .8rem; white-space: nowrap; }
-    .divisor-dropdown-turno { border-top: 1px solid #eceef2; margin: .3rem 0; list-style: none; }
-    .dropdown-vazio-turno { padding: .7rem 1rem; color: #999; font-size: .9rem; min-height: 44px; box-sizing: border-box; display: flex; align-items: center; }
+    .item-dropdown-turno .marcador-fechada { color: var(--gf-texto-secundario); font-size: .8rem; white-space: nowrap; }
+    .divisor-dropdown-turno { border-top: 1px solid var(--gf-borda); margin: .3rem 0; list-style: none; }
+    .dropdown-vazio-turno { padding: .7rem 1rem; color: var(--gf-texto-secundario); font-size: .9rem; min-height: 44px; box-sizing: border-box; display: flex; align-items: center; }
   </style>
 
   <script>

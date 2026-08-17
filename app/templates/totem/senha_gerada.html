@@ -64,7 +64,15 @@
     /* Prévia na tela: só uma referência visual de "isto é um cupom", largura
        fixa aqui é só estética da prévia - não tem relação com o tamanho real
        de impressão (ver regra @media print abaixo, que é intencionalmente
-       flexível). */
+       flexível).
+
+       EXCEÇÃO DELIBERADA à consolidação pré-dark-mode (BLUEPRINT.md, etapa 1
+       de 2): background:#fff/color:#000 aqui NÃO usam var(--gf-superficie)/
+       var(--gf-texto-*) de propósito - o cupom (prévia em tela E impresso,
+       @media print abaixo) deve SEMPRE parecer papel branco com tinta preta,
+       decisão já tomada, independente do tema geral do app. NÃO trocar por
+       variáveis na etapa 2 (dark mode em si) - troca aqui seria a correção
+       ERRADA, não um esquecimento. */
     .cupom {
       width: 320px; max-width: 90vw; background: #fff; color: #000;
       border: 1px dashed var(--gf-cinza-medio); border-radius: 4px;

@@ -1,0 +1,23 @@
+{# Menu principal (<nav>) compartilhado por admin/_layout.html, atendimento/
+   _layout.html, relatorios/_layout.html e core/dashboard.html - consolidação
+   pré-dark-mode (etapa 1 de 2, BLUEPRINT.md): as 4 áreas tinham o MESMO
+   <nav>...</nav> (logo + link "Sair") copiado byte-a-byte, só os links do
+   meio variando por área. Extraído aqui como macro com {% call %} pra cada
+   área continuar controlando seus PRÓPRIOS itens de menu (não força um menu
+   genérico) - só a casca (logo, wrapper, link "Sair") é compartilhada.
+
+   O CSS de `<nav>` continua no <style> de cada layout (não movido pra
+   gestfila.css nesta etapa) - só a duplicação de MARCAÇÃO/HTML foi
+   eliminada, conforme pedido; admin tem um <nav> com mais links (precisa de
+   quebra de linha/espaçamento próprio, ver .links-nav/.grupo-nav-esquerda
+   no CSS dele), então unificar o CSS também exigiria decidir por uma das
+   duas variantes - fora do escopo desta etapa mecânica. #}
+{% macro nav_principal() %}
+<nav>
+  <div class="grupo-nav-esquerda">
+    <span class="gf-logo gf-logo--navbar gf-logo--claro"><span class="gf-logo-gest">GEST</span><span class="gf-logo-fila">FILA</span></span>
+    {{ caller() }}
+  </div>
+  <a href="{{ url_for('auth.logout') }}">Sair ({{ current_user.nome }})</a>
+</nav>
+{% endmacro %}

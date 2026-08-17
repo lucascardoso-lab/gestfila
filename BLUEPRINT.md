@@ -4874,6 +4874,121 @@ continua funcionando como antes. Suíte completa sem falhas.
 
 ---
 
+## 10.55. ADENDO — Consolidação pré-dark-mode: variáveis semânticas novas + `<nav>` unificado (etapa 1 de 2)
+
+> Pedido do cliente: dark mode + claro + automático em TODO o projeto (admin,
+> atendimento, totem, painel de TV, relatórios, login), com botão de alternar
+> visível em TODAS as telas, inclusive totem/TV — **decisão CONSCIENTE do
+> cliente apesar do risco levantado**: totem/TV são telas públicas/kiosk sem
+> "dono" — qualquer pessoa pode tocar o botão; a preferência fica salva por
+> **navegador** via `localStorage`, não por conta/pessoa, então um totem pode
+> ficar no tema errado até alguém notar e corrigir manualmente. **Risco
+> aceito explicitamente pelo cliente, registrado aqui como tal** — não é uma
+> lacuna descoberta depois, é uma escolha consciente feita antes de
+> implementar.
+>
+> Esta seção documenta só a **etapa 1 de 2**: levantamento completo (FASE 1,
+> números reais via grep, sem código) seguido de consolidação MECÂNICA da
+> base CSS (troca de valor, sem tema escuro nenhum ainda) — pré-requisito
+> pra etapa 2 (dark mode em si) não precisar caçar 141 pontos individuais
+> espalhados pelo projeto.
+
+**Levantamento (FASE 1, antes de qualquer código):**
+- `--gf-*` (10 variáveis) definidas em UM lugar só (`gestfila.css`, `:root`)
+  — nenhuma duplicação entre áreas, todas as 6 áreas (admin/atendimento/
+  totem/painel/relatórios/auth) já carregam o mesmo arquivo via `<link>`.
+- **151 ocorrências de hex + 23 de `rgba()`** fora de variável, espalhadas
+  por 20 arquivos de template — das quais 10 hex eram a própria definição
+  em `gestfila.css` (fonte, não risco). As 141 restantes se resumiam a **~20
+  valores distintos reutilizados** (não caos disperso): `#fff`/`#ffffff`
+  (46×, fundos de card), `#555`/`#666`/`#999`/`#888`/`#aaa`/`#777` (38×,
+  texto secundário, nunca nomeado), família cinza-clara `#eceef2`/`#e5e8ea`/
+  `#f0f1f3`/`#f7f8fa`/`#f1f3f6`/`#e8eaec`/`#d0d4dc` (39×, bordas/fundos
+  sutis), `#eaf2f8`/`#fdf0e2`/`#e3f6e8` (fundos pastel de status
+  info/alerta/sucesso).
+- `<nav>` (admin/atendimento/relatórios/`core/dashboard.html`) era CSS+HTML
+  quase byte-a-byte idêntico, duplicado 4×, nunca centralizado — admin tinha
+  pequenas diferenças reais (mais links, precisa de quebra de linha), as
+  outras 3 eram idênticas.
+- CSS de impressão térmica (`totem/senha_gerada.html`, único `@media print`
+  do projeto) já é 100% isolado — preto/branco fixos, nenhuma `var(--gf-*)`
+  dentro do bloco de impressão — confirmado por leitura direta, não vaza
+  dark mode pro cupom físico.
+- Estrutura de cabeçalho por área: admin/atendimento/relatórios/`core.
+  dashboard` têm `<nav>`; totem é tela cheia sem nav (logo centralizado);
+  painel de TV tem `<header class="cabecalho">` só em `tv.html`, não em
+  `indisponivel.html` (a outra tela da área) — melhor colocar um botão
+  futuro no `_layout.html` compartilhado, não em `tv.html`.
+
+**Implementação desta etapa (consolidação mecânica, SEM tema escuro):**
+
+**1. Sete variáveis semânticas novas** em `gestfila.css::root` (10
+existentes mantidas intocadas):
+
+| Variável | Valor | Critério de escolha |
+|---|---|---|
+| `--gf-superficie` | `#FFFFFF` | Fundo de card/tabela/botão-secundário/dropdown - mesmo valor de `--gf-branco` hoje DE PROPÓSITO (só formaliza o papel semântico "superfície", que a etapa 2 vai escurecer; `--gf-branco` continua "a cor branca", constante) |
+| `--gf-texto-secundario` | `#555555` | Valor mais frequente entre os 6 tons de cinza já usados (13× - convenção já era essa, só nunca nomeada) |
+| `--gf-borda` | `#ECEEF2` | Valor mais frequente da família cinza-clara (10×) - NÃO inclui `#cfd6e4` (ver abaixo, papel diferente) |
+| `--gf-info-fundo` | `#EAF2F8` | Único valor já usado pra esse propósito, sem mistura |
+| `--gf-alerta-fundo` | `#FDF0E2` | Idem |
+| `--gf-sucesso-fundo` | `#E3F6E8` | Idem |
+| `--gf-nav-texto` | `#CFD6E4` | Achado durante a troca (não previsto na FASE 1) - cor de texto dos links do `<nav>` sobre fundo escuro; mantida como valor FIXO de propósito - se o `<nav>` deve seguir o tema geral ou ficar sempre escuro é decisão da ETAPA 2, não desta |
+
+**2. ~135 substituições de hex/rgba por variável**, arquivo por arquivo,
+área por área (atendimento → relatórios → core → admin → totem → base.html)
+— `rgba(0,0,0,X)` de `box-shadow` deixado como estava (baixo risco,
+puramente estético, per pedido). Exceções deliberadas, documentadas
+inline no código pra não serem "corrigidas" por engano na etapa 2:
+- `totem/senha_gerada.html::.cupom` (dentro E fora do `@media print`) -
+  branco/preto fixos, o cupom deve SEMPRE parecer papel, decisão já tomada.
+- `admin/_layout.html::.badge.super-admin` (`#ede4fb`/`#6b21a8`, roxo) -
+  único uso de roxo no projeto inteiro, não é padrão recorrente.
+- `.marcador-aberta` (`#1d7a3a`, verde "Atendendo agora",
+  `_redirecionar_busca.html`/`iniciar_turno.html`) - mesmo critério, single-use.
+- `.botao-totem.navegacao:hover` (`#1c2b38`, `totem/_layout.html`) - tom
+  próprio de hover, único uso.
+- `TipoSenha.cor` (`admin/tipos_senha/*.html`, `totem/escolher_tipo.html`)
+  - é CONTEÚDO escolhido pelo admin (cor do tipo de senha), não tema -
+  intocado; só o `color:#fff` fixo do texto sobre essa cor virou
+  `var(--gf-branco)` (texto continua branco sempre, isso é seguro).
+- `painel/_layout.html`/`painel/tv.html` (TV) - **arquivo inteiro fora do
+  escopo desta etapa**, mesmo raciocínio do `--painel-*` (tema escuro fixo e
+  deliberado) estendido a todo o arquivo, não só às 4 variáveis nomeadas -
+  decisão de escopo registrada aqui para o cliente corrigir se a intenção
+  era mais restrita.
+- `#C0392B` embutido em JS (Chart.js do `core/dashboard.html`, `.style.
+  color` do `painel/tv.html`) - JS não lê CSS custom properties de um
+  `<style>`/`<link>` sem `getComputedStyle` explícito; fora do escopo
+  MECÂNICO desta etapa (seria mudança de comportamento, não de valor) -
+  documentado inline, fica pra etapa 2 se precisar reagir ao tema em runtime.
+
+**3. `<nav>` extraído para partial único** (`app/templates/_nav_principal.
+html`) — macro Jinja com `{% call %}`, não um `{% include %}` simples: cada
+área continua controlando seus PRÓPRIOS itens de menu via o conteúdo do
+bloco `{% call nav_principal() %}...{% endcall %}`, a macro só fornece a
+casca compartilhada (logo + wrapper + link "Sair"). CSS do `<nav>`
+**permanece** no `<style>` de cada layout (não movido pra `gestfila.css`
+nesta etapa) — admin tem uma variante com mais links (wrap/espaçamento
+próprios), unificar o CSS também exigiria escolher uma das duas variantes,
+fora do escopo desta troca mecânica de valor.
+
+**Testes:** `tests/test_regressao_consolidacao_pre_dark_mode.py` (8 casos)
+- confirma as 7 variáveis novas + as 10 pré-existentes intactas no `:root`
+de `gestfila.css`; confirma que as 4 áreas renderizam `<nav>` a partir do
+mesmo partial (conteúdo comum presente nas 4, item exclusivo de uma área
+não vaza pras outras); confirma por amostragem que a substituição chegou
+ao HTML renderizado (não só ao arquivo-fonte); confirma que as exceções
+deliberadas (cupom, badge roxo) continuam com hex fixo. Suíte completa
+(58 arquivos pré-existentes) sem nenhuma falha — nenhum teste antigo
+checava hex cru no HTML renderizado, então nenhum precisou de ajuste.
+
+**Não incluído nesta etapa (fica para a etapa 2, dark mode em si):** botão
+de alternar tema, `prefers-color-scheme`/`data-theme`, persistência em
+`localStorage`, qualquer redefinição de variável por tema.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da

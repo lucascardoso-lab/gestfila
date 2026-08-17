@@ -11,7 +11,7 @@
     html, body {
       margin: 0; height: 100%;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      background: linear-gradient(180deg, #ffffff 0%, var(--gf-cinza-claro) 100%);
+      background: linear-gradient(180deg, var(--gf-superficie) 0%, var(--gf-cinza-claro) 100%);
       color: var(--gf-cinza-escuro);
     }
     .totem {
@@ -29,12 +29,14 @@
     .botao-totem {
       display: flex; align-items: center; justify-content: center; text-align: center;
       min-height: 140px; border-radius: 12px; font-size: 1.6rem; font-weight: 700;
-      text-decoration: none; color: #fff; background: var(--gf-primaria); border: none;
+      text-decoration: none; color: var(--gf-branco); background: var(--gf-primaria); border: none;
       cursor: pointer; padding: 1rem; line-height: 1.25;
       box-shadow: 0 4px 14px rgba(192,57,43,.28);
     }
     .botao-totem:hover { background: var(--gf-primaria-escura); }
-    .botao-totem.navegacao { background: var(--gf-cinza-escuro); color: #fff; box-shadow: 0 4px 14px rgba(44,62,80,.28); }
+    .botao-totem.navegacao { background: var(--gf-cinza-escuro); color: var(--gf-branco); box-shadow: 0 4px 14px rgba(44,62,80,.28); }
+    /* Tom próprio (escurecido de --gf-cinza-escuro), não consolidado: único
+       uso deste hover específico no projeto - não é padrão recorrente. */
     .botao-totem.navegacao:hover { background: #1c2b38; }
     .botao-totem.desabilitado { background: var(--gf-cinza-claro); color: var(--gf-cinza-medio); cursor: default; box-shadow: none; }
     .botao-voltar {
@@ -42,7 +44,7 @@
       color: var(--gf-cinza-escuro); font-size: 1.1rem; padding: .6rem 1.4rem; border-radius: 10px;
       text-decoration: none;
     }
-    .botao-voltar:hover { background: #e8eaec; }
+    .botao-voltar:hover { background: var(--gf-borda); }
     .senha-codigo {
       font-size: 6rem; font-weight: 800; letter-spacing: .1em; background: var(--gf-branco);
       color: var(--gf-primaria); padding: 1.5rem 3rem; border-radius: 24px; margin: 2rem 0;

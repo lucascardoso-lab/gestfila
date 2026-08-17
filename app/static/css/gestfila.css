@@ -15,6 +15,49 @@
   --gf-sucesso: #27AE60;
   --gf-alerta: #E67E22;
   --gf-info: #2980B9;
+
+  /* Consolidação pré-dark-mode (etapa 1 de 2, ver BLUEPRINT.md) - as 141
+     ocorrências de hex soltos pelo projeto (fora de variável) se resumiam a
+     ~20 valores distintos, quase todos reaproveitados sem nenhum nome -
+     formalizados aqui como variáveis semânticas novas, mesmo espírito das 10
+     acima. Escolha de UM valor representativo por família (documentado por
+     variável abaixo) é intencional - a etapa 2 (dark mode em si) redefine
+     estas variáveis por tema; --gf-branco/--gf-primaria/etc. acima
+     permanecem CONSTANTES (não redefinidas por tema) por definição. */
+
+  /* Fundo de card/tabela/botão-secundário/dropdown - hoje #fff hardcoded em
+     ~46 lugares. Mesmo valor de --gf-branco hoje (propositalmente - só
+     formaliza o PAPEL semântico "superfície de conteúdo", que a etapa 2 vai
+     escurecer; --gf-branco continua sendo "a cor branca", sem mudar). */
+  --gf-superficie: #FFFFFF;
+  /* Texto secundário/legenda - hoje misturado entre #555/#666/#999/#888/
+     #aaa/#777 (13/10/9/4/1/1 ocorrências). #555 escolhido por ser o valor já
+     mais usado no projeto (13x) - convenção que já era a mais comum, só
+     nunca nomeada; homogeneização deliberada dos demais tons de cinza pra
+     esse único valor, aceita pelo cliente (troca mecânica de valor, não de
+     comportamento). */
+  --gf-texto-secundario: #555555;
+  /* Borda/fundo cinza-claro (divisores, bordas de input, hover sutil) - hoje
+     #eceef2/#e5e8ea/#f0f1f3/#f7f8fa/#f1f3f6/#e8eaec/#d0d4dc (10/2/1/2/2/1/7
+     ocorrências). #eceef2 escolhido pelo mesmo critério (valor mais
+     frequente, 10x). NÃO inclui #cfd6e4 (ver --gf-nav-texto abaixo) - aquele
+     é cor de TEXTO do menu sobre fundo escuro, papel diferente deste. */
+  --gf-borda: #ECEEF2;
+  /* Fundos pastéis de status (badges/avisos) - cada um já tinha um único
+     valor usado de forma consistente no projeto inteiro, sem mistura (só
+     formalizados em variável, sem escolha entre alternativas). */
+  --gf-info-fundo: #EAF2F8;
+  --gf-alerta-fundo: #FDF0E2;
+  --gf-sucesso-fundo: #E3F6E8;
+  /* Cor de texto dos links do menu principal (<nav>) sobre o fundo escuro
+     (--gf-cinza-escuro) - achado durante a consolidação, não previsto na
+     análise inicial (item 5 do levantamento permitia isso). Mantido como
+     valor FIXO de propósito: o menu principal é uma barra propositalmente
+     escura hoje (mesmo em qualquer tema futuro) - decisão de dark mode
+     sobre se o <nav> deve ou não seguir o tema geral fica pra etapa 2, não
+     decidida aqui; nomear a variável já deixa esse ponto explícito pra quem
+     for decidir depois, sem mudar o valor agora. */
+  --gf-nav-texto: #CFD6E4;
 }
 
 /* Logo tipográfico "GESTFILA" - puro HTML/CSS, sem imagem/arquivo externo.

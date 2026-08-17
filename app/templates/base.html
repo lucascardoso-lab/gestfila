@@ -17,13 +17,18 @@
     .container {
       max-width: 480px;
       margin: 8vh auto;
-      background: var(--gf-branco);
+      /* Consolidação pré-dark-mode: era var(--gf-branco) (mesmo valor hoje) -
+         trocado por var(--gf-superficie), a variável certa pra "superfície
+         de card" (mesmo papel de .card/table/etc. no resto do projeto);
+         --gf-branco continua reservado pra "a cor branca" propriamente dita
+         (texto/ícone), não pra fundo de superfície. */
+      background: var(--gf-superficie);
       padding: 2.5rem;
       border-radius: 12px;
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
     }
     h1 { font-size: 1.5rem; margin-bottom: 1.5rem; }
-    label { display: block; margin-bottom: .35rem; font-size: .9rem; color: #555; }
+    label { display: block; margin-bottom: .35rem; font-size: .9rem; color: var(--gf-texto-secundario); }
     input[type="text"], input[type="password"] {
       width: 100%;
       padding: .65rem .75rem;
@@ -56,7 +61,7 @@
       font-size: .9rem;
     }
     .flash.error { background: var(--gf-primaria-clara); color: var(--gf-primaria-escura); }
-    .flash.info { background: #eaf2f8; color: var(--gf-info); }
+    .flash.info { background: var(--gf-info-fundo); color: var(--gf-info); }
     .top-bar {
       display: flex;
       justify-content: space-between;

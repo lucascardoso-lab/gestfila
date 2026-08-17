@@ -13,7 +13,7 @@
       <label for="prioridade_rodizio">Quantidade de chamadas prioritárias seguidas (0 = sem rodízio, fila estritamente FIFO)</label>
       <input type="number" id="prioridade_rodizio" name="prioridade_rodizio" min="0" max="20"
              value="{{ fila.prioridade_rodizio }}" required>
-      <p style="color:#666; font-size:.85rem; margin-top:.5rem;">
+      <p style="color:var(--gf-texto-secundario); font-size:.85rem; margin-top:.5rem;">
         Senhas marcadas como prioritárias (definido no serviço) são chamadas até esta
         quantidade de vezes seguidas antes do sistema voltar a chamar uma senha normal.
       </p>
