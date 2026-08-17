@@ -68,14 +68,23 @@ resp = anon.get("/painel/tv/tv-despertar-audio")
 assert resp.status_code == 200
 html = resp.data.decode("utf-8")
 
-# A) função existe e é chamada no handler de 'chamada' envolvendo falarChamada().
+# A) função existe. Desde a fila real de chamadas de voz (adendo 10.58,
+#    BLUEPRINT.md), socket.on('chamada') não chama mais despertarSaidaAudio()/
+#    falarChamada() diretamente - só enfileira (enfileirarChamada());
+#    processarProximaDaFila() é quem decide, por turno, se toca o tom (só na
+#    1ª chamada de uma rajada - pipeline ocioso, ver adendo) e chama
+#    despertarSaidaAudio() envolvendo falarChamada().
 assert "function despertarSaidaAudio(callback)" in html
 ok("despertarSaidaAudio() presente")
 
 corpo_handler = html[html.index('socket.on("chamada"'):html.index("Smart TVs ficam com o navegador aberto")]
-assert "despertarSaidaAudio(() => {" in corpo_handler
-assert "falarChamada(dados)" in corpo_handler
-ok("socket.on('chamada') chama despertarSaidaAudio() envolvendo falarChamada()")
+assert "enfileirarChamada(dados)" in corpo_handler
+ok("socket.on('chamada') enfileira a chamada (fila real, adendo 10.58) em vez de chamar áudio direto")
+
+corpo_processar_fila = corpo_da_funcao(html, "processarProximaDaFila")
+assert "despertarSaidaAudio(executarTurno)" in corpo_processar_fila
+assert "falarChamada(item.dados, finalizarTurno)" in corpo_processar_fila
+ok("processarProximaDaFila() chama despertarSaidaAudio() envolvendo falarChamada() em cada turno da fila")
 
 # B) encadeamento real via onended (não setTimeout estimado).
 corpo_despertar = corpo_da_funcao(html, "despertarSaidaAudio")

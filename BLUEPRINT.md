@@ -5222,6 +5222,127 @@ Suíte completa sem falhas.
 
 ---
 
+## 10.58. ADENDO — Fila real de chamadas de voz no painel de TV (chamadas nunca se cortam)
+
+**Pedido:** no painel de TV (`painel/tv.html`), várias chamadas chegando em
+sequência rápida podiam se cortar entre si (`speechSynthesis.cancel()` era
+chamado antes de cada `speak()` novo, matando a fala anterior no meio).
+Decisão do cliente: chamadas nunca se cortam - tocam uma de cada vez, do
+início ao fim, mesmo que isso gere um pequeno atraso em picos raros (volume
+do sistema é baixo, ~50 senhas/dia no total - atraso não é problema real
+aqui).
+
+**Mecanismos relacionados (investigados antes de implementar):**
+- **10.48/10.49** (corte de início de fala, CPU fraca e warm-up do motor) -
+  a ORDEM falarChamada() antes de inserirChamada() dentro de cada turno da
+  fila continua exatamente a mesma; a fila só decide QUANDO cada turno
+  começa, não muda nada dentro dele.
+- **10.50** (heartbeat do motor de speechSynthesis) - **intocado**, como
+  pedido. Continua usando `speechSynthesis.speaking` (não a fila) pra
+  decidir se dispara - "nada tocando" agora inclui "fila vazia"
+  naturalmente, porque a fila serializa tudo através do mesmo
+  `speechSynthesis.speak()`.
+- **10.51** (despertar hardware de áudio via Web Audio API,
+  `despertarSaidaAudio`) - continua existindo exatamente igual, só passou a
+  ser chamado condicionalmente (ver decisão 1 abaixo), não mais sempre.
+
+**Duas decisões de produto levantadas e confirmadas explicitamente com o
+cliente antes de escrever qualquer código** (as duas opções e o porquê da
+escolha):
+
+1. **Tom de despertar (despertarSaidaAudio) em cada chamada da fila, ou só
+   na 1ª de uma rajada?**
+   - Opção A (escolhida): só na 1ª chamada de uma rajada (pipeline
+     realmente ocioso antes dela - fila vazia E nada em andamento no
+     momento em que ela chegou). Chamadas seguintes da mesma rajada pulam
+     o tom - o hardware acabou de tocar algo segundos atrás, está
+     garantidamente "quente". Menos ~130ms de atraso por chamada extra na
+     fila.
+   - Opção B (rejeitada): tocar sempre, mesmo em chamadas já enfileiradas
+     atrás de outra. Mais uniforme, mas empilha atraso comprovadamente
+     desnecessário numa rajada.
+2. **Atualização visual (inserirChamada) de uma chamada na fila: imediata
+   ao chegar, ou só quando o ÁUDIO dela começa?**
+   - Opção A (escolhida): só quando o áudio daquela chamada específica
+     começa (turno processado). Tela e voz sempre sincronizadas - nunca
+     mostra uma senha que a voz ainda não anunciou. Numa rajada rara, a
+     tela "atrasa" junto com a fila de áudio (mesmo atraso já aceito pra
+     voz).
+   - Opção B (rejeitada): atualizar a tela assim que o evento chega do
+     servidor, independente da fila de áudio. Podia gerar descompasso
+     temporário (tela mostrando a chamada 3 enquanto a voz ainda termina a
+     1).
+
+**Implementação** (`app/templates/painel/tv.html`):
+- `filaChamadas` (array) + `processandoFila` (bool) - novo estado no topo
+  do script. `processandoFila` é true do início ao fim do "turno" de UMA
+  chamada (tom opcional + `falarChamada()` + `inserirChamada()` + esperar o
+  áudio terminar de verdade) - nunca dois turnos ao mesmo tempo.
+- `enfileirarChamada(dados)` - chamada por `socket.on('chamada')` no lugar
+  do disparo direto de áudio/visual. Decide `tocarTom` NO MOMENTO EM QUE A
+  CHAMADA CHEGA (`!processandoFila && filaChamadas.length === 0` - decisão
+  1 acima), empurra `{dados, tocarTom}` pra fila, chama
+  `processarProximaDaFila()`.
+- `processarProximaDaFila()` - guard `if (processandoFila) return;` evita
+  dois turnos simultâneos; tira o próximo item da fila; se `tocarTom`,
+  envolve o turno em `despertarSaidaAudio()` (10.51), senão processa
+  direto; dentro do turno, `falarChamada(item.dados, finalizarTurno)`
+  roda antes de `inserirChamada(item.dados)` (ordem da 10.48, decisão 2
+  acima); `finalizarTurno()` (chamado quando a fala termina de verdade)
+  libera `processandoFila` e agenda o próximo turno via
+  `setTimeout(processarProximaDaFila, 0)` (evita empilhar a pilha de
+  chamadas síncronas em rajadas maiores, sem efeito no timing real - a
+  espera é imposta pelo áudio, não por este `setTimeout`).
+- `falarChamada(dados, aoTerminar)` e `falarChamadaPregravada(dados,
+  aoTerminar)` passam a aceitar um callback de conclusão, chamado
+  exatamente uma vez quando a fala termina de tocar - **inclusive nos
+  early-returns sem áudio real** (som desativado, sem suporte a
+  `speechSynthesis`, sem voz pt-* instalada, TV pré-gravada): sem isso a
+  fila travaria pra sempre esperando uma chamada que nunca ia "terminar".
+  Pro caminho `speechSynthesis`, a conclusão real é `fala.onend`/
+  `fala.onerror` (evento do motor, não `speechSynthesis.speaking`
+  isolado nem um tempo estimado - pedido explícito, por causa de
+  comportamento inconsistente de `speaking` entre navegadores em alguns
+  casos relatados).
+- `speechSynthesis.cancel()` **deixa de rodar incondicionalmente antes de
+  todo `speak()`** ("evitar empilhar falas" agora é responsabilidade da
+  fila, que só inicia uma chamada nova depois que a anterior terminou de
+  verdade - cancelar aqui cortaria exatamente a fala que a fila está
+  deixando terminar de propósito). Continua existindo só como **proteção
+  de borda**: um watchdog (`WATCHDOG_FALA_TIMEOUT_MS = 15000`) chama
+  `cancel()` e força a conclusão do turno SE `onend`/`onerror` nunca
+  disparar dentro de 15s (motor preso num estado inconsistente) - nunca
+  como mecanismo normal de transição entre chamadas.
+- Comentário da 10.50 (heartbeat) corrigido: descrevia "o `cancel()` que
+  `falarChamada()` já faz" cancelando um heartbeat concorrente - essa
+  frase descrevia um mecanismo que deixou de existir com este adendo;
+  corrigida pra refletir o comportamento atual (a chamada real entra na
+  fila normalmente, o heartbeat curtíssimo termina antes dela).
+
+**Testes:**
+- `tests/test_regressao_fila_voz_tv.py` (novo, estrutural - mesma
+  limitação de infraestrutura dos outros testes de JS do projeto, sem
+  runtime de navegador): confirma o estado da fila, que `socket.on
+  ('chamada')` só enfileira, a decisão de `tocarTom` na chegada (decisão
+  1), a ordem falarChamada()->inserirChamada() dentro do turno (decisão
+  2), que os dois callbacks de conclusão cobrem todos os early-returns, e
+  que `cancel()` não roda mais incondicionalmente. Inclui uma simulação
+  em Python da regra de `tocarTom` com uma rajada de 3 chamadas
+  (confirma só a 1ª toca o tom) e uma chamada isolada (confirma que
+  continua com a mesma latência de hoje, tom sempre toca sem
+  concorrência).
+- `tests/test_regressao_despertar_audio.py` e
+  `tests/test_regressao_audio_pregravado.py` - trechos que checavam
+  `despertarSaidaAudio()`/`falarChamada()` sendo chamados direto de
+  dentro de `socket.on('chamada')` foram atualizados pra refletir que
+  agora só `enfileirarChamada()` roda ali; a chamada real acontece em
+  `processarProximaDaFila()` - não-regressão confirmada nos dois
+  arquivos.
+
+Suíte completa (62 arquivos) sem falhas.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da

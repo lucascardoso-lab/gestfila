@@ -105,11 +105,16 @@
       // não teria cortado sozinha. Este heartbeat só chama speak() de uma
       // utterance PRÓPRIA, curtíssima e quase inaudível - nunca toca no que
       // já está em andamento. Se uma chamada real chegar durante um
-      // heartbeat, o cancel() que falarChamada() já faz (existente desde
-      // antes desta correção, "evita empilhar falas") cancela o heartbeat
-      // como cancelaria qualquer fala anterior e começa a real - mesmo
-      // mecanismo já usado pra várias chamadas reais em sequência rápida,
-      // não um caminho novo de interação.
+      // heartbeat (checagem de `speechSynthesis.speaking` logo abaixo evita
+      // a maioria dos casos, mas existe uma janela estreita entre a
+      // checagem e o speak() do heartbeat), ela entra na fila real de
+      // chamadas (adendo 10.58, BLUEPRINT.md) como qualquer outra - o
+      // motor toca o heartbeat (curtíssimo, quase inaudível) até o fim e
+      // só então a chamada real começa; nenhum cancel() automático entra
+      // em ação aqui desde a 10.58 (antes desse adendo, o cancel() que
+      // falarChamada() fazia em toda chamada cancelava o heartbeat do
+      // mesmo jeito que cancelaria qualquer fala anterior - comportamento
+      // histórico, não mais o mecanismo atual).
       const HEARTBEAT_TTS_INTERVALO_MS = 12000; // 12s - dentro da faixa 10-15s sugerida
       // Não-zero de propósito: volume 0 evita ruído perceptível, mas corre o
       // risco de o motor otimizar o caminho e nunca de fato exercitar o
@@ -165,6 +170,18 @@
 
       let totalChamadas = 0;
       let chamadaAtualDados = null;
+
+      // Fila real de chamadas de voz (adendo 10.58, BLUEPRINT.md) - chamadas
+      // nunca se cortam entre si: cada uma toca por completo, uma de cada vez,
+      // mesmo que várias cheguem em sequência rápida (decisão do cliente:
+      // pequeno atraso em picos raros é aceitável, volume do sistema é baixo,
+      // ~50 senhas/dia). `filaChamadas` guarda as que ainda não começaram a
+      // tocar; `processandoFila` é true do início ao fim do "turno" de UMA
+      // chamada (tom de despertar opcional + falarChamada + inserirChamada +
+      // aguardar o áudio terminar de verdade) - nunca duas chamadas em voz ao
+      // mesmo tempo. Ver processarProximaDaFila()/enfileirarChamada() abaixo.
+      let filaChamadas = [];
+      let processandoFila = false;
 
       // --- Relógio/data (client-side, nunca formatado no servidor - mesma
       // convenção já usada no resto do projeto, seções 10.11/10.12.2). ---
@@ -315,15 +332,26 @@
         return seg;
       }
 
-      function falarChamadaPregravada(dados) {
+      function falarChamadaPregravada(dados, aoTerminar) {
+        // `aoTerminar` (adendo 10.58) - chamado exatamente uma vez quando esta
+        // sequência de clipes acaba (ou é superada, ver `meuId` abaixo) - é o
+        // sinal que processarProximaDaFila() usa pra liberar o próximo item da
+        // fila. Com a fila real, `sequenciaPregravadaId` deixa de ser o
+        // mecanismo normal de troca entre chamadas (isso agora é a fila -
+        // nunca duas em voo ao mesmo tempo) e vira só proteção de borda: se
+        // por algum motivo esta função for chamada fora do fluxo da fila
+        // (nunca deveria acontecer no uso normal), a sequência antiga ainda
+        // se auto-encerra sem travar (chama `aoTerminar` e sai) em vez de
+        // continuar tocando por cima da nova.
+        const concluir = aoTerminar || function () {};
         const segmentos = segmentosChamadaPregravada(dados);
-        const meuId = ++sequenciaPregravadaId;   // qualquer sequência anterior vira no-op
+        const meuId = ++sequenciaPregravadaId;
         const volume = Math.max(0, Math.min(1, TV_VOLUME / 100));
         if (audioPregravadoAtual) { audioPregravadoAtual.pause(); audioPregravadoAtual = null; }
 
         function tocar(indice, nomeOverride) {
-          if (meuId !== sequenciaPregravadaId) return;   // chamada mais nova assumiu
-          if (indice >= segmentos.length) { audioPregravadoAtual = null; return; }
+          if (meuId !== sequenciaPregravadaId) { concluir(); return; } // superada (proteção de borda) - libera a fila mesmo assim
+          if (indice >= segmentos.length) { audioPregravadoAtual = null; concluir(); return; }
           const nome = nomeOverride || segmentos[indice];
           const audio = new Audio(urlAudio(nome));
           audio.volume = volume;
@@ -351,16 +379,32 @@
         tocar(0);
       }
 
-      function falarChamada(dados) {
+      // Tempo máximo que uma fala pode ficar "em andamento" antes do watchdog
+      // (adendo 10.58) considerar o motor travado num estado inconsistente e
+      // forçar a liberação da fila via cancel() - ver comentário no fim desta
+      // função. Bem acima de qualquer frase real (nome/código de senha).
+      const WATCHDOG_FALA_TIMEOUT_MS = 15000;
+
+      function falarChamada(dados, aoTerminar) {
+        // `aoTerminar` (adendo 10.58) - chamado exatamente uma vez quando esta
+        // chamada específica termina de tocar (ou não vai tocar nada, nos
+        // early-returns abaixo) - processarProximaDaFila() usa esse sinal pra
+        // liberar o próximo item da fila. Sem áudio real pra esperar (som
+        // desativado, sem suporte, sem voz), a conclusão é imediata: não há
+        // nada com que sincronizar.
+        const concluir = aoTerminar || function () {};
+
         if (!TV_SOM_ATIVO) {
-          return; // som desativado para esta TV (cadastro admin)
+          concluir(); // som desativado para esta TV (cadastro admin)
+          return;
         }
         if (TV_USA_AUDIO_PREGRAVADO) {
-          falarChamadaPregravada(dados);
+          falarChamadaPregravada(dados, concluir);
           return; // esta TV não usa speechSynthesis
         }
         if (!("speechSynthesis" in window)) {
-          return; // sem suporte a TTS - degrada graciosamente
+          concluir(); // sem suporte a TTS - degrada graciosamente
+          return;
         }
 
         const voz = vozPreferidaCache;
@@ -376,6 +420,7 @@
           // áudio pré-gravado desta TV (Tv.usa_audio_pregravado) no cadastro.
           console.warn("GESTFILA: nenhuma voz pt-* disponível neste navegador - chamada não foi falada. " +
             "Instale a voz Português (Brasil) no sistema operacional ou ligue o áudio pré-gravado desta TV.");
+          concluir();
           return;
         }
 
@@ -403,15 +448,41 @@
         // DEPOIS que TODO o código síncrono do handler termina - incluindo
         // inserirChamada(), que passou a rodar em seguida (handler síncrono,
         // não usa await). Isso desfazia silenciosamente a reordenação
-        // acima: falarChamada() "rodava primeiro" só até a linha do
-        // cancel(); o speak() de fato só era chamado DEPOIS do reflow/
-        // animação pesados, exatamente o cenário que a reordenação existe
-        // pra evitar. Escolhida a correção da causa primária (comprovada
-        // pela investigação) em vez da mitigação do fator secundário
-        // (bug do Chromium em cancel()+speak() no mesmo tick, nunca
-        // confirmado neste caso) - as duas não podiam conviver do jeito que
-        // foram implementadas na primeira tentativa.
-        speechSynthesis.cancel(); // evita empilhar falas se varias chamadas chegarem rapido
+        // acima: falarChamada() "rodava primeiro" só até a linha do speak();
+        // o speak() de fato só era chamado DEPOIS do reflow/animação
+        // pesados, exatamente o cenário que a reordenação existe pra evitar.
+        // Escolhida a correção da causa primária (comprovada pela
+        // investigação) em vez da mitigação do fator secundário (bug do
+        // Chromium em cancel()+speak() no mesmo tick, nunca confirmado neste
+        // caso) - as duas não podiam conviver do jeito que foram
+        // implementadas na primeira tentativa.
+        //
+        // speechSynthesis.cancel() NÃO é mais chamado aqui (adendo 10.58,
+        // reversão parcial desta seção): "evitar empilhar falas" agora é
+        // responsabilidade da FILA (processarProximaDaFila() só inicia uma
+        // chamada nova depois que a anterior termina de verdade) - cancelar
+        // aqui cortaria exatamente a fala anterior que a fila está deixando
+        // terminar de propósito. cancel() continua existindo no navegador
+        // como proteção de borda: o watchdog abaixo o usa SÓ se este
+        // `onend`/`onerror` nunca disparar dentro de WATCHDOG_FALA_TIMEOUT_MS
+        // (motor preso num estado inconsistente) - nunca como mecanismo
+        // normal de transição entre chamadas.
+        let concluida = false;
+        const concluirUmaVez = () => {
+          if (concluida) return;
+          concluida = true;
+          clearTimeout(watchdog);
+          concluir();
+        };
+        fala.onend = concluirUmaVez;
+        fala.onerror = concluirUmaVez; // erro do motor não pode travar a fila pra sempre
+        const watchdog = setTimeout(() => {
+          console.warn("GESTFILA: watchdog de fala disparado - speechSynthesis não terminou em " +
+            (WATCHDOG_FALA_TIMEOUT_MS / 1000) + "s, possível estado inconsistente do motor. " +
+            "Chamando cancel() como recuperação de borda (não é o fluxo normal).");
+          speechSynthesis.cancel();
+          concluirUmaVez();
+        }, WATCHDOG_FALA_TIMEOUT_MS);
         speechSynthesis.speak(fala);
       }
 
@@ -742,44 +813,98 @@
       socket.on("disconnect", () => atualizarStatus("Reconectando…", "reconectando"));
       socket.on("connect_error", () => atualizarStatus("Sem conexão - tentando reconectar…", "desconectado"));
 
-      // evento principal desta tela: {tipo: 'senha'|'nome', local, senha|nome_paciente, cor?, repetir?}
-      // emitido pelo backend nas salas tv_<id>/fila_<id>.
+      // Fila real de chamadas de voz (adendo 10.58, BLUEPRINT.md - ver
+      // declaração de `filaChamadas`/`processandoFila` no topo do arquivo).
+      // Processa UM item por vez, do início ao fim (nunca duas chamadas
+      // "em voo" simultaneamente) - cada "turno" é: tom de despertar
+      // (só se aplicável, ver `tocarTom` abaixo) -> falarChamada() ->
+      // inserirChamada() -> aguarda o áudio terminar de verdade (`onend`/
+      // equivalente, não um tempo estimado) -> libera o próximo.
       //
-      // ORDEM invertida de propósito (investigação de corte de início de fala
-      // em hardware fraco, adendo correspondente no BLUEPRINT): falarChamada()
-      // roda ANTES de inserirChamada(). inserirChamada() dispara
-      // dispararAnimacaoDestaque(), que força um reflow síncrono
-      // (`elChamadaAtual.offsetWidth`) e inicia uma animação CSS de 3s que
-      // anima `box-shadow` (propriedade cara, força repaint a cada frame, não
-      // é compositor-only como transform/opacity) - em CPU fraca, esse
-      // trabalho competia bem no momento em que a fala deveria começar,
-      // cortando o início do áudio. falarChamada() não depende de nada que
-      // inserirChamada() atualiza (só usa `dados`), então a troca de ordem é
-      // segura - o áudio começa a inicializar sem concorrência de reflow/
-      // repaint, e a atualização visual (que o olho não percebe faltar por
-      // uns milissegundos) vem logo depois.
+      // ORDEM falarChamada() ANTES de inserirChamada() dentro de cada turno
+      // é a mesma já estabelecida na 10.48 (investigação de corte de início
+      // de fala em hardware fraco): inserirChamada() dispara
+      // dispararAnimacaoDestaque(), que força um reflow síncrono e anima
+      // `box-shadow` (caro, força repaint) - em CPU fraca, isso competia
+      // por CPU bem no momento em que o áudio deveria começar. A fila não
+      // muda essa ordem POR ITEM, só decide QUANDO cada item começa seu
+      // turno.
       //
-      // despertarSaidaAudio() (adendo que documenta esta correção -
-      // EXPERIMENTAL) envolve falarChamada() num callback: o tom de
-      // "despertar" o hardware de áudio toca primeiro, e falarChamada() só
-      // roda no onended REAL do oscilador - inserirChamada() continua depois
-      // de falarChamada(), preservando a ordem já estabelecida na 10.48.
-      socket.on("chamada", (dados) => {
+      // Duas decisões de produto confirmadas explicitamente com o cliente
+      // antes desta implementação (adendo 10.58 documenta as duas opções
+      // levantadas e o porquê da escolha):
+      // 1) Tom de despertar (despertarSaidaAudio, 10.51) só toca ANTES da
+      //    primeira chamada de uma rajada (pipeline realmente ocioso quando
+      //    a chamada chegou - fila vazia E nada em andamento). Chamadas
+      //    seguintes da mesma rajada pulam o tom - o hardware de áudio já
+      //    tocou algo há poucos segundos, está garantidamente "quente"; SE
+      //    tocasse toda vez, empilharia ~130ms de atraso desnecessário por
+      //    chamada extra na fila. `tocarTom` é decidido no MOMENTO EM QUE A
+      //    CHAMADA CHEGA (enfileirarChamada), não no momento em que ela
+      //    começa a tocar - é exatamente aí que se sabe se o pipeline
+      //    estava ocioso "antes desta chamada específica".
+      // 2) Atualização visual (inserirChamada) de uma chamada em fila só
+      //    acontece quando o ÁUDIO DELA especificamente começa (quando o
+      //    turno dela é processado) - tela e voz sempre sincronizadas,
+      //    nunca mostra uma senha que a voz ainda não anunciou. Numa
+      //    rajada rara, a tela "atrasa" junto com a fila de áudio (mesmo
+      //    atraso já aceito pra voz) - efeito colateral aceito de
+      //    propósito, não um bug.
+      function enfileirarChamada(dados) {
+        // ocioso agora = ninguém em andamento E fila vazia = esta é a
+        // primeira chamada de uma rajada nova (decisão 1 acima).
+        const tocarTom = !processandoFila && filaChamadas.length === 0;
+        filaChamadas.push({ dados, tocarTom });
+        processarProximaDaFila();
+      }
+
+      function processarProximaDaFila() {
+        if (processandoFila) return; // já tem uma chamada em andamento - ela mesma chama isto de novo ao terminar
+        const item = filaChamadas.shift();
+        if (!item) return; // fila vazia, nada a processar agora
+        processandoFila = true;
+
         const t0 = DEBUG_TIMING ? performance.now() : 0;
-        despertarSaidaAudio(() => {
+
+        const finalizarTurno = () => {
+          processandoFila = false;
+          if (filaChamadas.length > 0) {
+            // setTimeout(0), não chamada direta: evita empilhar a pilha de
+            // chamadas em rajadas maiores (cada turno terminando chamaria o
+            // próximo sincronamente dentro do mesmo call stack) - sem efeito
+            // perceptível no timing real (a espera é de qualquer forma
+            // imposta pelo áudio terminando, não por este setTimeout).
+            setTimeout(processarProximaDaFila, 0);
+          }
+        };
+
+        const executarTurno = () => {
           const t1 = DEBUG_TIMING ? performance.now() : 0;
-          falarChamada(dados);
+          falarChamada(item.dados, finalizarTurno);
           const t2 = DEBUG_TIMING ? performance.now() : 0;
-          inserirChamada(dados);
+          inserirChamada(item.dados);
           if (DEBUG_TIMING) {
             const t3 = performance.now();
             console.log(
-              `[GESTFILA debug] despertarSaidaAudio=${(t1 - t0).toFixed(1)}ms ` +
-              `falarChamada=${(t2 - t1).toFixed(1)}ms inserirChamada=${(t3 - t2).toFixed(1)}ms ` +
-              `total=${(t3 - t0).toFixed(1)}ms`
+              `[GESTFILA debug] tocarTom=${item.tocarTom} filaRestante=${filaChamadas.length} ` +
+              `falarChamada(início-síncrono)=${(t2 - t1).toFixed(1)}ms inserirChamada=${(t3 - t2).toFixed(1)}ms ` +
+              `totalAteAquiNesteTurno=${(t3 - t0).toFixed(1)}ms`
             );
           }
-        });
+        };
+
+        if (item.tocarTom) {
+          despertarSaidaAudio(executarTurno);
+        } else {
+          executarTurno();
+        }
+      }
+
+      // evento principal desta tela: {tipo: 'senha'|'nome', local, senha|nome_paciente, cor?, repetir?}
+      // emitido pelo backend nas salas tv_<id>/fila_<id>. Só enfileira - todo
+      // o resto (tom/fala/visual/ordem) é responsabilidade da fila acima.
+      socket.on("chamada", (dados) => {
+        enfileirarChamada(dados);
       });
 
       // Smart TVs ficam com o navegador aberto por dias - recarregar 1x/dia evita

@@ -220,15 +220,37 @@ assert "speechSynthesis.speak(" in html_normal
 ok("TV normal: TV_USA_AUDIO_PREGRAVADO=false e o caminho speechSynthesis segue intacto (sem regressão)")
 
 # ===========================================================================
-# D) Não-duplicação: o disparo de áudio (falarChamada) só acontece no evento
-#    'chamada' ao vivo, nunca na reconstrução de histórico (adendo 10.13). Vale
-#    para os DOIS caminhos, já que ambos passam pelo mesmo falarChamada().
+# D) Não-duplicação: o disparo de áudio (falarChamada) só acontece a partir do
+#    evento 'chamada' ao vivo, nunca na reconstrução de histórico (adendo
+#    10.13). Vale para os DOIS caminhos, já que ambos passam pelo mesmo
+#    falarChamada() - com a fila real (adendo 10.58, BLUEPRINT.md),
+#    socket.on('chamada') só enfileira; quem de fato chama falarChamada() é
+#    processarProximaDaFila(), um único ponto de chamada (não duplicado por
+#    caminho pré-gravado/speechSynthesis - a ramificação é DENTRO de
+#    falarChamada(), não em dois call-sites).
 # ===========================================================================
-bloco_chamada = html_pg[html_pg.index('socket.on("chamada"'):html_pg.index('setTimeout(() => window.location.reload')]
-assert "falarChamada(dados)" in bloco_chamada
+bloco_chamada = html_pg[html_pg.index('socket.on("chamada"'):html_pg.index('Smart TVs ficam com o navegador aberto')]
+assert "enfileirarChamada(dados)" in bloco_chamada
+
+def corpo_da_funcao_pg(texto, nome_funcao):
+    inicio = texto.index(f"function {nome_funcao}(")
+    abre = texto.index("{", inicio)
+    profundidade = 0
+    i = abre
+    while True:
+        if texto[i] == "{":
+            profundidade += 1
+        elif texto[i] == "}":
+            profundidade -= 1
+            if profundidade == 0:
+                return texto[abre:i + 1]
+        i += 1
+
+corpo_processar_fila = corpo_da_funcao_pg(html_pg, "processarProximaDaFila")
+assert corpo_processar_fila.count("falarChamada(item.dados") == 1
 bloco_recarregar = html_pg[html_pg.index("function recarregarHistorico"):html_pg.index("const socket = io(")]
 assert "falarChamada" not in bloco_recarregar
-ok("Disparo de áudio só no evento 'chamada' ao vivo, nunca em recarregarHistorico (não duplica em reload/reconexão)")
+ok("Disparo de áudio só a partir do evento 'chamada' ao vivo (via fila), nunca em recarregarHistorico (não duplica em reload/reconexão)")
 
 # ===========================================================================
 # E) Aviso no cadastro de Local (Opção A): só quando falta o arquivo E há TV
