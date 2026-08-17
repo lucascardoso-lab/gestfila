@@ -15,6 +15,7 @@ Execução: python -m tests.test_regressao_local_rodizio_tela (a partir da raiz 
 projeto, com o virtualenv ativado).
 """
 import os
+import re
 from datetime import datetime
 
 os.environ.setdefault("SECRET_KEY", "test")
@@ -161,10 +162,15 @@ ok("Isolamento multi-tenant: admin de outra empresa recebe 404 ao acessar Local 
 resp = c_recepcao_a1.get(URL_PAINEL)
 assert resp.status_code == 200
 texto = resp.data.decode("utf-8")
-# Fora do <script> - lá dentro, o JS carrega o mesmo texto da mensagem de estado
-# vazio como string literal (fallback do render client-side), o que faria um
-# "not in texto" simples dar falso positivo mesmo com a tabela cheia de dados.
-html_sem_script = texto.split("<script")[0]
+# Fora de QUALQUER <script> - lá dentro, o JS carrega o mesmo texto da
+# mensagem de estado vazio como string literal (fallback do render
+# client-side), o que faria um "not in texto" simples dar falso positivo
+# mesmo com a tabela cheia de dados. Remove TODOS os blocos <script>...
+# </script> (não só corta a partir do primeiro) - dark mode (etapa 2,
+# BLUEPRINT.md) passou a injetar um <script> de tema no <head>, antes de
+# qualquer conteúdo real da página; cortar só a partir do primeiro
+# <script> (como antes) removeria o corpo inteiro da página por engano.
+html_sem_script = re.sub(r"<script[^>]*>.*?</script>", "", texto, flags=re.DOTALL)
 assert "FX001" in html_sem_script and "Fila X" in html_sem_script
 assert "FY001" in html_sem_script and "Fila Y" in html_sem_script
 assert "Nenhuma senha aguardando neste Local." not in html_sem_script

@@ -4989,6 +4989,146 @@ de alternar tema, `prefers-color-scheme`/`data-theme`, persistência em
 
 ---
 
+## 10.56. ADENDO — Dark mode em si: tema claro/escuro/automático em todo o projeto (etapa 2 de 2)
+
+> Pedido do cliente (mesmo escopo já registrado na 10.55): dark mode em TODO
+> o projeto, inclusive totem e painel de TV, com botão de alternar visível
+> em TODAS as telas. **Risco do botão em telas públicas/kiosk (totem/TV) já
+> aceito explicitamente pelo cliente e documentado por completo no adendo
+> 10.55** — não repetido aqui, só referenciado: preferência por
+> `localStorage`/navegador, sem "dono" da tela, pode ficar no tema errado
+> até alguém notar.
+
+**Mecanismo:** atributo `data-theme="light"` ou `"dark"` no `<html>`
+(nunca `"auto"` — esse é só o modo GUARDADO no `localStorage`, sempre
+resolvido pra um dos dois valores concretos antes de virar atributo, via
+`prefers-color-scheme` quando o modo é automático). Script novo
+(`app/templates/_tema_script.html`, incluído no `<head>` das 7 áreas-raiz da
+FASE 1 da 10.55, **antes** do `<link>` de `gestfila.css`) aplica o tema de
+forma síncrona assim que o parser chega nele — evita o flash do tema errado
+no primeiro paint. Expõe `window.GestfilaTema` (não fica preso numa IIFE
+fechada) porque o botão de alternar só existe mais abaixo no `<body>`,
+renderizado bem depois deste script já ter rodado — sem isso o clique não
+teria como chamar a mesma lógica de aplicar/persistir.
+
+**Botão de alternar** (`app/templates/_alternador_tema.html`, macro
+`alternador_tema(flutuante=False)`): um ícone só, que CICLA entre os 3
+modos a cada clique (claro → escuro → automático → claro → ...), em vez de
+um seletor explícito de 3 opções — cabe pequeno tanto dentro do `<nav>`
+quanto flutuante em tela cheia (totem/painel de TV), e o padrão já é visto
+em várias ferramentas pra essa mesma tríade (ex.: VS Code, GitHub). Estado
+atual sempre visível via ícone (☀️/🌙/🖥️) + `aria-label`/`title` completos
+("Tema: X. Clique para alternar."). Reaproveitado nas 7 áreas-raiz:
+- Dentro do `<nav>` (admin/atendimento/relatórios/`core.dashboard`) — como
+  as 4 já usam `_nav_principal.html` (10.55), um único ponto resolve as 4.
+- Flutuante, canto inferior direito (`.alternador-tema--flutuante`,
+  `gestfila.css`) nas 3 sem `<nav>`: `base.html` (login/erros/troca de
+  senha), `totem/_layout.html`, `painel/_layout.html`.
+
+**Paleta escura para `--gf-*`** (`gestfila.css::[data-theme="dark"]`): as
+15 variáveis "temáticas" das 18 no `:root` (10 originais + 7 da 10.55)
+redefinidas com valores mais claros/saturados que a versão clara — não é
+auditoria formal de acessibilidade, mas contraste realmente legível, não só
+"tecnicamente diferente" (pedido explícito). `--gf-branco`/`--gf-nav-texto`
+continuam CONSTANTES (não redefinidas) — mesma decisão já tomada pro
+nav-texto na 10.55, mantida.
+
+> **Achado ao implementar (não previsto na 10.55):** `--gf-cinza-escuro`
+> tinha DOIS papéis conflitantes — texto escuro-sobre-claro (precisa
+> inverter no tema escuro) E fundo do `<nav>`/botão "navegação" do totem
+> (precisa ficar FIXO, mesma barra escura em qualquer tema). Extraída uma
+> variável nova, `--gf-escuro-fixo` (valor atual de `--gf-cinza-escuro`,
+> NÃO redefinida no tema escuro), usada só nesses 2 lugares — libera
+> `--gf-cinza-escuro` pra inverter livremente como texto em todo o resto,
+> sem quebrar o `<nav>`. Achados 2 outros gaps na implementação:
+> - `<input>`/`<select>`/`<textarea>` nunca tiveram `background`/`color`
+>   próprios em nenhum layout (só `border`) — no tema claro isso não
+>   aparecia (o padrão do NAVEGADOR já coincidia por acaso com
+>   `--gf-superficie`/`--gf-cinza-escuro` claros); no escuro, ficariam
+>   brancos "flutuando" numa página escura. Regra nova em `gestfila.css`
+>   (`input, select, textarea { background: var(--gf-superficie); color:
+>   var(--gf-cinza-escuro); }`) — sem efeito no tema claro (mesmos valores
+>   que já eram aplicados por padrão), só corrige o escuro.
+> - 4 usos de `background: var(--gf-branco)` como SUPERFÍCIE de card (não
+>   texto) sobrevivido da 10.55 por engano — `.barra-contexto`
+>   (admin/`core.dashboard`), `.cartao-modal` (totem/confirmar_geracao.html)
+>   e `.senha-codigo` (totem/_layout.html). Corrigidos pra
+>   `var(--gf-superficie)` (a variável certa pra essa função, que a etapa 2
+>   escurece) — `--gf-branco` fica reservado só pra texto/ícone
+>   literalmente branco.
+
+**Painel de TV — paleta CLARA nova** (`painel/_layout.html`, dentro do
+próprio `<style>`, não em `gestfila.css` — `--painel-*` nunca fez parte da
+paleta compartilhada): a tela só tinha paleta ESCURA antes (fixa, sem
+conceito de tema); ganhou `[data-theme="light"]` com 5 variáveis
+`--painel-fundo`/`--painel-fundo-header`/`--painel-fundo-elemento`/
+`--painel-texto-secundario`/`--painel-texto-principal` (a última é nova —
+era `#fff` fixo em vários seletores, precisava de nome pra poder inverter).
+A paleta escura (`:root`) continua sendo o padrão/automático — **pedido
+explícito: não muda o visual atual quando o tema for escuro ou automático
+com o SO em escuro.**
+
+> **Tensão resolvida (achada ao implementar):** `painel/tv.html` usa
+> `--gf-primaria`/`-escura`/`--gf-sucesso`/`--gf-alerta`/`--gf-info`
+> (direto) e `--gf-cinza-medio` (via `.gf-watermark` de `gestfila.css`) na
+> aparência ATUAL (valores claros/canônicos, já que nunca existiu tema
+> nenhum antes). Sem tratamento especial, o bloco `[data-theme="dark"]` de
+> `gestfila.css` mudaria essas cores aqui também sempre que o usuário
+> escolhesse tema escuro no resto do site — violando "não muda o visual
+> atual quando escuro". Resolvido PINANDO essas 6 variáveis no `:root`
+> PRÓPRIO de `painel/_layout.html`, nos valores canônicos, sempre — mesma
+> especificidade do `[data-theme="dark"]` de `gestfila.css` (ambos 0,1,0),
+> mas como o `<style>` de `painel/_layout.html` vem DEPOIS no documento,
+> vence o empate sempre, independente do tema escolhido no resto do site.
+> O painel de TV fica assim com o PRÓPRIO esquema claro/escuro, totalmente
+> desacoplado do tema geral admin/atendimento/etc. `.chamada-badge-
+> prioritario` (fundo branco fixo, alto contraste "não importa `dados.cor`")
+> continua com `background: #fff` literal, sem tocar — já é o mesmo padrão
+> do cupom, e o pin de `--gf-primaria-escura` acima garante que a cor do
+> texto/borda continua legível nos dois temas do painel sem precisar de
+> mais nada.
+
+**Cupom (totem/senha_gerada.html) — confirmado, não tocado:** nenhuma
+variável de tema (`--gf-*` novo/velho, `--painel-*`) é referenciada em
+`.cupom`, nem dentro nem fora do `@media print` — `background: #fff;
+color: #000;` literal nos dois lugares, como já era desde a 10.55. Único
+detalhe secundário: a borda tracejada da PRÉVIA em tela (`border: 1px
+dashed var(--gf-cinza-medio)`, fora do `@media print`) usa uma variável
+ORIGINAL (não uma das novas da 10.55) que passa a ter valor diferente no
+tema escuro — o fundo/texto do cupom continuam 100% fixos (o que importa
+pro requisito "sempre parece papel"), só essa borda fica sutilmente mais
+clara no tema escuro; não alterado, registrado aqui por transparência.
+
+**Testes:** `tests/test_regressao_dark_mode.py` (9 casos) — confirma
+script+botão presentes nas 7 áreas-raiz (e antes do `<link>` de
+`gestfila.css`, e a variante flutuante só nas 3 sem `<nav>`); confirma que
+`[data-theme="dark"]` existe em `gestfila.css` com as 15 variáveis
+temáticas DIFERENTES do `:root` claro (não é bloco vazio) e que as 3
+constantes continuam iguais; confirma que `painel/_layout.html` ganha
+`[data-theme="light"]` com valores diferentes da paleta escura e que os
+6 `--gf-*` usados ali ficam pinados; confirma checagem estrutural do script
+(lê/escreve `localStorage`, resolve automático via `prefers-color-scheme`);
+confirma que o cupom nunca referencia variável de tema.
+
+**3 testes pré-existentes corrigidos** (quebrados pelo novo `<script>` no
+`<head>`, não por bug de comportamento):
+`test_regressao_cupom_impressao_navegador.py`,
+`test_regressao_local_rodizio_tela.py`,
+`test_regressao_nome_paciente_none.py` — todos assumiam "o primeiro/único
+`<script>` do documento" pra extrair só o JS de negócio da página, uma
+premissa que deixou de valer com o script de tema no `<head>` (e, num caso,
+também com o script de resync do botão flutuante no fim do `<body>`).
+Corrigidos pra ancorar num marcador único do script que cada teste
+realmente queria (`var URL_RETORNO`) ou remover TODOS os blocos
+`<script>...</script>` via regex em vez de cortar a partir do primeiro -
+sem mudar o que cada teste verifica, só a forma de isolar o texto certo.
+
+**Não incluído nesta etapa:** nenhum — etapa 2 fecha o pedido de dark mode
+completo (mecanismo + paleta escura `--gf-*` + paleta clara `--painel-*` +
+botão nas 7 áreas). Suíte completa sem falhas.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da

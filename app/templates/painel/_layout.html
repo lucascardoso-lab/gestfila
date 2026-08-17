@@ -5,23 +5,63 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block titulo %}Painel{% endblock %} - GESTFILA</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%23FFFFFF'/%3E%3Ctext x='50' y='72' font-family='Arial,sans-serif' font-size='68' font-weight='700' text-anchor='middle' fill='%23C0392B'%3EG%3C/text%3E%3C/svg%3E">
+  {% include "_tema_script.html" %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/gestfila.css') }}">
   <style>
     :root {
       /* Tons próprios do painel de TV (fundo escuro) - nunca fizeram parte da
          paleta oficial de gestfila.css (essa é do sistema administrativo);
          só formalizados aqui como variável nomeada (adendo do redesign do
-         painel de TV) - os valores em si não mudaram. */
+         painel de TV) - os valores em si não mudaram. Continuam sendo o
+         padrão/automático (dark mode etapa 2, BLUEPRINT.md) - é a aparência
+         de sempre desta tela, só ganhou nome de variável antes de existir
+         qualquer noção de tema. */
       --painel-fundo: #0d1b2a;
       --painel-fundo-header: #13263b;
       --painel-fundo-elemento: #1b2e42;
       --painel-texto-secundario: #9fb3c8;
+      /* Nova nesta etapa: era um #fff fixo em vários seletores (cabeçalho,
+         valor/local da chamada) - precisava de nome pra poder inverter no
+         tema claro novo (ver [data-theme="light"] abaixo). */
+      --painel-texto-principal: #ffffff;
+
+      /* --gf-* usados nesta tela (primaria/primaria-escura/sucesso/alerta/
+         info - direto em painel/tv.html; cinza-medio via .gf-watermark de
+         gestfila.css, único lugar do projeto que usa essa classe), FIXADOS
+         aqui nos valores canônicos de gestfila.css - o painel de TV tem o
+         PRÓPRIO esquema claro/escuro (--painel-*, acima/abaixo),
+         independente do tema escolhido no admin/atendimento/etc. Sem este
+         pin, o bloco [data-theme="dark"] de gestfila.css mudaria a cor da
+         marca aqui também, quebrando "não muda o visual atual quando o tema
+         for escuro" (o visual ATUAL já usa estes valores canônicos, não os
+         redefinidos pro resto do site). Especificidade igual à de
+         [data-theme="dark"] (0,1,0) - como este bloco vem DEPOIS de
+         gestfila.css no documento, ele vence o empate, sempre. */
+      --gf-primaria: #C0392B;
+      --gf-primaria-escura: #922B21;
+      --gf-sucesso: #27AE60;
+      --gf-alerta: #E67E22;
+      --gf-info: #2980B9;
+      --gf-cinza-medio: #95A5A6;
+    }
+    /* Paleta CLARA nova (não existia antes desta etapa) - só ativa quando o
+       usuário escolhe tema "claro" (ou "automático" com o SO em claro). O
+       tema escuro (acima) continua sendo o padrão/[data-theme="dark"]
+       implícito - esta tela nunca teve um "estado claro" antes, então não
+       há aparência anterior pra preservar aqui, diferente do resto do
+       projeto (onde o claro É o padrão histórico e o escuro é o novo). */
+    [data-theme="light"] {
+      --painel-fundo: #eef1f4;
+      --painel-fundo-header: #ffffff;
+      --painel-fundo-elemento: #ffffff;
+      --painel-texto-secundario: #5a6b7b;
+      --painel-texto-principal: #1a2530;
     }
     * { box-sizing: border-box; }
     html, body {
       margin: 0; height: 100%;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      background: var(--painel-fundo); color: #fff;
+      background: var(--painel-fundo); color: var(--painel-texto-principal);
     }
     .painel { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
@@ -43,7 +83,7 @@
        GESTFILA + nome da unidade/TV). */
     .cabecalho-logo-empresa { max-height: 36px; max-width: 140px; }
     .cabecalho-unidade {
-      font-size: 1.15rem; font-weight: 600; color: #fff;
+      font-size: 1.15rem; font-weight: 600; color: var(--painel-texto-principal);
       padding-left: 1rem; border-left: 1px solid var(--painel-fundo-elemento);
     }
     .cabecalho-info { display: flex; align-items: center; gap: 1.25rem; font-variant-numeric: tabular-nums; }
@@ -54,7 +94,7 @@
 
     #status-conexao {
       font-size: .85rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
-      padding: .4rem 1rem; border-radius: 999px; background: #2a3b4d; transition: background-color .3s ease;
+      padding: .4rem 1rem; border-radius: 999px; background: var(--painel-fundo-elemento); transition: background-color .3s ease;
     }
     #status-conexao.conectado { background: var(--gf-sucesso); }
     #status-conexao.reconectando { background: var(--gf-alerta); }
@@ -121,7 +161,7 @@
       to { opacity: 1; transform: scale(1); }
     }
     @keyframes chamada-destaque {
-      from { box-shadow: 0 0 70px -4px rgba(192, 57, 43, .95); border-color: #fff; }
+      from { box-shadow: 0 0 70px -4px rgba(192, 57, 43, .95); border-color: var(--painel-texto-principal); }
       to { box-shadow: 0 0 40px -12px rgba(192, 57, 43, .55); border-color: var(--gf-primaria); }
     }
     .chamada-atual.animar {
@@ -139,7 +179,13 @@
        inline-flex` acima - mesma correção já documentada em
        atendimento/_layout.html (a especificidade empatada faria o
        `display: inline-flex` vencer o `[hidden]` nativo do navegador, sem
-       essa regra própria). */
+       essa regra própria). Continua fundo #fff fixo na etapa 2 (dark mode) -
+       não precisa virar var(--gf-superficie)/var(--painel-*): o alto
+       contraste "fixo, não importa dados.cor" É o requisito, então o fundo
+       nunca deveria mudar por tema também; `color`/`border` seguem usando
+       var(--gf-primaria-escura), que fica PINADA acima (:root deste
+       arquivo) no valor canônico sempre, então o contraste continua correto
+       nos dois temas do painel sem precisar de mais nada aqui. */
     .chamada-badge-prioritario {
       display: inline-flex; align-items: center; gap: .4rem;
       font-size: clamp(.9rem, 1.4vw, 1.2rem); font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
@@ -151,7 +197,7 @@
 
     .chamada-atual-rotulo {
       font-size: clamp(1rem, 1.6vw, 1.4rem); font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
-      color: #fff; background: var(--gf-primaria); border-radius: 999px;
+      color: var(--painel-texto-principal); background: var(--gf-primaria); border-radius: 999px;
       padding: .4rem 1.4rem; margin: 0 0 1rem;
     }
     .chamada-atual-valor {
@@ -160,7 +206,7 @@
          pouco (pedido do cliente) pra dar mais equilíbrio visual com
          "Últimas chamadas", aumentada ao lado. */
       font-size: clamp(100px, min(12vw, 20vh), 220px);
-      font-weight: 800; line-height: 1; margin: 0; color: #fff;
+      font-weight: 800; line-height: 1; margin: 0; color: var(--painel-texto-principal);
     }
     /* Correção do Problema 2 (chamada por nome): nome de paciente é texto de
        comprimento IMPREVISÍVEL (1 palavra a um nome composto inteiro) -
@@ -179,7 +225,7 @@
     .chamada-atual-local {
       /* Reduzido na mesma proporção de .chamada-atual-valor acima (pedido do
          cliente), pra manter o card coerente entre si. */
-      font-size: clamp(50px, min(5vw, 9vh), 110px); font-weight: 700; line-height: 1.1; margin: 0; color: #fff;
+      font-size: clamp(50px, min(5vw, 9vh), 110px); font-weight: 700; line-height: 1.1; margin: 0; color: var(--painel-texto-principal);
     }
 
     /* Correção do Bloco 1.2: com poucos itens, a lista ficava ancorada no
@@ -224,5 +270,7 @@
      informação real da tela (senha/local chamados), só um lembrete de marca
      no canto, baixa opacidade. #}
   <span class="gf-logo gf-watermark"><span class="gf-logo-gest">GEST</span><span class="gf-logo-fila">FILA</span></span>
+  {% from "_alternador_tema.html" import alternador_tema %}
+  {{ alternador_tema(flutuante=True) }}
 </body>
 </html>

@@ -168,7 +168,13 @@ ok("Geração de senha funciona normalmente mesmo sem nome_impressora_windows (l
 with app.app_context():
     id_senha_sem_endereco = Senha.query.filter_by(codigo="LAB001").first().id
 
-corpo_script = texto[texto.index("<script>"):texto.index("</script>")]
+# Ancorado em "var URL_RETORNO" (só existe no script de negócio desta tela),
+# não no primeiro "<script>" do documento - dark mode (etapa 2, BLUEPRINT.md)
+# passou a injetar um <script> de tema no <head>, antes deste; pegar o
+# PRIMEIRO <script> do documento pegaria o de tema, não o de impressão.
+indice_ancora = texto.index("var URL_RETORNO")
+inicio_script = texto.rindex("<script>", 0, indice_ancora)
+corpo_script = texto[inicio_script:texto.index("</script>", indice_ancora)]
 
 # ===========================================================================
 # C) window.print() dispara automaticamente ao carregar, guardado por
@@ -230,8 +236,16 @@ ok("Botão manual chama a mesma função de impressão, sem depender do guard - 
 #      corrida; sem diálogo, não há essa folga. Não é bug de rede/webfont
 #      (nunca foi) - é puramente ordem de parsing, por isso a correção é só
 #      reordenar os dois blocos, sem nenhum setTimeout/await novo.
-#      IMPORTANTE: usar rindex/índice do <script> LOCAL (o único que existe
-#      no documento inteiro, então texto.index("<script>") já é ele), mas
+#      IMPORTANTE (atualizado - dark mode etapa 2, BLUEPRINT.md, passou a
+#      injetar OUTROS <script>/<style> no documento): texto.index("<script>")
+#      sozinho não é mais garantia de achar o <script> do CUPOM - o <head> de
+#      totem/_layout.html agora tem um <script> de tema (_tema_script.html)
+#      ANTES de tudo, e o <body> ganhou um <script> de resync do botão de
+#      tema (_alternador_tema.html) DEPOIS do conteúdo - o do cupom não é
+#      mais nem o primeiro nem o último <script> do documento. Por isso
+#      ancorado em "var URL_RETORNO" (só existe no script do cupom) - acha
+#      o <script> que abre IMEDIATAMENTE ANTES dessa âncora, não importa
+#      quantos outros <script> existam antes ou depois no documento.
 #      texto.index("<style>") sozinho pegaria o <style> de _layout.html
 #      (dentro do <head>, sempre antes de qualquer conteúdo do body) e
 #      passaria mesmo com o <style>/<script> do CUPOM na ordem errada - foi
@@ -242,14 +256,10 @@ ok("Botão manual chama a mesma função de impressão, sem depender do guard - 
 #      cupom só tem UM <style> - como o do layout vem sempre primeiro (é
 #      do <head>, sempre antes do <body>), o ÚLTIMO <style> do documento
 #      inteiro É necessariamente o do cupom, esteja ele antes OU depois do
-#      <script> (que também é único no documento). Um rindex limitado a
-#      "antes do <script>" (tentativa anterior) falha nesse exato cenário:
-#      se o <style> do cupom estiver DEPOIS do <script> (bug revertido de
-#      propósito nesta sanity check), a busca limitada só encontra de novo
-#      o <style> do layout, e a asserção passa mesmo com o bug presente -
-#      foi exatamente isso que escondeu a regressão no sanity check.
+#      <script> do cupom.
 # ===========================================================================
-indice_script_cupom = texto.index("<script>")
+indice_ancora_cupom = texto.index("var URL_RETORNO")
+indice_script_cupom = texto.rindex("<script>", 0, indice_ancora_cupom)
 indice_style_cupom = texto.rindex("<style>")
 assert indice_style_cupom < indice_script_cupom
 ok("<style> do CUPOM (não o do _layout.html) vem antes do <script> (que chama window.print()) - CSSOM completo antes de qualquer script rodar")

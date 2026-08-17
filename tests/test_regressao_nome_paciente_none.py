@@ -14,6 +14,7 @@ Execução: python -m tests.test_regressao_nome_paciente_none (a partir da raiz 
 projeto, com o virtualenv ativado).
 """
 import os
+import re
 from datetime import datetime
 
 os.environ.setdefault("SECRET_KEY", "test")
@@ -113,7 +114,10 @@ with c_recepcao.session_transaction() as sess:
 resp = c_recepcao.get(f"/atendimento/recepcao/filas/{ids['fila_a']}")
 assert resp.status_code == 200
 texto = resp.data.decode("utf-8")
-html_sem_script = texto.split("<script")[0]
+# Remove TODOS os blocos <script>...</script> (não só corta a partir do
+# primeiro) - dark mode (etapa 2, BLUEPRINT.md) passou a injetar um
+# <script> de tema no <head>, antes de qualquer conteúdo real da página.
+html_sem_script = re.sub(r"<script[^>]*>.*?</script>", "", texto, flags=re.DOTALL)
 
 assert 'id="nome" name="nome" value="None"' not in texto
 assert "FA001" in html_sem_script  # confirma que a senha_atual foi de fato renderizada
@@ -138,7 +142,7 @@ ok("GET /filas/<id>/dados: nome_paciente nulo serializado como null (JS trata co
 resp = c_recepcao.get(f"/atendimento/recepcao/local/{ids['local_guiche01']}")
 assert resp.status_code == 200
 texto = resp.data.decode("utf-8")
-html_sem_script = texto.split("<script")[0]
+html_sem_script = re.sub(r"<script[^>]*>.*?</script>", "", texto, flags=re.DOTALL)
 
 assert 'id="nome" name="nome" value="None"' not in texto
 assert "FA001" in html_sem_script

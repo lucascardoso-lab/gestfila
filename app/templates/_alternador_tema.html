@@ -1,0 +1,34 @@
+{# Botão de alternar tema (claro/escuro/automático) - dark mode etapa 2 de 2,
+   BLUEPRINT.md. Um único ícone que CICLA entre os 3 modos a cada clique
+   (claro -> escuro -> automático -> claro -> ...), em vez de um seletor
+   explícito de 3 opções - escolha de UX: é o padrão já visto em várias
+   ferramentas (ex.: VS Code, GitHub) pra essa mesma tríade, cabe num
+   único botão pequeno o bastante pra funcionar tanto dentro do <nav>
+   (pouco espaço) quanto flutuante em telas cheias (totem/painel de TV,
+   sem disputar atenção com o conteúdo real da tela) - um <select>/menu
+   explícito exigiria mais espaço nos dois contextos sem ganho real (só
+   3 opções, cíclico é rápido de entender e usar). O estado atual sempre
+   fica visível pelo ícone (☀️/🌙/🖥️) + `aria-label`/`title` (texto
+   completo, "Tema: X. Clique para alternar."), então ninguém precisa
+   adivinhar em qual dos 3 modos o clique vai cair.
+
+   Toda a lógica (persistência, resolução de "automático",
+   aplicar/alternar) vive em _tema_script.html (window.GestfilaTema),
+   incluído uma vez no <head> - aqui só o MARCADO do botão + uma chamada
+   de resync (o script do <head> já rodou e tentou sincronizar o ícone
+   antes deste botão existir no DOM; esta linha corrige isso assim que
+   ele existe). Import com `alternador_tema()` (sem parênteses de área -
+   nenhum parâmetro necessário) ou `alternador_tema(flutuante=True)` pra
+   telas sem <nav> (totem, painel de TV, base.html) - CSS de
+   `.alternador-tema--flutuante` fica em gestfila.css (compartilhado). #}
+{% macro alternador_tema(flutuante=False) %}
+<button
+  type="button"
+  class="alternador-tema{{ ' alternador-tema--flutuante' if flutuante else '' }}"
+  aria-label="Alternar tema"
+  title="Alternar tema"
+>
+  <span class="alternador-tema-icone" aria-hidden="true">🖥️</span>
+</button>
+<script>if (window.GestfilaTema) { GestfilaTema.aplicar(GestfilaTema.modoAtual()); }</script>
+{% endmacro %}

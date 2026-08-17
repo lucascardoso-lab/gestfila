@@ -11,13 +11,19 @@
    eliminada, conforme pedido; admin tem um <nav> com mais links (precisa de
    quebra de linha/espaçamento próprio, ver .links-nav/.grupo-nav-esquerda
    no CSS dele), então unificar o CSS também exigiria decidir por uma das
-   duas variantes - fora do escopo desta etapa mecânica. #}
+   duas variantes - fora do escopo desta etapa mecânica.
+
+   Dark mode (etapa 2): botão de alternar tema (_alternador_tema.html)
+   incluído aqui dentro, entre os links e o "Sair" - resolve as 4 áreas que
+   usam este partial de uma vez só, sem precisar tocar em cada uma. #}
+{% from "_alternador_tema.html" import alternador_tema %}
 {% macro nav_principal() %}
 <nav>
   <div class="grupo-nav-esquerda">
     <span class="gf-logo gf-logo--navbar gf-logo--claro"><span class="gf-logo-gest">GEST</span><span class="gf-logo-fila">FILA</span></span>
     {{ caller() }}
   </div>
+  {{ alternador_tema() }}
   <a href="{{ url_for('auth.logout') }}">Sair ({{ current_user.nome }})</a>
 </nav>
 {% endmacro %}

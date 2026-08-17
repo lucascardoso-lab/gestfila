@@ -1,0 +1,82 @@
+{# Script de tema (claro/escuro/automático) - dark mode etapa 2 de 2, ver
+   BLUEPRINT.md. Incluído no <head> das 7 "áreas-raiz" (base.html, admin/
+   _layout.html, atendimento/_layout.html, relatorios/_layout.html,
+   core/dashboard.html, totem/_layout.html, painel/_layout.html), ANTES do
+   <link> de gestfila.css - roda de forma síncrona assim que o parser chega
+   aqui, aplicando `data-theme` no <html> antes do CSSOM terminar de montar,
+   evitando o "flash" do tema errado no primeiro paint.
+
+   Preferência persistida em localStorage POR NAVEGADOR (não por conta/
+   usuário) - inclusive nas telas de totem/TV, que são públicas/kiosk sem
+   "dono": risco aceito EXPLICITAMENTE pelo cliente (documentado na íntegra
+   no adendo 10.55 do BLUEPRINT - só a referência aqui, sem repetir o texto).
+
+   `window.GestfilaTema` fica exposto global de propósito: o botão de
+   alternar (_alternador_tema.html) é renderizado mais abaixo no <body>,
+   bem depois deste script já ter rodado - expor as funções aqui (em vez de
+   uma IIFE fechada) é o que permite o clique no botão, chegando bem
+   depois, continuar chamando a MESMA lógica de aplicar/persistir tema. #}
+<script>
+  window.GestfilaTema = (function () {
+    var CHAVE = "gestfila_tema";
+    var ORDEM = ["light", "dark", "auto"];
+    var ROTULOS = { light: "Claro", dark: "Escuro", auto: "Automático" };
+    var ICONES = { light: "☀️", dark: "🌙", auto: "🖥️" };
+
+    function modoAtual() {
+      var salvo = localStorage.getItem(CHAVE);
+      return ORDEM.indexOf(salvo) !== -1 ? salvo : "auto";
+    }
+
+    // "auto" nunca é um valor de data-theme válido pro CSS ([data-theme="dark"]
+    // em gestfila.css) - sempre resolvido pra "light"/"dark" de verdade aqui,
+    // a partir da preferência do SO, antes de virar atributo.
+    function resolvido(modo) {
+      if (modo === "auto") {
+        return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+      return modo;
+    }
+
+    function aplicar(modo) {
+      document.documentElement.setAttribute("data-theme", resolvido(modo));
+      // Sincroniza ícone/rótulo de QUALQUER botão já presente no DOM neste
+      // momento - inofensivo se nenhum existir ainda (ex.: esta 1ª chamada,
+      // ainda no <head>, antes do <body> ser parseado); o botão se
+      // ressincroniza sozinho ao renderizar (ver _alternador_tema.html).
+      document.querySelectorAll(".alternador-tema").forEach(function (botao) {
+        var elIcone = botao.querySelector(".alternador-tema-icone");
+        if (elIcone) elIcone.textContent = ICONES[modo];
+        var rotulo = "Tema: " + ROTULOS[modo] + ". Clique para alternar.";
+        botao.setAttribute("aria-label", rotulo);
+        botao.title = rotulo;
+      });
+    }
+
+    function alternar() {
+      var proximo = ORDEM[(ORDEM.indexOf(modoAtual()) + 1) % ORDEM.length];
+      localStorage.setItem(CHAVE, proximo);
+      aplicar(proximo);
+    }
+
+    // Aplicado já na primeira execução (antes do <link rel="stylesheet"> de
+    // gestfila.css sequer terminar de carregar) - é isto que evita o flash.
+    aplicar(modoAtual());
+
+    // Em modo automático, acompanha em tempo real se o SO mudar de tema
+    // (ex.: virou a noite, o sistema operacional trocou sozinho) - sem
+    // precisar recarregar a página.
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () {
+      if (modoAtual() === "auto") aplicar("auto");
+    });
+
+    // Delegado em document (não no botão): funciona pro botão que ainda nem
+    // existe no DOM neste momento (este script roda no <head>, o botão só
+    // aparece mais abaixo no <body>).
+    document.addEventListener("click", function (ev) {
+      if (ev.target.closest(".alternador-tema")) alternar();
+    });
+
+    return { modoAtual: modoAtual, aplicar: aplicar, alternar: alternar };
+  })();
+</script>

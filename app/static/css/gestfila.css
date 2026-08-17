@@ -58,7 +58,88 @@
      decidida aqui; nomear a variável já deixa esse ponto explícito pra quem
      for decidir depois, sem mudar o valor agora. */
   --gf-nav-texto: #CFD6E4;
+  /* Achada ao implementar a etapa 2 (dark mode em si): --gf-cinza-escuro é
+     usada tanto como TEXTO escuro-sobre-claro (papel que precisa inverter no
+     tema escuro) quanto como FUNDO do <nav> e do botão "navegação" do totem
+     (papel que precisa ficar FIXO - o <nav> é uma barra propositalmente
+     escura em qualquer tema, mesma decisão já tomada pra --gf-nav-texto na
+     etapa 1). As duas coisas não podem continuar na mesma variável. Extraída
+     aqui como uma variável própria, com o valor atual de --gf-cinza-escuro,
+     NÃO redefinida no bloco [data-theme="dark"] abaixo - libera
+     --gf-cinza-escuro pra inverter livremente como texto, sem quebrar o
+     <nav>. Usada em admin/atendimento/relatorios/_layout.html,
+     core/dashboard.html (fundo do <nav>) e totem/_layout.html
+     (.botao-totem.navegacao). */
+  --gf-escuro-fixo: #2C3E50;
 }
+
+/* ETAPA 2 (dark mode) - redefinição das 15 variáveis "temáticas" acima
+   (das 18 no :root, --gf-branco/--gf-nav-texto/--gf-escuro-fixo ficam DE
+   FORA de propósito - são constantes, não mudam de valor por tema, ver
+   comentário de cada uma acima). Valores escolhidos seguindo convenção
+   usual de dark mode (fundo neutro escuro, texto claro, tons de destaque
+   mais claros/saturados que a versão clara pra manter contraste legível
+   em fundo escuro) - não é uma auditoria formal de acessibilidade, mas
+   texto realmente legível, não só "tecnicamente diferente". Aplicado via
+   atributo `data-theme="dark"` no <html> (ver app/templates/
+   _tema_script.html) - nunca `prefers-color-scheme` direto no CSS, porque
+   o modo "automático" só é UMA das 3 opções do usuário (claro/escuro/
+   automático), resolvida em JS pra um valor concreto antes de chegar aqui. */
+[data-theme="dark"] {
+  /* --gf-primaria mais claro/saturado que o original (#C0392B) - o valor
+     claro já teria contraste baixo demais como TEXTO (não só fundo de
+     botão) sobre um fundo escuro (ex.: .exportar a, .kpi-numero,
+     .cartao-numero, que usam --gf-primaria como color, não background). */
+  --gf-primaria: #E5533F;
+  --gf-primaria-escura: #FF8A75;
+  --gf-primaria-clara: #4A2420;
+  --gf-cinza-escuro: #E8EAED;
+  --gf-cinza-medio: #8B96A0;
+  --gf-cinza-claro: #16181C;
+  --gf-sucesso: #4FCE7D;
+  --gf-alerta: #F0A24E;
+  --gf-info: #5DADE2;
+  --gf-superficie: #24272D;
+  --gf-texto-secundario: #A7AFB8;
+  --gf-borda: #34383F;
+  --gf-info-fundo: #1E2E38;
+  --gf-alerta-fundo: #3A2E1C;
+  --gf-sucesso-fundo: #1C3327;
+}
+
+/* Gap achado ao implementar a etapa 2: <input>/<select>/<textarea> nunca
+   tiveram background/color própria em nenhum layout (só border) - no tema
+   claro isso não aparecia porque o valor por padrão do NAVEGADOR (fundo
+   branco, texto escuro) já coincidia por acaso com --gf-superficie/
+   --gf-cinza-escuro claros; no tema escuro os campos ficariam brancos
+   "flutuando" numa página escura sem esta regra. Sem efeito visual nenhum
+   no tema claro (mesmos valores que já eram aplicados por padrão), só
+   corrige o tema escuro. */
+input, select, textarea {
+  background: var(--gf-superficie);
+  color: var(--gf-cinza-escuro);
+}
+
+/* Botão de alternar tema (_alternador_tema.html) - dois contextos:
+   dentro do <nav> (fundo sempre --gf-escuro-fixo, ver etapa 2) e flutuante
+   em telas sem nav (totem/painel de TV/login). Compartilhado aqui (não no
+   <style> de cada layout) porque aparece nas 7 áreas-raiz de uma vez. */
+.alternador-tema {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 44px; min-height: 44px; padding: 0;
+  border: none; border-radius: 8px; background: rgba(255, 255, 255, .12);
+  color: var(--gf-branco); font-size: 1.15rem; line-height: 1; cursor: pointer;
+}
+.alternador-tema:hover { background: rgba(255, 255, 255, .22); }
+/* Variante flutuante (sem <nav> pra encaixar) - superfície própria
+   (var(--gf-superficie), já reage ao tema) em vez do fundo semi-transparente
+   acima, que só funciona sobre o fundo escuro fixo do <nav>. */
+.alternador-tema--flutuante {
+  position: fixed; bottom: 1.25rem; right: 1.25rem; z-index: 9997;
+  background: var(--gf-superficie); color: var(--gf-cinza-escuro);
+  border: 1px solid var(--gf-borda); box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
+}
+.alternador-tema--flutuante:hover { background: var(--gf-borda); }
 
 /* Logo tipográfico "GESTFILA" - puro HTML/CSS, sem imagem/arquivo externo.
    "GEST" usa --gf-cinza-escuro por padrão (funciona sobre fundos claros -
