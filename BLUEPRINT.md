@@ -4668,6 +4668,59 @@ totem_botoes.py`, `app/admin/totens.py`, `app/admin/tvs.py`, `app/admin/
 unidades.py`, `app/admin/usuarios.py` (flag em todos os `render_template`
 das 10 rotas); novo `tests/test_regressao_admin_editar_contexto.py`.
 
+> **Regression + varredura completa (mesma investigação, achada em teste
+> real pós-deploy):** o filtro por unidade do item 1 acima não funcionava de
+> verdade em produção - o atributo `hidden` era setado certinho pelo JS
+> (`item.hidden = !mesmaUnidade`), mas o item continuava visível. Causa raiz:
+> `[hidden] { display: none; }` é uma declaração de origem **UA** (folha de
+> estilo padrão do navegador) - QUALQUER `display:` de origem **AUTOR** que
+> combine com o elemento sempre vence uma declaração UA normal na cascata,
+> **independente da especificidade relativa entre os dois seletores**.
+> `.checkboxes label { display: flex; ... }` (`admin/_layout.html`) tem
+> exatamente esse conflito, sem nenhuma regra `[hidden]` própria pra vencer.
+>
+> **Este é o MESMO padrão já corrigido DUAS vezes antes** neste projeto -
+> `atendimento/_layout.html::.aviso-encerramento` (seção 10.18) e
+> `painel/tv.html::.chamada-badge-prioritario` (redesign do painel de TV) -
+> cada uma com sua própria regra `[seletor][hidden] { display: none; }`. Por
+> ser a 3ª ocorrência do mesmo padrão, virou varredura completa (mesmo
+> princípio já aplicado várias vezes nesta sessão: achado pontual não fica
+> isolado, procura-se o padrão inteiro) em vez de corrigir só o caso
+> reportado:
+>
+> | Elemento | Seletor que o atinge | `display:` de autor? | Status antes da varredura |
+> |---|---|---|---|
+> | `.checkboxes label` (admin/locais/form.html) | `.checkboxes label` | `display: flex` | **quebrado** |
+> | `.selecionado-redirecionar` (atendimento/_redirecionar_busca.html) | `.selecionado-redirecionar` | `display: flex` | **quebrado (achado novo)** |
+> | `.aviso-encerramento` (atendimento/_layout.html) | `.aviso-encerramento` | `display: flex` | já corrigido (seção 10.18) |
+> | `.chamada-badge-prioritario` (painel/tv.html) | `.chamada-badge-prioritario` | `display: inline-flex` | já corrigido |
+> | `#vazio-filas-turno`/`.vazio`, `#erro-turno`/`.flash.error`, `#aviso-bloqueio`/`.flash.aviso` (×2), `#dropdown-redirecionar`/`.dropdown-redirecionar`, `#busca-redirecionar`/`.busca-redirecionar` | — | nenhum `display:` de autor | seguro (só `display` de UA no elemento, `[hidden]` UA já vence por especificidade dentro da mesma origem) |
+>
+> **Segundo caso quebrado, achado só nesta varredura:**
+> `.selecionado-redirecionar` (o balão "→ Redirecionando para: X" do widget
+> de busca, `atendimento/_redirecionar_busca.html`, incluído tanto por
+> `painel_fila.html` quanto `painel_local.html` - corrige as duas telas de
+> uma vez) tinha o mesmo problema, nunca reportado por não ter sido
+> percebido visualmente ainda.
+>
+> **Correção:** regra própria em cada um dos dois arquivos, mesma técnica já
+> validada nos dois casos anteriores - `.checkboxes label[hidden] {
+> display: none; }` (`admin/_layout.html`) e `.selecionado-redirecionar
+> [hidden] { display: none; }` (`atendimento/_redirecionar_busca.html`).
+> Nenhuma mudança no JS (`filtrarFilasPorUnidade()` já estava correto - o
+> bug era 100% CSS, sem nenhum erro visível no console, exatamente o motivo
+> de valer a pena a varredura em vez de confiar em "parece que devia
+> funcionar").
+>
+> **Testes:** novo `tests/test_regressao_hidden_display_sweep.py` (3 casos)
+> - confirma a regra `[hidden] { display: none; }` própria presente pra cada
+> seletor corrigido, extraindo o corpo exato da regra (mesmo padrão já usado
+> em `test_regressao_encerramento_automatico.py`/`test_regressao_painel_tv_
+> redesign.py` pros dois casos anteriores) - inclui chamar uma senha de
+> verdade em `painel_local` antes de checar (o widget só é incluído ali
+> quando há `senha_atual`, diferente de `painel_fila`). Suíte completa (56
+> arquivos) sem falhas.
+
 ---
 
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+

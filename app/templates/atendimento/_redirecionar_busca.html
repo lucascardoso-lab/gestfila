@@ -55,6 +55,16 @@
     padding: .7rem .9rem; min-height: 44px; box-sizing: border-box;
     background: var(--gf-primaria-clara); border-radius: 8px; font-size: .95rem;
   }
+  /* Bug corrigido (varredura completa do mesmo padrão já visto em
+     atendimento/_layout.html::.aviso-encerramento, painel/tv.html::
+     .chamada-badge-prioritario e admin/_layout.html::.checkboxes label):
+     `display: flex` acima, de origem AUTOR, sempre vence `[hidden] {
+     display: none }` da folha de estilo do navegador (UA) - sem esta
+     regra própria, elSelecionado.hidden = true/false (JS abaixo) setava
+     o atributo certo, mas o balão "→ Redirecionando para: X" nunca
+     sumia/aparecia de verdade. Incluído por painel_fila.html E
+     painel_local.html - corrige as duas telas de uma vez. */
+  .selecionado-redirecionar[hidden] { display: none; }
   .dropdown-redirecionar {
     list-style: none; margin: .3rem 0 0; padding: .3rem 0; position: absolute; z-index: 20;
     left: 0; right: 0; max-height: 320px; overflow-y: auto;

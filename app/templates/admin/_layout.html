@@ -80,6 +80,18 @@
       display: flex; align-items: center; gap: .4rem; font-size: .85rem;
       background: var(--gf-cinza-claro); padding: .4rem .7rem; border-radius: 8px; margin-top: 0;
     }
+    /* Bug corrigido (mesmo padrão já visto em atendimento/_layout.html::
+       .aviso-encerramento e painel/tv.html::.chamada-badge-prioritario):
+       `display: flex` acima é declaração de origem AUTOR - sempre vence
+       `[hidden] { display: none }` da folha de estilo do NAVEGADOR (UA),
+       não importa a especificidade relativa entre os dois seletores, já
+       que origem autor tem prioridade sobre origem UA na cascata pra
+       declarações normais. Sem esta regra própria, `item.hidden = true`
+       (admin/locais/form.html, filtro de "Filas de destino permitidas"
+       por unidade) seta o atributo `hidden` de verdade no DOM, mas o
+       item continua visível, porque nada aqui derruba o `display: flex`
+       de cima. */
+    .checkboxes label[hidden] { display: none; }
     .flash { padding: .6rem .8rem; border-radius: 8px; margin-bottom: 1rem; font-size: .9rem; }
     .flash.error { background: var(--gf-primaria-clara); color: var(--gf-primaria-escura); }
     .flash.info { background: #eaf2f8; color: var(--gf-info); }
