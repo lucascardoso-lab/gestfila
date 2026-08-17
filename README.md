@@ -182,6 +182,8 @@ As instruções abaixo assumem um servidor Ubuntu/Debian limpo e usam `/var/www/
     Sem domínio, o navegador vai mostrar aviso de "conexão não segura" na primeira vez em cada dispositivo — normal nesse cenário. Anote a data de expiração (825 dias) para renovar manualmente.
 
 11. **Configurar o Apache (proxy reverso + SSL)**
+
+    `SEU_IP_INTERNO` aparece **3 vezes** neste bloco (as duas linhas `ServerName` + a linha `Redirect permanent`) — troque as 3 antes de salvar. Esquecer a linha `Redirect` especificamente quebra o redirecionamento HTTP→HTTPS **em silêncio** (sem erro no `apache2ctl configtest`, o navegador só "não redireciona") — já aconteceu numa instalação real.
     ```bash
     sudo a2dissite 000-default
     sudo nano /etc/apache2/sites-available/gestfila-ssl.conf

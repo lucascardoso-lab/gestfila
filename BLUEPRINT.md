@@ -5343,6 +5343,69 @@ Suíte completa (62 arquivos) sem falhas.
 
 ---
 
+## 10.59. ADENDO — 3 achados de uma instalação real em produção (Ubuntu 24 LTS, seguindo o README do zero)
+
+> Diferente dos adendos anteriores, os 3 itens abaixo **não vieram de revisão
+> de código nem de teste automatizado** - vieram de seguir o guia "Instalação
+> em produção" do README passo a passo, num servidor Ubuntu 24 LTS limpo,
+> pela primeira vez. Nenhum é um bug de comportamento do GESTFILA em si -
+> são gaps do processo de deploy/dependências que só aparecem no caminho
+> real de uma instalação nova, não em `python -m tests.*` nem em uso normal
+> do sistema já rodando.
+
+**1) `requirements.txt` não listava o `gunicorn`.** Fazia sentido pra
+desenvolvimento/teste local (a suíte usa `python -m tests.*`, nunca sobe um
+servidor WSGI de produção) - mas quebra silenciosamente uma instalação nova:
+o erro só aparece no `systemctl start`, como `203/EXEC` genérico, sem
+apontar pra causa raiz (o `venv` simplesmente não tem o executável
+`gunicorn`). `eventlet` já estava listado (confirmado com `pip install
+eventlet` respondendo "already satisfied" logo após `pip install -r
+requirements.txt`) - só o `gunicorn` em si faltava.
+
+**2) `gunicorn==26.0.0` removeu o worker `eventlet`.** Achado e reproduzido
+no servidor real: a versão mais nova do PyPI na hora da instalação (26.0.0)
+não tem mais `gunicorn.workers.geventlet` (confirmado via `ls
+venv/.../gunicorn/workers/` - sem `geventlet.py` na lista) e recusa até o
+extra `pip install "gunicorn[eventlet]"` (warning explícito do pip: "gunicorn
+26.0.0 does not provide the extra 'eventlet'"). `gunicorn==22.0.0` testado
+no MESMO servidor, MESMO `venv`, MESMO comando (`--worker-class eventlet`) -
+subiu limpo ("Using worker: eventlet", sem erro).
+
+**Decisão do pin:** investigado antes de decidir - nenhum outro lugar do
+projeto (`deploy/gunicorn.conf.py`, CI, `run.py`) já fixava uma versão de
+Gunicorn; não havia uma referência pra reaproveitar. Optado por
+**pin exato** (`gunicorn==22.0.0`), não uma faixa (`gunicorn<23`) - sem
+acesso a uma pesquisa que confirmasse que TODA a série 22.x/pré-23 mantém o
+worker eventlet, o único valor com confirmação real de funcionar hoje é
+exatamente esse. Comentário no próprio `requirements.txt` documenta o
+porquê e avisa para não presumir que a faixa inteira funciona sem testar de
+novo antes de mudar o pin.
+
+**3) Guia do README - `SEU_IP_INTERNO` aparece 3 vezes no bloco do Apache**
+(as duas linhas `ServerName` + a linha `Redirect permanent`, passo 11) e,
+na instalação real, as duas linhas `ServerName` foram trocadas mas a linha
+`Redirect` foi esquecida - o `apache2ctl configtest` não acusa nada (a
+sintaxe continua válida com o placeholder literal ali), o Apache sobe
+normal, e o único sintoma é o redirecionamento HTTP→HTTPS simplesmente não
+acontecer - silencioso o bastante pra passar despercebido na primeira
+instalação. Adicionada uma nota explícita no passo 11 do README avisando
+das 3 ocorrências antes do bloco de configuração.
+
+**Implementação:**
+- `requirements.txt` - adicionado `gunicorn==22.0.0` (com o comentário do
+  porquê do pin exato), logo após `eventlet` (os dois trabalham juntos em
+  produção - `gunicorn --worker-class eventlet`).
+- `README.md` (seção "Instalação em produção", passo 11) - nota sobre as 3
+  ocorrências de `SEU_IP_INTERNO` adicionada antes do bloco `apache`.
+
+**Testes:** suíte completa reexecutada após reinstalar as dependências
+localmente (com `gunicorn` agora presente no `venv`) - nenhum teste depende
+da ausência do Gunicorn no ambiente, nenhuma regressão.
+
+Suíte completa sem falhas.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da
