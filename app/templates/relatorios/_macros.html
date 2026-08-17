@@ -34,11 +34,11 @@
     {% endif %}
     <div>
       <label for="data_inicio">De</label>
-      <input type="text" id="data_inicio" name="data_inicio" value="{{ filtros.data_inicio_str }}" placeholder="AAAA-MM-DD">
+      <input type="date" id="data_inicio" name="data_inicio" value="{{ filtros.data_inicio_str }}">
     </div>
     <div>
       <label for="data_fim">Até</label>
-      <input type="text" id="data_fim" name="data_fim" value="{{ filtros.data_fim_str }}" placeholder="AAAA-MM-DD">
+      <input type="date" id="data_fim" name="data_fim" value="{{ filtros.data_fim_str }}">
     </div>
     <div>
       <button class="botao" type="submit">Filtrar</button>

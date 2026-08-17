@@ -1,11 +1,12 @@
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 from flask import g, request
 
 from app.admin.helpers import filas_da_empresa, unidades_da_empresa
 from app.models import Unidade, Usuario
+from app.utils.tempo import agora_na_clinica, janela_dia_clinica_em_utc
 
 
 @dataclass
@@ -59,14 +60,16 @@ def resolver_filtros(empresa):
     então não há tentativa de adivinhar um ID por tentativa e erro que justifique
     um 404; o pior caso é o relatório sair sem aquele filtro aplicado.
     """
-    hoje = date.today()
+    agora_clinica = agora_na_clinica()
+    hoje = agora_clinica.date()
+    fuso = agora_clinica.tzinfo
 
-    data_inicio_str = request.args.get("data_inicio") or (hoje - timedelta(days=30)).isoformat()
+    data_inicio_str = request.args.get("data_inicio") or hoje.isoformat()
     try:
-        data_inicio = datetime.strptime(data_inicio_str, "%Y-%m-%d")
+        data_inicio_data = datetime.strptime(data_inicio_str, "%Y-%m-%d").date()
     except ValueError:
-        data_inicio = datetime.combine(hoje - timedelta(days=30), datetime.min.time())
-        data_inicio_str = data_inicio.date().isoformat()
+        data_inicio_data = hoje
+        data_inicio_str = hoje.isoformat()
 
     data_fim_str = request.args.get("data_fim") or hoje.isoformat()
     try:
@@ -74,7 +77,14 @@ def resolver_filtros(empresa):
     except ValueError:
         data_fim_data = hoje
         data_fim_str = hoje.isoformat()
-    data_fim_exclusivo = datetime.combine(data_fim_data + timedelta(days=1), datetime.min.time())
+
+    # data_inicio_data/data_fim_data são dias CIVIS da clínica (o usuário escolhe
+    # no calendário pensando no dia local), mas Senha.criada_em é gravado em UTC
+    # naive (seção 8) - um datetime.combine(...) direto, sem passar pela mesma
+    # conversão fuso->UTC de janela_dia_clinica_em_utc() (10.39/10.44), reabriria
+    # o mesmo bug de 3h já corrigido nela, só que neste call-site.
+    data_inicio, _ = janela_dia_clinica_em_utc(datetime.combine(data_inicio_data, datetime.min.time(), tzinfo=fuso))
+    _, data_fim_exclusivo = janela_dia_clinica_em_utc(datetime.combine(data_fim_data, datetime.min.time(), tzinfo=fuso))
 
     unidades_ids_validas = _unidades_ids_visiveis(empresa)
 

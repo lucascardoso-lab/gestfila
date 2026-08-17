@@ -4723,6 +4723,81 @@ das 10 rotas); novo `tests/test_regressao_admin_editar_contexto.py`.
 
 ---
 
+## 10.54. ADENDO — Filtro De/Até dos relatórios: calendário nativo + padrão "hoje" em vez de 30 dias
+
+Pedido do cliente com print de referência (tela "Tempo médio de espera"): os
+campos "De"/"Até" eram `<input type="text">` (placeholder "AAAA-MM-DD"), sem
+nenhum calendário nativo do navegador, e o padrão de "sem filtro na URL" era
+uma janela dos últimos 30 dias.
+
+**Investigação:** as 4 telas de relatório que têm esse filtro
+(`tempo_espera.html`, `tempo_atendimento.html`, `volume.html`, `ranking.html`)
+já compartilham um único partial (`relatorios/_macros.html::form_filtros`) e
+um único resolvedor de filtros (`relatorios/helpers.py::resolver_filtros`) -
+não havia duplicação por tela para corrigir. `relatorios/dashboard.html`
+(dashboard operacional) não tem esse filtro (é uma visão "agora", sem
+período) - fora de escopo. Nenhum outro relatório fora de `relatorios/` usa
+esse mesmo padrão De/Até.
+
+Os campos já usavam formato ISO `AAAA-MM-DD` no valor, exatamente o formato
+que `<input type="date">` espera - trocar `type="text"` por `type="date"` foi
+suficiente pra ganhar o calendário nativo sem nenhuma mudança de parsing no
+back-end (`resolver_filtros` já fazia `datetime.strptime(..., "%Y-%m-%d")`) e
+sem biblioteca nova, alinhado ao restante do admin.
+
+**Correção (2 arquivos):**
+- `relatorios/_macros.html`: `type="text"` → `type="date"` nos dois campos
+  (`data_inicio`, `data_fim`); removido o `placeholder="AAAA-MM-DD"` (sem
+  função em um `<input type="date">`, o navegador já mostra o formato local).
+- `relatorios/_layout.html`: seletor CSS `.filtros input[type="text"]`
+  ampliado para também cobrir `input[type="date"]` (mesmo estilo de borda/
+  padding, senão os campos ficariam sem a formatação já aplicada aos demais).
+- `relatorios/helpers.py::resolver_filtros`: `hoje = date.today()` trocado
+  por `hoje = agora_na_clinica().date()` (fuso da clínica, seção 10.37 - não
+  o fuso do servidor); o padrão de `data_inicio_str`/`data_fim_str` quando
+  ausentes na querystring passou de `hoje - timedelta(days=30)` para `hoje`
+  em ambos os campos (De = Até = hoje).
+
+> **Correção adicional (revisão antes da aprovação) — mesmo bug de 3h da
+> 10.39, reaberto neste call-site:** a primeira versão desta correção montava
+> `data_inicio`/`data_fim_exclusivo` com `datetime.combine(hoje, ...)` -
+> **naive, sem nenhuma conversão de fuso** - comparado direto contra
+> `Senha.criada_em` (gravado em UTC naive, seção 8). `hoje`/as datas De/Até
+> digitadas pelo usuário são dias CIVIS da clínica, não dias em UTC; sem
+> converter, uma senha criada entre 21h e 23:59 de Brasília (já madrugada do
+> dia seguinte em UTC) ficaria de fora do filtro "hoje" - exatamente o mesmo
+> bug que `janela_dia_clinica_em_utc()` (10.39/10.44) foi criada para evitar,
+> só que aqui reaberto num call-site novo. Corrigido reaproveitando essa
+> mesma função: `data_inicio, _ = janela_dia_clinica_em_utc(datetime.combine(
+> data_inicio_data, datetime.min.time(), tzinfo=fuso))` e o mesmo padrão
+> (pegando o segundo elemento da tupla) para `data_fim_exclusivo` a partir de
+> `data_fim_data` - vale tanto pro padrão "hoje" quanto pra qualquer filtro
+> explícito De/Até digitado pelo usuário (o range inteiro estava exposto, não
+> só o default).
+
+**Testes:** novo `tests/test_regressao_relatorios_filtro_data.py` (7 casos),
+com o relógio do servidor SIMULADO (mesmo padrão de `test_regressao_fuso_
+horario.py`, patch de `app.utils.tempo._instante_utc`) às 22h de Brasília -
+dentro da janela onde o bug de 3h se manifestaria se a conversão de fuso não
+estivesse correta. Confirma `type="date"` presente nas 4 telas; confirma que
+uma senha criada às 22h de Brasília (madrugada em UTC) aparece no filtro
+"hoje" sem filtro explícito, e que os campos De/Até vêm preenchidos com o dia
+CIVIL da clínica (não o dia em UTC); confirma que um filtro explícito
+continua funcionando como antes. Suíte completa sem falhas.
+
+**Oportunidades de melhoria notadas, NÃO implementadas (fora do pedido):**
+- `filtros_para_querystring` (usado pelos links de exportar CSV/Excel)
+  reconstrói o filtro a partir de `filtros.data_inicio_str`/`data_fim_str` -
+  com o padrão agora sendo "hoje" em vez de 30 dias, os links de export sem
+  filtro explícito exportam só o dia atual (antes exportavam 30 dias) sim,
+  isso já é o comportamento pedido (consistência De/Até em toda a tela,
+  export incluso) - citado aqui só para registro, não é um bug.
+- Os 4 templates repetem a mesma estrutura de tabela/exportação quase
+  idêntica (cabeçalho, `{% if not linhas %}`, link CSV/Excel) - um partial
+  compartilhado reduziria repetição, mas é refactor sem urgência, não pedido.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da
