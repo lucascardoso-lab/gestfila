@@ -9,7 +9,13 @@ from app.utils.decorators import roles_required
 
 from . import atendimento_bp
 from .filas import PERFIS_OPERACIONAIS
-from .helpers import CHAVE_SESSAO_LOCAL, filas_acessiveis, locais_acessiveis, turno_ativo_do_usuario
+from .helpers import (
+    CHAVE_SESSAO_LOCAL,
+    filas_acessiveis,
+    locais_acessiveis,
+    turno_ativo_do_usuario,
+    ultima_configuracao_filas_do_usuario,
+)
 from .local import _setor_padrao_usuario
 
 
@@ -65,23 +71,29 @@ def _contexto_formulario(filas_selecionadas_iniciais=None, local_selecionado_id=
 @atendimento_bp.route("/iniciar-turno", methods=["GET", "POST"])
 @roles_required(*PERFIS_OPERACIONAIS)
 def iniciar_turno():
-    """Seção 10.19/10.23: tela padronizada como ponto de entrada SEMPRE que um
-    operador (perfis atendente/executor/atendente_executor) faz login - o próprio
-    login já redireciona pra cá (`auth/routes.py::_deve_ir_direto_para_turno`).
+    """Seção 10.19/10.23/10.57: tela padronizada como ponto de entrada SEMPRE que
+    um operador (perfis atendente/executor/atendente_executor) faz login - o
+    próprio login já redireciona pra cá (`auth/routes.py::_deve_ir_direto_para_turno`).
 
-    GET sempre renderiza o formulário - com um turno ativo (`TurnoAtivo`), vem
-    pré-populado com a configuração atual (filas + peso + Local), pra o operador
-    conferir/ajustar antes de confirmar "Iniciar atendimento"; sem turno ativo,
-    vem vazio. Não pula mais direto pra tela de atendimento (comportamento antigo,
-    revertido a pedido do cliente: a tela precisa aparecer em TODO login, nunca
-    ser contornada silenciosamente) - o operador sempre passa por aqui, mesmo
-    reabrindo a sessão com um turno já configurado (recuperação de estado do
-    adendo 10.11 continua valendo: é exatamente o pré-preenchimento que mostra o
-    que já estava salvo, sem o operador precisar reconfigurar do zero)."""
+    GET sempre renderiza o formulário. Não pula mais direto pra tela de
+    atendimento (comportamento antigo, revertido a pedido do cliente na 10.23:
+    a tela precisa aparecer em TODO login, nunca ser contornada silenciosamente)
+    - o operador sempre passa por aqui.
+
+    Pré-população, DUAS fontes independentes (seção 10.57 - reversão deliberada
+    de parte da 10.23, ver BLUEPRINT.md):
+    - FILAS: sempre pré-populadas com a ÚLTIMA configuração salva deste
+      operador (`ultima_configuracao_filas_do_usuario`), MESMO se o turno já
+      foi encerrado por logout/'Encerrar turno'/23h - o operador não precisa
+      remontar a lista de filas toda vez que loga de novo.
+    - LOCAL: só pré-populado se houver um turno ATIVO agora
+      (`turno_ativo_do_usuario`) - continua exigido do zero a cada login
+      quando não há turno em andamento, SEM mudança nesse ponto (decisão
+      explícita: só as filas persistem, não o Local)."""
     turno = turno_ativo_do_usuario(current_user)
 
     if request.method == "GET":
-        filas_iniciais = list(turno.filas_config) if turno is not None else []
+        filas_iniciais = ultima_configuracao_filas_do_usuario(current_user)
         local_inicial = turno.local_id if turno is not None else None
         return render_template("atendimento/iniciar_turno.html", **_contexto_formulario(filas_iniciais, local_inicial))
 

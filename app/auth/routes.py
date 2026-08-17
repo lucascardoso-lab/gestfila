@@ -124,8 +124,19 @@ def logout():
     # continuava True) - no próximo login, 'Iniciar Turno' pré-populava com as
     # filas/Local do turno anterior, mesmo o operador tendo saído de propósito.
     # Um logout explícito é o mesmo sinal de "terminei o turno" que o botão
-    # 'Encerrar turno' (turno.py::encerrar_turno) já tratava - mesmo efeito aqui,
-    # pra sempre logar com a tela 'Iniciar Turno' zerada.
+    # 'Encerrar turno' (turno.py::encerrar_turno) já tratava - mesmo efeito aqui:
+    # marca o turno como inativo, o que libera o Local (não pré-popula mais
+    # sozinho no próximo login - continua exigido do zero) e some da prioridade
+    # do motor de rodízio (turno_ativo_do_usuario filtra ativo=True).
+    #
+    # REVERSÃO PARCIAL DELIBERADA (seção 10.57, BLUEPRINT.md - pedido do
+    # cliente): "pra sempre logar com a tela 'Iniciar Turno' zerada" NÃO vale
+    # mais pra FILAS - a pré-população de filas (turno.py::iniciar_turno, GET)
+    # passou a usar `ultima_configuracao_filas_do_usuario`, que ignora `ativo`
+    # de propósito e sempre mostra a última lista salva, mesmo pós-logout. Esta
+    # linha abaixo continua fazendo exatamente o que sempre fez (só inativa o
+    # turno, nunca apagou `filas_config`) - a mudança de comportamento está na
+    # LEITURA (turno.py), não aqui.
     TurnoAtivo.query.filter_by(usuario_id=current_user.id, ativo=True).update({"ativo": False})
     db.session.commit()
 

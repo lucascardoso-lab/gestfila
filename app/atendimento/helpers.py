@@ -106,17 +106,36 @@ def local_atual():
 
 
 def turno_ativo_do_usuario(usuario):
-    """O turno em andamento deste operador (seção 10.19, tela 'Iniciar Turno') -
+    """O turno EM ANDAMENTO deste operador (seção 10.19, tela 'Iniciar Turno') -
     None se ele nunca iniciou um, ou se o último foi encerrado (ativo=False, seja
-    pelo botão 'Encerrar turno' ou pelo encerramento automático às 23h). Usada tanto
-    pela própria tela (GET: pré-popula o formulário com a configuração já salva se
-    houver turno ativo, mas SEMPRE renderiza o formulário - não pula mais direto
-    pro painel_local desde a 10.23, "nunca contornado silenciosamente"; docstring
-    corrigida aqui, estava desatualizada descrevendo o comportamento pré-10.23)
-    quanto pelo motor de rodízio (ver `_itens_rotacao`), que prioriza a
-    configuração do turno sobre o rodízio admin-configurado do Local quando o
-    operador tem um turno ativo para aquele Local especificamente."""
+    pelo botão 'Encerrar turno', pelo encerramento automático às 23h, ou por um
+    logout explícito - seção 10.57, reverte a 10.23 nesse ponto específico).
+    Continua filtrando por `ativo=True` de propósito - usada pelo motor de
+    rodízio (`_itens_rotacao`/`fila_ids_do_local` abaixo), que só deve priorizar
+    a configuração do turno sobre o rodízio admin-configurado do Local quando o
+    operador tem um turno DE VERDADE em andamento agora, não um antigo já
+    encerrado. Pré-popula só o LOCAL na tela 'Iniciar Turno' (GET) - a
+    pré-população de FILAS usa `ultima_configuracao_filas_do_usuario` abaixo,
+    que ignora `ativo` de propósito (seção 10.57)."""
     return TurnoAtivo.query.filter_by(usuario_id=usuario.id, ativo=True).first()
+
+
+def ultima_configuracao_filas_do_usuario(usuario):
+    """Última lista de filas (+ peso `chamadas_seguidas`) que este operador
+    configurou na tela 'Iniciar Turno', SEJA o turno atual ainda ativo, SEJA um
+    turno já encerrado (logout, 'Encerrar turno', ou encerramento automático às
+    23h) - seção 10.57, reversão deliberada da seção 10.23 (BLUEPRINT.md: "logout
+    volta a mostrar formulário zerado" deixou de valer só pra FILAS; Local
+    continua exigido do zero a cada login, sem mudança nesse ponto).
+
+    Diferente de `turno_ativo_do_usuario` (que FILTRA por `ativo=True` de
+    propósito, pro motor de rodízio) - aqui é sempre a MESMA linha de
+    `TurnoAtivo` (unique=True em usuario_id, nunca deletada, só o campo `ativo`
+    muda) - `filas_config` nunca é apagado por um logout/encerramento, só deixa
+    de estar "em uso agora" pro rodízio. Não precisa de tabela nova: o dado já
+    persistia, só não estava sendo LIDO fora do caso `ativo=True`."""
+    turno = TurnoAtivo.query.filter_by(usuario_id=usuario.id).first()
+    return list(turno.filas_config) if turno is not None else []
 
 
 def fila_ids_do_local(local, operador=None):

@@ -5129,6 +5129,99 @@ botão nas 7 áreas). Suíte completa sem falhas.
 
 ---
 
+## 10.57. ADENDO — Persistência de filas do turno entre logout/login (reversão PARCIAL e DELIBERADA da seção 10.23)
+
+> **ATENÇÃO: esta seção reverte parte de um comportamento corrigido e
+> documentado na seção 10.23** ("Bug corrigido: deslogar não encerrava o
+> turno... login voltou a mostrar formulário zerado depois de um Sair de
+> propósito"). Não é um bug novo nem uma contradição não percebida — é uma
+> **mudança de comportamento CONSCIENTE, pedida e confirmada explicitamente
+> pelo cliente, ciente do histórico completo da 10.23** (por que aquele
+> comportamento existia, o bug real que ele corrigia). O texto da 10.23
+> **não foi reescrito** - continua descrevendo, corretamente, o que foi
+> decidido e por quê naquele momento. Esta seção documenta o que mudou
+> depois, e por quê.
+
+**Pedido:** só as FILAS (e o peso "chamadas seguidas" de cada uma)
+configuradas na tela "Iniciar turno" devem sobreviver a um logout/login -
+o operador não deveria precisar remontar a lista toda vez que loga de
+novo. O **LOCAL continua sendo pedido do zero a cada login, sem nenhuma
+mudança nesse ponto** - só as filas. Vale pros 3 perfis operacionais
+(`atendente`/`executor`/`atendente_executor`).
+
+**Investigação (antes de decidir a arquitetura):**
+- `TurnoAtivo.filas_config` (JSON) já vive na MESMA linha que
+  `TurnoAtivo.ativo` - uma linha por usuário (`unique=True` em
+  `usuario_id`), NUNCA deletada; reiniciar/encerrar um turno só
+  atualiza/reseta campos da mesma linha. Ou seja: **um logout nunca
+  apagou `filas_config`** - só deixou de existir uma LEITURA que
+  ignorasse `ativo=False` pra pré-popular o formulário.
+- Não existe (nem existiu) nenhuma rota de "adicionar/remover fila em
+  tempo real" - a tabela "Filas do turno" (botão "x" pra remover) é
+  100% client-side (array em JS), persistida só no POST final de
+  "Iniciar atendimento", que já grava em `turno.filas_config`.
+- Dado isso, uma tabela nova só pra guardar "última configuração de
+  filas" seria dado 100% redundante com o que já existe -
+  **confirmado com o cliente antes de implementar (a suposição inicial
+  de precisar de tabela nova não bateu com o que a investigação achou)
+  - decisão: sem tabela nova.**
+
+**Implementação:**
+- `turno_ativo_do_usuario(usuario)` (`app/atendimento/helpers.py`) —
+  **intocada**, continua filtrando `ativo=True` - usada pelo motor de
+  rodízio (`_itens_rotacao`/`fila_ids_do_local`), que só deve priorizar a
+  configuração do turno sobre o rodízio admin-configurado do Local quando
+  há um turno DE VERDADE em andamento agora, e também usada pra
+  pré-popular o LOCAL (comportamento inalterado - continua exigido do
+  zero sem turno ativo).
+- `ultima_configuracao_filas_do_usuario(usuario)` (nova, mesmo arquivo) —
+  busca `TurnoAtivo` só por `usuario_id`, SEM filtrar `ativo`; retorna
+  `filas_config` (ou `[]` se o usuário nunca configurou um turno). Usada
+  SÓ pra pré-popular FILAS na tela "Iniciar turno" (GET).
+- `iniciar_turno()` (`app/atendimento/turno.py`, GET) — `filas_iniciais`
+  passa a vir de `ultima_configuracao_filas_do_usuario`; `local_inicial`
+  continua vindo de `turno_ativo_do_usuario` (`ativo=True`), sem mudança.
+- `logout()` (`app/auth/routes.py`) — **código inalterado** (continua só
+  marcando `ativo=False`, nunca apagou `filas_config`) - só o comentário
+  foi atualizado pra não descrever mais um efeito ("formulário
+  TOTALMENTE zerado") que deixou de ser verdade pras filas.
+- **Efeito colateral esperado, não escondido:** a rota de encerrar turno
+  (`POST /atendimento/turno/encerrar`, `turno.py::encerrar_turno` - sem
+  botão na UI desde a 10.23, mas ainda viva por URL) usa o MESMO
+  mecanismo (`ativo=False`, nunca apagou `filas_config`), então também
+  passa a deixar as filas pré-populadas ao voltar pra "Iniciar turno"
+  (antes desta mudança isso nunca foi testado explicitamente num sentido
+  ou outro) - consistente com o pedido (menos remontagem manual), não
+  uma mudança pedida à parte, mas decorrência direta do mesmo fix.
+- Nenhuma migration, nenhuma tabela nova, nenhuma rota nova.
+
+**RBAC:** `admin` também está em `PERFIS_OPERACIONAIS`
+(`app/atendimento/filas.py`) e usa exatamente a mesma lógica - a
+persistência é por `usuario_id`, não por perfil, então não há
+tratamento especial pra nenhum perfil operacional específico. Perfil
+`gerencial` continua sem acesso à tela (403), sem mudança - confirmado.
+
+**Testes:**
+- `tests/test_regressao_turno_ativo.py` (seção K) — o caso "Após
+  deslogar e logar de novo, lista ZERADA" **mudou de expectativa**
+  (documentado inline no teste, referenciando esta seção): agora
+  confirma que a fila configurada ANTES do logout continua pré-populada
+  depois, e que `filas_config` no banco não muda de valor com o logout
+  (só o flag `ativo`). Local continua confirmado vazio (`valorInicial:
+  null`) - ponto que NÃO mudou.
+- `tests/test_regressao_persistencia_filas_turno.py` (novo, 7 casos) —
+  remover uma fila específica (simulando o botão "x") faz só ELA sumir,
+  a outra continua com o peso certo; logout/login mantém a fila
+  restante (não a removida) nos 3 perfis operacionais; Local continua
+  vazio após logout, confirmado explicitamente (não só pela ausência de
+  asserção contrária); RBAC de `gerencial` (403) e single-session
+  (10.41, novo login derruba sessão antiga do mesmo usuário) confirmados
+  sem regressão.
+
+Suíte completa sem falhas.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da

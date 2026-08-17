@@ -375,16 +375,29 @@ assert resp.status_code == 403
 ok("Perfil gerencial recebe 403 ao tentar acessar 'Iniciar Turno' diretamente (RBAC)")
 
 # ===========================================================================
-# K) Bug corrigido: deslogar ('Sair') não encerrava o turno - TurnoAtivo.ativo
-#    continuava True, então o próximo login pré-populava 'Iniciar Turno' com as
-#    filas/Local do turno ANTERIOR. Um logout explícito agora encerra o turno
-#    (mesmo efeito do botão 'Encerrar turno') - o próximo login sempre chega com
-#    o formulário zerado.
+# K) REVERSÃO PARCIAL DELIBERADA (seção 10.57, BLUEPRINT.md - pedido do
+#    cliente, ciente do histórico): a seção 10.23 tinha corrigido um bug onde
+#    deslogar ('Sair') não encerrava o turno (TurnoAtivo.ativo continuava
+#    True), então o próximo login pré-populava 'Iniciar Turno' com as
+#    filas/Local do turno ANTERIOR mesmo o operador tendo saído de propósito -
+#    a correção fez logout encerrar o turno (ativo=False), igual à rota de
+#    encerrar turno (sem botão na UI desde a própria 10.23, mas viva por
+#    URL), pra sempre logar com o formulário TOTALMENTE zerado.
+#
+#    Isso continua valendo pro LOCAL (sem mudança nesse ponto - exigido do
+#    zero a cada login, com ou sem turno ativo). Mas NÃO vale mais pras FILAS:
+#    o operador não deveria precisar remontar a lista de filas (e o peso de
+#    cada uma) toda vez que loga de novo - logout continua encerrando o turno
+#    (ativo=False, Local liberado, fora da prioridade do motor de rodízio),
+#    só a PRÉ-POPULAÇÃO DE FILAS na tela 'Iniciar Turno' passou a ignorar
+#    esse "ativo=False" e sempre mostrar a última lista salva deste operador
+#    (`ultima_configuracao_filas_do_usuario`, app/atendimento/helpers.py).
 # ===========================================================================
 with app.app_context():
     turno_antes_logout = TurnoAtivo.query.filter_by(usuario_id=ids["recepcao_2"]).first()
     assert turno_antes_logout is not None and turno_antes_logout.ativo is True
     assert turno_antes_logout.filas_config  # tem fila(s) configurada(s) (seção I/H)
+    filas_config_antes_logout = list(turno_antes_logout.filas_config)
 
 resp = c2.get("/logout", follow_redirects=True)
 assert resp.status_code == 200
@@ -392,15 +405,32 @@ assert resp.status_code == 200
 with app.app_context():
     turno_apos_logout = TurnoAtivo.query.filter_by(usuario_id=ids["recepcao_2"]).first()
     assert turno_apos_logout.ativo is False
-ok("Logout ('Sair') marca o TurnoAtivo como inativo, igual ao botão 'Encerrar turno'")
+    # filas_config NUNCA foi apagado por um logout - só o flag `ativo` muda
+    # (mesma linha, unique=True em usuario_id) - é isso que permite a
+    # pré-população sobreviver sem precisar de tabela nova.
+    assert list(turno_apos_logout.filas_config) == filas_config_antes_logout
+ok("Logout ('Sair') marca o TurnoAtivo como inativo (igual à rota de encerrar turno), mas NÃO apaga filas_config")
 
 c2_relogado, resp_login_2 = login_como("recepcao_turno_2")
 assert resp_login_2.headers["Location"].endswith(URL_INICIAR_TURNO)
 resp = c2_relogado.get(URL_INICIAR_TURNO)
 assert resp.status_code == 200
 texto_pos_logout = resp.data.decode("utf-8")
-assert "let filasSelecionadas = ([]).filter" in texto_pos_logout
-ok("Após deslogar e logar de novo, 'Iniciar Turno' chega com a lista de filas ZERADA (não repete o turno anterior)")
+# FILAS: pré-populadas com a última configuração salva (fila_b, peso 1 -
+# submetida no bloco I) - já NÃO é mais "([]).filter" (comportamento da 10.23,
+# revertido pela 10.57).
+assert "let filasSelecionadas = ([]).filter" not in texto_pos_logout
+# tojson ordena as chaves alfabeticamente (chamadas_seguidas, fila_id, ordem) -
+# confirmado rodando o teste, não assumido.
+assert f'"chamadas_seguidas": 1, "fila_id": {ids["fila_b"]}, "ordem": 0' in texto_pos_logout
+ok("Após deslogar e logar de novo, 'Iniciar Turno' PRÉ-POPULA as filas com a última configuração salva (reversão 10.57)")
+
+# LOCAL: continua exigido do zero a cada login, SEM mudança - "valorInicial"
+# (o parâmetro que pré-seleciona o Local no widget de busca, seção 10.10/
+# 10.55) precisa ser null aqui, nunca o local_1 usado antes do logout.
+assert "valorInicial: null," in texto_pos_logout
+assert f"valorInicial: {ids['local_1']}," not in texto_pos_logout
+ok("Após deslogar e logar de novo, o LOCAL continua vindo vazio - só as filas persistem, decisão explícita")
 
 print()
 print(f"TODOS OS {len(passos)} TESTES DE TURNO ATIVO PASSARAM")
