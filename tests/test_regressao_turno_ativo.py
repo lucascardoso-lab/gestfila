@@ -7,6 +7,7 @@ sobreviver a reload/crash (adendo 10.11).
 Execução: python -m tests.test_regressao_turno_ativo (a partir da raiz do projeto,
 com o virtualenv ativado).
 """
+import json
 import os
 
 os.environ.setdefault("SECRET_KEY", "test")
@@ -113,8 +114,15 @@ resp = c1.get(URL_INICIAR_TURNO)
 assert resp.status_code == 200
 texto_tela = resp.data.decode("utf-8")
 assert "Iniciar turno" in texto_tela
-assert 'id="select-fila"' in texto_tela and 'id="select-local"' in texto_tela
-assert f'value="{ids["fila_a"]}"' in texto_tela and "Recepção Geral" in texto_tela
+# Busca com autocomplete (mesmo padrão da seção 10.10) substituiu os <select>
+# simples de Fila/Local - a lista completa vem embutida como JSON no JS da
+# página (FILAS_DISPONIVEIS/LOCAIS_DISPONIVEIS), não mais como <option>.
+assert 'id="busca-fila"' in texto_tela and 'id="busca-local"' in texto_tela
+inicio = texto_tela.index("FILAS_DISPONIVEIS = ") + len("FILAS_DISPONIVEIS = ")
+fim = texto_tela.index(";", inicio)
+filas_disponiveis = json.loads(texto_tela[inicio:fim])
+por_id = {item["id"]: item for item in filas_disponiveis}
+assert por_id[ids["fila_a"]]["nome"] == "Recepção Geral"
 ok("Tela 'Iniciar Turno' lista as filas e locais acessíveis ao operador")
 
 # ===========================================================================
@@ -255,13 +263,12 @@ resp = c1_novo.get(URL_INICIAR_TURNO)
 assert resp.status_code == 200
 texto_recuperado = resp.data.decode("utf-8")
 assert str(ids["fila_a"]) in texto_recuperado
-# isola o <select id="select-local">...</select> antes de procurar o 'selected' -
-# IDs de Fila e Local são sequências independentes (podem colidir em valor
-# numérico, ex.: os dois começando em 1), então um grep solto em toda a página
-# podia bater primeiro numa <option> do select de Fila.
-trecho_select_local = texto_recuperado[texto_recuperado.index('id="select-local"'):texto_recuperado.index("</select>", texto_recuperado.index('id="select-local"'))]
-indice_opcao_local = trecho_select_local.index(f'value="{ids["local_1"]}"')
-assert "selected" in trecho_select_local[indice_opcao_local:indice_opcao_local + 80]
+# Com o <select> substituído pelo widget de busca (10.10), a pré-seleção do
+# Local recuperado do banco vira o parâmetro `valorInicial` passado à fábrica
+# criarBuscaAutocomplete() - a instância de Local (não a de Fila, que nunca
+# pré-seleciona nada) - único jeito de confirmar QUAL local foi pré-selecionado,
+# já que IDs de Fila e Local são sequências independentes e podem colidir.
+assert f"valorInicial: {ids['local_1']}," in texto_recuperado
 ok("'Iniciar Turno' encontra o turno salvo no banco e pré-popula filas/Local - recuperação de estado após reload")
 
 resp = c1_novo.get(f"/atendimento/recepcao/local/{ids['local_1']}")

@@ -12,37 +12,58 @@
 
     <div class="card grade-turno">
       <div>
-        <label for="select-fila">Fila</label>
-        <select id="select-fila">
-          <option value="">Selecione</option>
-          {% for unidade_nome, itens_unidade in filas_json|groupby('unidade') %}
-            <optgroup label="{{ unidade_nome|upper }}">
-              {% for fila in itens_unidade %}
-                <option value="{{ fila.id }}">[{{ fila.unidade_sigla }}] {{ fila.nome }}</option>
-              {% endfor %}
-            </optgroup>
-          {% endfor %}
-        </select>
+        <label for="busca-fila">Fila</label>
+        <div class="campo-busca-turno">
+          <input
+            type="text"
+            id="busca-fila"
+            class="busca-turno"
+            placeholder="Buscar fila por nome..."
+            autocomplete="off"
+            role="combobox"
+            aria-expanded="false"
+            aria-autocomplete="list"
+            aria-controls="dropdown-fila"
+            onkeydown="if (event.key === 'Enter') event.preventDefault();"
+          >
+          <input type="hidden" id="fila-busca-id" value="">
+          <div class="selecionado-turno" id="selecionado-fila" hidden>
+            Fila selecionada: <strong id="selecionado-fila-nome"></strong>
+            <button type="button" class="link" id="limpar-fila">Trocar</button>
+          </div>
+          <ul class="dropdown-turno" id="dropdown-fila" role="listbox" hidden></ul>
+        </div>
 
         <label for="input-chamadas-seguidas">Quantidade de chamadas seguidas</label>
         <input type="number" id="input-chamadas-seguidas" min="0" value="0">
 
         <p><button type="button" id="botao-adicionar-fila" class="botao" style="margin-top:1rem;">Adicionar fila</button></p>
 
-        <label for="select-local">Local</label>
-        <select id="select-local" name="local_id" required>
-          <option value="">Selecione</option>
-          {% for unidade_nome, itens_unidade in locais_json|groupby('unidade') %}
-            <optgroup label="{{ unidade_nome|upper }}">
-              {% for local in itens_unidade %}
-                <option value="{{ local.id }}" {{ 'selected' if local.id == local_selecionado_id else '' }}>{{ local.identificador_admin }}</option>
-              {% endfor %}
-            </optgroup>
-          {% endfor %}
-        </select>
+        <label for="busca-local">Local</label>
+        <div class="campo-busca-turno">
+          <input
+            type="text"
+            id="busca-local"
+            class="busca-turno"
+            placeholder="Buscar local por nome..."
+            autocomplete="off"
+            role="combobox"
+            aria-expanded="false"
+            aria-autocomplete="list"
+            aria-controls="dropdown-local"
+            onkeydown="if (event.key === 'Enter') event.preventDefault();"
+          >
+          <input type="hidden" name="local_id" id="local-busca-id" value="">
+          <div class="selecionado-turno" id="selecionado-local" hidden>
+            Local selecionado: <strong id="selecionado-local-nome"></strong>
+            <button type="button" class="link" id="limpar-local">Trocar</button>
+          </div>
+          <ul class="dropdown-turno" id="dropdown-local" role="listbox" hidden></ul>
+        </div>
 
         <p><button type="submit" id="botao-iniciar" class="botao" style="margin-top:1.5rem;">Iniciar atendimento</button></p>
         <p id="erro-turno" class="flash error" hidden>Adicione ao menos uma fila antes de iniciar o turno.</p>
+        <p id="erro-local" class="flash error" hidden>Selecione um local para o turno.</p>
       </div>
 
       <div>
@@ -63,6 +84,41 @@
     #tabela-filas-turno th, #tabela-filas-turno td { font-size: .85rem; }
     #tabela-filas-turno .botao-remover { background: none; border: none; color: var(--gf-primaria-escura); cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 0; }
     .vazio { color: #999; font-size: .9rem; }
+
+    /* Busca com autocomplete (mesmo padrão da seção 10.10, atendimento/
+       _redirecionar_busca.html) - duas instâncias nesta tela (Fila e Local),
+       por isso com classes próprias (-turno) em vez de reaproveitar as
+       classes -redirecionar daquele partial, que não é incluído aqui. */
+    .campo-busca-turno { position: relative; max-width: 420px; }
+    .busca-turno {
+      width: 100%; padding: .8rem .9rem; font-size: 1.05rem; min-height: 44px;
+      border: 1px solid #d0d4dc; border-radius: 8px; box-sizing: border-box;
+    }
+    .busca-turno:focus { outline: 2px solid var(--gf-primaria); outline-offset: 1px; }
+    .selecionado-turno {
+      display: flex; align-items: center; gap: .6rem; margin-top: .5rem;
+      padding: .7rem .9rem; min-height: 44px; box-sizing: border-box;
+      background: var(--gf-primaria-clara); border-radius: 8px; font-size: .95rem;
+    }
+    /* [hidden] própria (mesmo cuidado da varredura CSS já documentada no
+       BLUEPRINT, seção 10.53): display:flex de origem autor acima sempre
+       vence [hidden]{display:none} de origem UA, independente de especificidade. */
+    .selecionado-turno[hidden] { display: none; }
+    .dropdown-turno {
+      list-style: none; margin: .3rem 0 0; padding: .3rem 0; position: absolute; z-index: 20;
+      left: 0; right: 0; max-height: 280px; overflow-y: auto;
+      background: #fff; border: 1px solid #d0d4dc; border-radius: 8px;
+      box-shadow: 0 6px 18px rgba(0,0,0,.12);
+    }
+    .item-dropdown-turno {
+      display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+      min-height: 44px; padding: .55rem 1rem; font-size: 1rem; cursor: pointer;
+    }
+    .item-dropdown-turno:hover, .item-dropdown-turno.destacado { background: #f1f3f6; }
+    .item-dropdown-turno .marcador-aberta { color: #1d7a3a; font-size: .8rem; white-space: nowrap; }
+    .item-dropdown-turno .marcador-fechada { color: #999; font-size: .8rem; white-space: nowrap; }
+    .divisor-dropdown-turno { border-top: 1px solid #eceef2; margin: .3rem 0; list-style: none; }
+    .dropdown-vazio-turno { padding: .7rem 1rem; color: #999; font-size: .9rem; min-height: 44px; box-sizing: border-box; display: flex; align-items: center; }
   </style>
 
   <script>
@@ -70,6 +126,8 @@
       const FILAS_DISPONIVEIS = {{ filas_json | tojson }};
       const FILAS_POR_ID = {};
       FILAS_DISPONIVEIS.forEach((f) => { FILAS_POR_ID[f.id] = f; });
+
+      const LOCAIS_DISPONIVEIS = {{ locais_json | tojson }};
 
       let filasSelecionadas = ({{ filas_selecionadas_iniciais | tojson }}).filter((f) => FILAS_POR_ID[f.fila_id]);
 
@@ -82,6 +140,131 @@
         return (texto || "").replace(/[&<>"']/g, (c) => ({
           "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
         }[c]));
+      }
+
+      // Fábrica reaproveitável do padrão de busca com autocomplete (seção 10.10,
+      // atendimento/_redirecionar_busca.html) - 3º uso do mesmo padrão nesta sessão
+      // (redirecionar fila + fila do turno + local do turno). Generalizada aqui, não
+      // em _redirecionar_busca.html: essa 1ª instância já é testada/comprovada em
+      // produção com um contrato de formulário próprio (hidden field É o campo
+      // enviado direto no submit de Realocar); refatorá-la juntaria risco a um
+      // widget que já funciona sem necessidade real - as DUAS instâncias novas
+      // desta tela, por outro lado, vivem no mesmo template e são praticamente
+      // idênticas, então a duplicação ENTRE ELAS é generalizada numa função só.
+      function criarBuscaAutocomplete(cfg) {
+        const elBusca = document.getElementById(cfg.inputId);
+        const elHidden = document.getElementById(cfg.hiddenId);
+        const elDropdown = document.getElementById(cfg.dropdownId);
+        const elSelecionado = document.getElementById(cfg.selecionadoId);
+        const elSelecionadoNome = document.getElementById(cfg.selecionadoNomeId);
+        const elLimpar = document.getElementById(cfg.limparId);
+        const elCampo = elBusca.closest(".campo-busca-turno");
+
+        function fecharDropdown() {
+          elDropdown.hidden = true;
+          elDropdown.innerHTML = "";
+          elBusca.setAttribute("aria-expanded", "false");
+        }
+
+        function limpar() {
+          elHidden.value = "";
+          elSelecionado.hidden = true;
+          elBusca.value = "";
+          elBusca.hidden = false;
+          fecharDropdown();
+        }
+
+        function selecionar(item) {
+          elHidden.value = item.id;
+          elSelecionadoNome.textContent = cfg.exibir(item);
+          elSelecionado.hidden = false;
+          elBusca.value = "";
+          elBusca.hidden = true;
+          fecharDropdown();
+          if (cfg.aoSelecionar) cfg.aoSelecionar(item);
+        }
+
+        function itemHtml(item) {
+          const marcador = cfg.aberta
+            ? (cfg.aberta(item)
+                ? '<span class="marcador-aberta">● Atendendo agora</span>'
+                : '<span class="marcador-fechada">· Fora do horário</span>')
+            : "";
+          return `<li class="item-dropdown-turno" role="option" data-id="${item.id}">
+            <span>${escapeHtml(cfg.exibir(item))}</span>${marcador}
+          </li>`;
+        }
+
+        // Filtro 100% local, sem mínimo de caracteres pra abrir a caixa de seleção -
+        // mesmo comportamento CORRIGIDO da seção 10.10 (focar/clicar já lista tudo;
+        // digitar só estreita a partir daí), não reintroduz o problema original.
+        function renderizarDropdown(termo) {
+          const termoNormalizado = termo.trim().toLocaleLowerCase("pt-BR");
+          const encontrados = cfg.itens.filter((it) => cfg.buscarEm(it).toLocaleLowerCase("pt-BR").includes(termoNormalizado));
+          if (!encontrados.length) {
+            elDropdown.innerHTML = `<li class="dropdown-vazio-turno">${cfg.mensagemVazia}</li>`;
+            elDropdown.hidden = false;
+            elBusca.setAttribute("aria-expanded", "true");
+            return;
+          }
+
+          let html;
+          if (cfg.aberta) {
+            const ativos = encontrados.filter(cfg.aberta);
+            const inativos = encontrados.filter((it) => !cfg.aberta(it));
+            html = ativos.map(itemHtml).join("");
+            if (ativos.length && inativos.length) {
+              html += '<li class="divisor-dropdown-turno" role="separator"></li>';
+            }
+            html += inativos.map(itemHtml).join("");
+          } else {
+            html = encontrados.map(itemHtml).join("");
+          }
+
+          elDropdown.innerHTML = html;
+          elDropdown.hidden = false;
+          elBusca.setAttribute("aria-expanded", "true");
+        }
+
+        elBusca.addEventListener("input", () => renderizarDropdown(elBusca.value));
+        elBusca.addEventListener("focus", () => renderizarDropdown(elBusca.value));
+        elBusca.addEventListener("click", () => renderizarDropdown(elBusca.value));
+
+        elDropdown.addEventListener("click", (ev) => {
+          const li = ev.target.closest(".item-dropdown-turno");
+          if (!li) return;
+          const item = cfg.itens.find((it) => String(it.id) === li.dataset.id);
+          if (item) selecionar(item);
+        });
+
+        elLimpar.addEventListener("click", limpar);
+
+        // Escopado à própria instância (elCampo.contains), não a ".campo-busca-turno"
+        // genérico - com DUAS instâncias na mesma tela, um seletor de classe batendo
+        // nas duas fecharia o dropdown errado ao clicar dentro do outro widget.
+        document.addEventListener("click", (ev) => {
+          if (!elCampo.contains(ev.target)) fecharDropdown();
+        });
+
+        elBusca.addEventListener("keydown", (ev) => {
+          if (ev.key === "Escape") {
+            fecharDropdown();
+            return;
+          }
+          if (ev.key !== "Enter") return;
+          const itensListados = elDropdown.querySelectorAll(".item-dropdown-turno");
+          if (itensListados.length === 1) {
+            const item = cfg.itens.find((it) => String(it.id) === itensListados[0].dataset.id);
+            if (item) selecionar(item);
+          }
+        });
+
+        if (cfg.valorInicial != null) {
+          const item = cfg.itens.find((it) => it.id === cfg.valorInicial);
+          if (item) selecionar(item);
+        }
+
+        return { limpar };
       }
 
       function renderizar() {
@@ -111,10 +294,45 @@
         });
       }
 
+      const erroLocal = document.getElementById("erro-local");
+
+      // Dropdown de Fila continua listando TODAS as filas, mesmo as já adicionadas
+      // à tabela "Filas do turno" - comportamento IDÊNTICO ao <select> simples que
+      // este widget substitui (confirmado antes de implementar): a mesma fila pode
+      // ser adicionada de novo só para ajustar o peso dela no rodízio, o servidor
+      // mescla em uma única entrada ao salvar (_mesclar_filas_config, turno.py).
+      const buscaFila = criarBuscaAutocomplete({
+        inputId: "busca-fila", hiddenId: "fila-busca-id", dropdownId: "dropdown-fila",
+        selecionadoId: "selecionado-fila", selecionadoNomeId: "selecionado-fila-nome", limparId: "limpar-fila",
+        itens: FILAS_DISPONIVEIS,
+        buscarEm: (f) => f.nome,
+        exibir: (f) => `[${f.unidade_sigla}] ${f.nome}`,
+        aberta: (f) => f.aberta,
+        mensagemVazia: "Nenhuma fila encontrada.",
+      });
+
+      // Local não tem noção de "aberto agora" (não é sobre horário de funcionamento
+      // de uma fila) - sem marcador/agrupamento, só busca por nome simples. Também
+      // não existe hoje nenhuma indicação de "Local ocupado por outro operador" no
+      // <select> que este widget substitui (confirmado antes de implementar, via
+      // locais_acessiveis()/_contexto_formulario - nenhum dado de ocupação é
+      // passado ao template) - nada a preservar nesse sentido; a checagem de
+      // ocupação continua acontecendo só no POST (turno.py), como sempre foi.
+      const buscaLocal = criarBuscaAutocomplete({
+        inputId: "busca-local", hiddenId: "local-busca-id", dropdownId: "dropdown-local",
+        selecionadoId: "selecionado-local", selecionadoNomeId: "selecionado-local-nome", limparId: "limpar-local",
+        itens: LOCAIS_DISPONIVEIS,
+        buscarEm: (l) => l.identificador_admin,
+        exibir: (l) => l.identificador_admin,
+        aberta: null,
+        mensagemVazia: "Nenhum local encontrado.",
+        valorInicial: {{ local_selecionado_id | tojson }},
+        aoSelecionar: () => { erroLocal.hidden = true; },
+      });
+
       document.getElementById("botao-adicionar-fila").addEventListener("click", () => {
-        const selectFila = document.getElementById("select-fila");
         const inputSeguidas = document.getElementById("input-chamadas-seguidas");
-        const filaId = Number(selectFila.value);
+        const filaId = Number(document.getElementById("fila-busca-id").value);
         if (!filaId) return;
 
         // Mesma fila pode ser adicionada mais de uma vez (o operador ajusta o peso
@@ -124,16 +342,22 @@
           chamadas_seguidas: Math.max(0, Number(inputSeguidas.value) || 0),
         });
         erro.hidden = true;
-        selectFila.value = "";
+        buscaFila.limpar();
         inputSeguidas.value = "0";
         renderizar();
       });
 
       document.getElementById("form-turno").addEventListener("submit", (evento) => {
+        let bloqueado = false;
         if (filasSelecionadas.length === 0) {
-          evento.preventDefault();
           erro.hidden = false;
+          bloqueado = true;
         }
+        if (!document.getElementById("local-busca-id").value) {
+          erroLocal.hidden = false;
+          bloqueado = true;
+        }
+        if (bloqueado) evento.preventDefault();
       });
 
       renderizar();

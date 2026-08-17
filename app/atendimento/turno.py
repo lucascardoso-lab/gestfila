@@ -44,7 +44,13 @@ def _contexto_formulario(filas_selecionadas_iniciais=None, local_selecionado_id=
         # vem com o prefixo "[SIGLA] nome" embutido - BLUEPRINT.md, seção
         # 10.32), sem precisar remontar o prefixo aqui.
         "filas_json": [
-            {"id": f.id, "nome": f.nome, "unidade": f.unidade.nome, "unidade_sigla": f.unidade.sigla_exibicao}
+            {
+                "id": f.id, "nome": f.nome, "unidade": f.unidade.nome, "unidade_sigla": f.unidade.sigla_exibicao,
+                # `aberta` (Fila.aberta_em(), seção 10.1/10.5) alimenta o mesmo marcador
+                # "Atendendo agora"/"Fora do horário" do widget de busca da seção 10.10 -
+                # reaproveitado aqui, adendo da busca com autocomplete em "Iniciar turno".
+                "aberta": f.aberta_em(),
+            }
             for f in filas
         ],
         "locais_json": [

@@ -1166,6 +1166,82 @@ itens do dropdown), consistente com uso em totem/tablet.
 > vai se estreitando conforme o operador digita — em vez de um campo de
 > busca "cego" até a segunda letra.
 
+> **EXTENSÃO** (mesma sessão de trabalho): o mesmo padrão de busca com
+> autocomplete foi aplicado aos dois `<select>` simples da tela "Iniciar
+> turno" (`atendimento/iniciar_turno.html`, seção 10.19) — "Fila" (o
+> dropdown de adicionar fila ao rodízio do turno) e "Local" (o posto do
+> turno) — 3ª ocorrência do mesmo padrão nesta sessão.
+>
+> **Investigação prévia (confirmada, não presumida):** o dropdown de Fila do
+> `<select>` antigo já listava TODAS as filas, inclusive as já adicionadas à
+> tabela "Filas do turno" (a mesma fila pode ser adicionada de novo só para
+> ajustar o peso no rodízio — `_mesclar_filas_config`, `turno.py`, soma as
+> entradas repetidas ao salvar) — comportamento preservado no widget novo,
+> sem nenhum filtro adicional. O `<select id="select-local">` nunca teve
+> nenhuma indicação visual de "Local ocupado por outro operador"
+> (`locais_acessiveis()`/`_contexto_formulario` não carregam esse dado) —
+> nada a replicar nesse sentido; a checagem de ocupação continua acontecendo
+> só no POST (`turno.py`), como sempre foi.
+>
+> **Generalização decidida (registro do raciocínio):** o JS do widget 10.10
+> (`_redirecionar_busca.html`) foi generalizado numa fábrica reaproveitável
+> — `criarBuscaAutocomplete(cfg)`, parametrizada por ids de elementos, lista
+> de itens, funções de busca/exibição, marcador opcional de "aberta" e valor
+> inicial opcional — mas **dentro de `iniciar_turno.html`, não em
+> `_redirecionar_busca.html`**: a 1ª instância já é testada/comprovada em
+> produção com um contrato de formulário próprio (o hidden field É o campo
+> enviado direto no submit de Realocar); refatorá-la juntaria risco a um
+> widget que já funciona, sem necessidade real. As DUAS instâncias novas,
+> por outro lado, vivem no mesmo template e são praticamente idênticas — a
+> duplicação ENTRE ELAS é que foi eliminada.
+>
+> **Diferenças de contrato entre as 3 instâncias, preservadas:**
+> - Fila: seleção não submete nada sozinha — só preenche um candidato
+>   (`#fila-busca-id`, sem `name`, não viaja no POST); o botão "Adicionar
+>   fila" existente lê esse valor, empurra pra `filasSelecionadas` (mesma
+>   lógica de sempre) e reseta o widget (`buscaFila.limpar()`). Marcador
+>   "Atendendo agora"/"Fora do horário" reaproveitado (`Fila.aberta_em()`,
+>   novo campo `aberta` em `filas_json`, `_contexto_formulario`).
+> - Local: o hidden field É o campo real do form (`name="local_id"`, igual
+>   ao `<select>` antigo) — sem marcador de horário (não se aplica). Ganhou
+>   suporte a valor inicial (`valorInicial`) para replicar a pré-seleção que
+>   o `<select required>` fazia via `selected` ao reconfigurar um turno já
+>   ativo — capacidade que o widget 10.10 original não precisava (nunca
+>   inicia pré-selecionado). Como um hidden `required` não é validado
+>   nativamente pelo navegador, a checagem "Local não pode ficar vazio" foi
+>   replicada em JS (mesmo padrão do erro de "nenhuma fila selecionada" já
+>   existente), com um novo parágrafo de erro (`#erro-local`) — o servidor
+>   já validava isso de qualquer forma (`turno.py`), então não é uma
+>   validação nova, só devolve o feedback imediato que o `required` dava.
+>
+> **Regressão real encontrada pela suíte, confirmada com o cliente antes de
+> decidir (não corrigida por conta própria):** `test_regressao_contexto_
+> multi_unidade.py` (item 7 do seu próprio docstring) já comprovava que os
+> `<select>` de "Iniciar Turno" tinham `<optgroup>` **por unidade** —
+> recurso deliberado de UX multi-unidade, próprio adendo, aplicado também a
+> outros 3 selects do admin (Totem/TV no cadastro de Fila, Fila no cadastro
+> de Botão do totem — esses 3 continuam `<select>` simples, INTOCADOS, ainda
+> com `<optgroup>`). O widget de busca novo não agrupa por unidade — Fila
+> agrupa por "atendendo agora"/"fora do horário" (padrão da 10.10), Local não
+> agrupa nada — só o prefixo `[SIGLA] Nome` continua identificando a unidade
+> de cada item. Perguntado ao cliente antes de prosseguir: confirmado manter
+> só o prefixo (busca por nome/sigla já reduz a necessidade de navegar uma
+> lista longa) — `test_regressao_contexto_multi_unidade.py` atualizado
+> (checa `unidade_sigla`/`identificador_admin` no JSON embutido em vez de
+> `<optgroup>` no HTML), sem perda de cobertura.
+>
+> **Testes:** `tests/test_regressao_busca_turno.py` (15 casos) — mesmo
+> padrão de `test_regressao_redirecionar_busca.py`, adaptado às duas novas
+> instâncias: ausência dos `<select>` antigos, campos/ids novos, JSON
+> embutido com marcador `aberta` só na Fila, alvos de toque, ausência de
+> mínimo de caracteres, fila já adicionada continua no dropdown, e a
+> pré-seleção do Local via `valorInicial` ao reconfigurar um turno.
+> `tests/test_regressao_turno_ativo.py`, `tests/test_regressao_single_
+> session.py` e `tests/test_regressao_contexto_multi_unidade.py`
+> (pré-existentes) tinham asserções amarradas ao markup antigo
+> (`id="select-local"`, `selected`/`<optgroup>` em `<option>`) — atualizadas
+> para os novos ids/contrato, sem mudança de cobertura.
+
 ---
 
 ## 10.11. ADENDO — Horário de relógio junto da duração (tela de Atendimento)

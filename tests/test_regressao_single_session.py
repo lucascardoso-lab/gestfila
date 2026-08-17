@@ -249,9 +249,10 @@ sessao_f2 = login_como("operador_ss_c")  # mesmo usuário, derruba F1
 resp = sessao_f2.get(URL_INICIAR_TURNO)
 assert resp.status_code == 200
 texto_f2 = resp.data.decode("utf-8")
-trecho_select_local = texto_f2[texto_f2.index('id="select-local"'):texto_f2.index("</select>", texto_f2.index('id="select-local"'))]
-indice_opcao_local = trecho_select_local.index(f'value="{ids["local_y"]}"')
-assert "selected" in trecho_select_local[indice_opcao_local:indice_opcao_local + 80]
+# Com o <select> substituído pelo widget de busca (10.10), a pré-seleção do
+# Local vira o parâmetro `valorInicial` passado à fábrica criarBuscaAutocomplete()
+# da instância de Local (atendimento/iniciar_turno.html).
+assert f"valorInicial: {ids['local_y']}," in texto_f2
 ok("Sessão F2 (nova) já enxerga o Local/Fila do turno aberto por F1 - 'Iniciar Turno' vem pré-populado, sem re-escolher")
 
 # a tela de atendimento por-Local também abre direto, sem exigir nenhuma nova

@@ -15,14 +15,19 @@ Cobre:
 5. Admin de empresa (não super admin) vê o seletor de Unidade, mas NUNCA o de
    Empresa - já está implicitamente restrito à própria.
 6. Breadcrumb "Empresa › Unidade › Nome da tela" nas telas admin.
-7. Prefixo "[SIGLA] Nome" + <optgroup> nos selects que listam locais/filas de
+7. Prefixo "[SIGLA] Nome" nos selects/widgets que listam locais/filas de
    múltiplas unidades: tela "Iniciar Turno", Totem/TV no cadastro de Fila, Fila
-   no cadastro de Botão do totem.
+   no cadastro de Botão do totem. Totem/TV/Botão continuam sendo <select> com
+   <optgroup> por unidade; "Iniciar Turno" perdeu o <optgroup> ao virar busca
+   com autocomplete (seção 10.10, mudança deliberada e confirmada com o
+   cliente) - o prefixo [SIGLA] continua sendo a única forma de distinguir a
+   unidade de cada item ali, sem agrupamento visual.
 8. Bloco Redirecionar (busca + acesso rápido) também recebe o prefixo de unidade.
 
 Execução: python -m tests.test_regressao_contexto_multi_unidade (a partir da
 raiz do projeto, com o virtualenv ativado).
 """
+import json
 import os
 
 os.environ.setdefault("SECRET_KEY", "test")
@@ -290,13 +295,17 @@ assert "Todas as unidades" in trecho_breadcrumb
 ok("Sem unidade escolhida, o breadcrumb mostra 'Todas as unidades'")
 
 # ===========================================================================
-# H) Prefixo "[SIGLA] Nome" + <optgroup> nos selects multi-unidade.
+# H) Prefixo "[SIGLA] Nome" nos selects/widgets multi-unidade.
 # ===========================================================================
-# H.1) Tela "Iniciar Turno" (seção 10.19) - fila e local.
+# H.1) Tela "Iniciar Turno" (seção 10.19) - fila e local. Widget de busca com
+# autocomplete (seção 10.10) - sem <optgroup> (mudança deliberada e confirmada
+# com o cliente ao trocar o <select> pelo widget novo); o prefixo [SIGLA]
+# continua presente nos dados embutidos (unidade_sigla na Fila,
+# identificador_admin já formatado no Local), só sem agrupamento visual.
 c_usuario_matriz = login_como("usuario_matriz_ctx")
 # este usuário só tem acesso à Matriz - login já redireciona pra 'Iniciar Turno'
 # (perfil recepcao puro) - troca de usuário com acesso às DUAS unidades pra ver
-# o agrupamento de fato (usuario_matriz só veria 1 optgroup).
+# as duas unidades misturadas na mesma lista (usuario_matriz só veria a Matriz).
 with app.app_context():
     u = db.session.get(Usuario, ids["usuario_matriz"])
     u.unidades = [db.session.get(Unidade, ids["matriz"]), db.session.get(Unidade, ids["anexo"])]
@@ -306,13 +315,21 @@ c_usuario_matriz = login_como("usuario_matriz_ctx")
 resp = c_usuario_matriz.get("/atendimento/iniciar-turno")
 assert resp.status_code == 200
 texto = resp.data.decode("utf-8")
-assert '<optgroup label="MATRIZ">' in texto
-assert '<optgroup label="ANEXO MEZANINO">' in texto
-assert "[MAT] Recepção Geral" in texto
-assert "[ANE] Recepção Geral" in texto
-assert "[MAT] Guiche 01" in texto
-assert "[ANE] Guiche 01" in texto
-ok("Tela 'Iniciar Turno': selects de Fila e Local usam <optgroup> por unidade + prefixo [SIGLA]")
+
+inicio = texto.index("FILAS_DISPONIVEIS = ") + len("FILAS_DISPONIVEIS = ")
+fim = texto.index(";", inicio)
+filas_json = json.loads(texto[inicio:fim])
+siglas_e_nomes = {(f["unidade_sigla"], f["nome"]) for f in filas_json}
+assert ("MAT", "Recepção Geral") in siglas_e_nomes
+assert ("ANE", "Recepção Geral") in siglas_e_nomes
+
+inicio = texto.index("LOCAIS_DISPONIVEIS = ") + len("LOCAIS_DISPONIVEIS = ")
+fim = texto.index(";", inicio)
+locais_json = json.loads(texto[inicio:fim])
+identificadores = {l["identificador_admin"] for l in locais_json}
+assert "[MAT] Guiche 01" in identificadores
+assert "[ANE] Guiche 01" in identificadores
+ok("Tela 'Iniciar Turno': widgets de busca de Fila e Local trazem as DUAS unidades com o prefixo [SIGLA] preservado (sem <optgroup>, mudança deliberada da 10.10)")
 
 # H.2) Cadastro de Fila (admin) - selects de Totem e TV.
 resp = c_super.get(f"/admin/filas/nova?empresa_id={ids['empresa_a']}")
