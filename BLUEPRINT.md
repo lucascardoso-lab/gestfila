@@ -5462,6 +5462,62 @@ inalterado. Suíte completa (62 módulos) reexecutada sem falhas.
 
 ---
 
+## 10.61. ADENDO — Painel de TV preso em "Reconectando..." em produção: faltava `X-Forwarded-Proto` no vhost do README (mesmo padrão da 10.59/10.60)
+
+> Achado numa instalação real, não em teste automatizado (mesma origem dos
+> achados da 10.59): Apache, SSL e Gunicorn todos funcionando
+> individualmente (`systemctl status gestfila` ok, `apache2ctl configtest`
+> ok, HTTPS abrindo normalmente), mas o painel de TV nunca saía de
+> "Reconectando...". Causa raiz confirmada via log real do servidor
+> (`journalctl -u gestfila`), não suposição:
+>
+> ```
+> "https://SEU_IP_INTERNO is not an accepted origin."
+> ```
+
+**Causa raiz:** o vhost de exemplo do `README.md` (seção "Instalação em
+produção", passo 11) nunca setava `X-Forwarded-Proto`. Sem esse header, o
+Gunicorn (atrás do Apache) só enxerga a conexão como HTTP simples - mesmo o
+navegador tendo chegado em HTTPS -, e o Flask-SocketIO rejeita o handshake
+do WebSocket por origem inconsistente (`https://...` no browser vs. `http://...`
+no que o backend acha que recebeu). **Não é** o problema já corrigido de
+`ProxyPass ws://` vs `http://` (esse já está certo no vhost do README, linhas
+`ProxyPass /socket.io/ ws://...` + `ProxyPass / http://...`, mesmo padrão do
+`deploy/apache-painel-senhas.conf` de referência) - é uma causa diferente,
+mais adiante no mesmo fluxo: o handshake chega no Gunicorn com o proxy
+certo, mas com o esquema errado.
+
+**Confirmado, não é falha do código Python (sem mudança em `app/`):** o
+projeto já tem a peça que deveria consumir esse header -
+`ProxyFix(x_for=1, x_proto=1)` + `TRUST_PROXY_HEADERS=True` em
+`ProductionConfig` (`app/__init__.py`/`app/config.py`, adendo 10.25) - e ela
+já está configurada corretamente (exatamente 1 hop, `x_proto=1`). O código
+nunca teve a chance de confiar em nada porque o Apache simplesmente não
+mandava o header nenhuma vez; não há causa mais funda mascarada por essa
+correção - uma vez que o Apache manda `X-Forwarded-Proto: https`, o
+`ProxyFix` já existente consome corretamente, sem qualquer ajuste adicional.
+O `deploy/apache-painel-senhas.conf` (deploy de referência anterior, mais
+antigo que o guia do README) **já tinha essa linha** desde sempre - o gap
+era só no vhost simplificado do README, que o próprio README já avisava
+"confira `deploy/` antes de divergir" (linha 78) sem essa linha
+especificamente ter sido carregada para o guia novo.
+
+**Implementação (só configuração de servidor, nenhuma mudança em código):**
+- `README.md` (seção "Instalação em produção", passo 11) - adicionada
+  `RequestHeader set X-Forwarded-Proto "https"` dentro do
+  `<VirtualHost *:443>`, logo após `ProxyPreserveHost On`, com comentário
+  citando o sintoma exato ("Reconectando..." pra sempre) para reconhecimento
+  rápido numa próxima instalação.
+- `mod_headers` (pré-requisito do `RequestHeader`) **já estava** no comando
+  `a2enmod` do passo 2 (`sudo a2enmod proxy proxy_http proxy_wstunnel ssl
+  headers rewrite`) - confirmado, nenhuma mudança necessária ali.
+
+**Sem mudança de código** - só documentação/config de exemplo; suíte de
+testes não roda contra um vhost Apache real, não há teste automatizado
+possível para esse achado (mesmo racional da 10.59, itens 1-3).
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da

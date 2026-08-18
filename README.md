@@ -206,6 +206,11 @@ As instruções abaixo assumem um servidor Ubuntu/Debian limpo e usam `/var/www/
         Header always set Strict-Transport-Security "max-age=63072000"
 
         ProxyPreserveHost On
+        # Sem isso o Flask-SocketIO vê a conexão como HTTP (o Gunicorn nunca sabe que
+        # o Apache está terminando TLS) e rejeita o handshake por origem inválida -
+        # sintoma: painel de TV preso em "Reconectando..." pra sempre (adendo 10.61).
+        RequestHeader set X-Forwarded-Proto "https"
+
         ProxyPass /socket.io/ ws://127.0.0.1:8000/socket.io/
         ProxyPassReverse /socket.io/ ws://127.0.0.1:8000/socket.io/
         ProxyPass / http://127.0.0.1:8000/
