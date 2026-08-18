@@ -5,6 +5,9 @@
 {% block conteudo %}
   <h1>{{ 'Editar super admin' if usuario else 'Novo super admin' }}</h1>
   <p class="subtitulo">Super admin global: sem empresa vinculada, acesso completo a todas as empresas (mesmo nível do usuário "superadmin" original).</p>
+  {% if not usuario %}
+    <p class="subtitulo">A senha é gerada automaticamente (temporária) e mostrada uma única vez após criar - o novo super admin é obrigado a trocá-la no primeiro login.</p>
+  {% endif %}
   <div class="card">
     <form method="post">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -15,8 +18,10 @@
       <label for="login">Login</label>
       <input type="text" id="login" name="login" value="{{ login }}" required>
 
-      <label for="senha">{{ 'Nova senha (deixe em branco para manter)' if usuario else 'Senha' }}</label>
-      <input type="password" id="senha" name="senha" autocomplete="new-password" {{ 'required' if not usuario else '' }}>
+      {% if usuario %}
+        <label for="senha">Nova senha (deixe em branco para manter)</label>
+        <input type="password" id="senha" name="senha" autocomplete="new-password">
+      {% endif %}
 
       <p><button class="botao" type="submit" style="margin-top:1.5rem;">Salvar</button></p>
     </form>

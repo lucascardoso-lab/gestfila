@@ -1,10 +1,13 @@
-from flask import abort, flash, g, redirect, render_template, request, url_for
+import secrets
+
+from flask import flash, g, redirect, render_template, request, url_for
 from flask_login import current_user
 
 from app.admin import admin_bp
 from app.admin.helpers import autorizar_objeto, resolver_empresa_contexto, resolver_unidade_contexto
 from app.extensions import db
 from app.models import Empresa, Perfil, Unidade, Usuario
+from app.utils.decorators import super_admin_required
 
 
 @admin_bp.route("/usuarios")
@@ -31,20 +34,26 @@ def listar_usuarios():
 
 
 @admin_bp.route("/usuarios/globais/novo", methods=["GET", "POST"])
+@super_admin_required
 def novo_usuario_global():
     """Cria um super admin global (sem empresa) - só acessível a super admins.
 
     Mesmo formato do usuário 'superadmin' semeado em seeds/seed_inicial.py: sem
     perfis nem unidades (irrelevantes, já que Usuario.is_super_admin - baseado
     só em empresa_id IS NULL - dá bypass em todo RBAC de perfil/unidade).
+
+    Senha (adendo 10.60): quem cria nunca escolhe a senha final - segue o
+    mesmo padrão do seed (adendo 10.35), senha temporária aleatória +
+    `deve_trocar_senha=True` (o middleware `forcar_troca_senha` já bloqueia
+    qualquer tela até a troca). A senha aparece UMA ÚNICA VEZ, direto na
+    resposta deste POST (nunca fica em sessão/flash/banco em texto claro) -
+    por isso a confirmação não tem link de "recarregar": um F5 reenviaria o
+    POST e criaria outro usuário.
     """
-    if not g.is_super_admin:
-        abort(403)
-
     if request.method == "POST":
-        nome, login, senha, _perfil_ids, _unidade_ids = _ler_formulario()
+        nome, login, _senha_ignorada, _perfil_ids, _unidade_ids = _ler_formulario()
 
-        erro = _validar_usuario(nome, login, senha, senha_obrigatoria=True)
+        erro = _validar_usuario(nome, login, senha="", senha_obrigatoria=False)
         if not erro and Usuario.query.filter_by(login=login).first():
             erro = "Já existe um usuário com esse login."
 
@@ -52,12 +61,17 @@ def novo_usuario_global():
             flash(erro, "error")
             return render_template("admin/usuarios/form_global.html", usuario=None, nome=nome, login=login)
 
+        senha_temporaria = secrets.token_urlsafe(12)
         usuario = Usuario(nome=nome, login=login, empresa_id=None)
-        usuario.set_senha(senha)
+        usuario.set_senha(senha_temporaria)
+        usuario.deve_trocar_senha = True
         db.session.add(usuario)
         db.session.commit()
-        flash(f"Super admin '{usuario.nome}' criado, com acesso a todas as empresas.", "info")
-        return redirect(url_for("admin.listar_usuarios"))
+        return render_template(
+            "admin/usuarios/global_criado.html",
+            usuario=usuario,
+            senha_temporaria=senha_temporaria,
+        )
 
     return render_template("admin/usuarios/form_global.html", usuario=None, nome="", login="")
 

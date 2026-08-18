@@ -1,0 +1,13 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}Super admin criado{% endblock %}
+
+{% block conteudo %}
+  <h1>Super admin criado</h1>
+  <div class="card">
+    <p>Usuário <strong>{{ usuario.nome }}</strong> (login <strong>{{ usuario.login }}</strong>) criado com acesso a todas as empresas.</p>
+    <p class="subtitulo">Senha temporária - anote agora, ela não será exibida novamente. O sistema vai exigir a troca no primeiro login.</p>
+    <p><code id="senha-temporaria" style="font-size:1.2rem;">{{ senha_temporaria }}</code></p>
+    <p><a class="botao" href="{{ url_for('admin.listar_usuarios') }}">Voltar para Usuários</a></p>
+  </div>
+{% endblock %}

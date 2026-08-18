@@ -351,7 +351,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.6 | Impressão física via térmica Bematech (ESC/POS) *(supersedida pela 10.28)* |
 | 10.7 | Link direto de acesso público (Totens e TVs) |
 | 10.8 | Rodízio de chamadas por Local (múltiplas filas) |
-| 10.9 | Super admin global criável pelo painel |
+| 10.9 | Super admin global criável pelo painel *(senha temporária + troca obrigatória, ver 10.60)* |
 | 10.10 | Busca com autocomplete no bloco Redirecionar |
 | 10.11 | Horário de relógio junto da duração (Atendimento) |
 | 10.12 | Nota operacional — seed de Perfis obrigatório |
@@ -5403,6 +5403,62 @@ localmente (com `gunicorn` agora presente no `venv`) - nenhum teste depende
 da ausência do Gunicorn no ambiente, nenhuma regressão.
 
 Suíte completa sem falhas.
+
+---
+
+## 10.60. ADENDO — Criação de super admin global via UI segue o mesmo padrão de senha do seed (temporária + troca obrigatória)
+
+> Pedido: a criação de um segundo super admin pelo painel (adendo 10.9) já
+> existia, mas divergia do único outro lugar que cria um super admin
+> (`seeds/seed_inicial.py`, adendo 10.35) - lá a senha inicial é sempre
+> temporária/aleatória, nunca escolhida por quem executa o seed. Na rota da
+> UI, quem criava digitava a senha final na hora, sem forçar troca -
+> inconsistente com o próprio padrão de segurança já adotado pro superadmin
+> original. Investigado antes de implementar (RBAC, origem do `empresa_id`,
+> unicidade de login) - achados abaixo.
+
+**RBAC unificado:** `novo_usuario_global` (`app/admin/usuarios.py`) trocou a
+checagem manual `if not g.is_super_admin: abort(403)` pelo decorator
+`@super_admin_required` (`app/utils/decorators.py`), o mesmo já usado em
+`admin/empresas.py` e `admin/perfis.py` - mesmo efeito, sem checagem nova.
+
+**Senha temporária + troca obrigatória:** a rota gera a senha com
+`secrets.token_urlsafe(12)` (mesma chamada do seed) e marca
+`usuario.deve_trocar_senha = True` - o middleware genérico
+`app/middleware/forcar_troca_senha.py` (adendo 10.35) já bloqueia qualquer
+tela até a troca, sem precisar de nada novo além de acionar a flag. Qualquer
+valor de `senha` que o cliente envie no POST é ignorado (o formulário
+(`admin/usuarios/form_global.html`) nem mostra mais o campo, ao criar - só ao
+editar um super admin já existente, onde a troca de senha continua opcional
+e explícita).
+
+**Exibição única da senha:** a senha temporária só existe na própria resposta
+HTML do POST de criação (`admin/usuarios/global_criado.html`) - nunca é
+salva em sessão/flash/log, só no hash (`Usuario.senha_hash`). Como um F5 do
+navegador reenviaria o mesmo POST (criando outro usuário), a tela de
+confirmação não tem link de "recarregar", só um link de volta para
+`/admin/usuarios`.
+
+**`empresa_id` e unicidade de login (confirmado, sem mudança):**
+`novo_usuario_global` sempre grava `Usuario(empresa_id=None)` direto, nunca
+depende de `resolver_empresa_contexto()` (usada pela criação de usuário
+normal, `novo_usuario`) - não existe caminho pra "esquecer" a empresa por
+acidente. `Usuario.login` já é `unique=True` **sem** escopo de empresa
+(`app/models/usuario.py`), então a validação de duplicidade existente
+(`Usuario.query.filter_by(login=login).first()`) já cobre corretamente um
+super admin colidindo com o login de qualquer usuário do sistema, de
+qualquer empresa.
+
+**Arquivos:** `app/admin/usuarios.py` (`novo_usuario_global`),
+`app/templates/admin/usuarios/form_global.html` (campo de senha só ao
+editar), `app/templates/admin/usuarios/global_criado.html` (novo - tela de
+confirmação). **Testes:** `tests/test_regressao_super_admin_global.py`
+estendido - formulário de criação sem campo de senha; senha enviada pelo
+cliente é ignorada; usuário nasce com `deve_trocar_senha=True`; senha
+temporária exibida na resposta do POST bate com o hash gravado; login com
+essa senha cai no fluxo de troca obrigatória (mesmo comportamento do
+seed, adendo 10.35); RBAC (403 pra admin de empresa, mesmo por URL direta)
+inalterado. Suíte completa (62 módulos) reexecutada sem falhas.
 
 ---
 

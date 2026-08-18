@@ -7,9 +7,14 @@ Cobre:
   globais existentes, com badge "Super admin global".
 - POST /admin/usuarios/globais/novo cria um usuário com empresa_id=None
   (Usuario.is_super_admin True) sem exigir empresa.
-- O super admin recém-criado consegue logar e tem acesso completo (mesmo nível
-  do super admin original) - ex.: acessa /admin/empresas e a listagem de
-  usuários de qualquer empresa, sem precisar de perfil/unidade.
+- Senha (adendo 10.60): quem cria não escolhe a senha - o sistema gera uma
+  temporária aleatória, marca deve_trocar_senha=True (mesmo padrão do seed,
+  adendo 10.35) e a exibe uma única vez na resposta do POST. O form de
+  criação não tem campo de senha.
+- O super admin recém-criado consegue logar (com a senha temporária), é
+  obrigado a trocá-la, e depois tem acesso completo (mesmo nível do super
+  admin original) - ex.: acessa /admin/empresas e a listagem de usuários de
+  qualquer empresa, sem precisar de perfil/unidade.
 - RBAC: admin de empresa recebe 403 ao tentar acessar as rotas de criação/edição
   de super admin global, mesmo sabendo a URL.
 - Editar/ativar-desativar um super admin global funciona e redireciona sem
@@ -19,6 +24,7 @@ Execução: python -m tests.test_regressao_super_admin_global (a partir da raiz
 do projeto, com o virtualenv ativado).
 """
 import os
+import re
 
 os.environ.setdefault("SECRET_KEY", "test")
 os.environ.setdefault("FLASK_ENV", "testing")
@@ -62,9 +68,9 @@ with app.app_context():
     ids = dict(empresa_a=empresa_a.id, super_original=super_id, admin_a=admin_a_id)
 
 
-def login_como(login):
+def login_como(login, senha="senha123"):
     c = app.test_client()
-    resp = c.post("/login", data={"login": login, "senha": "senha123"}, follow_redirects=True)
+    resp = c.post("/login", data={"login": login, "senha": senha}, follow_redirects=True)
     assert resp.status_code == 200, (login, resp.status_code)
     return c
 
@@ -101,12 +107,18 @@ with app.app_context():
 ok("POST /admin/usuarios/globais/novo como admin de empresa -> 403, nenhum usuário criado")
 
 # ===========================================================================
-# C) Super admin cria outro super admin global pelo painel.
+# C) Super admin cria outro super admin global pelo painel. Formulário não tem
+#    campo de senha; o servidor gera uma temporária (ignorando qualquer
+#    "senha" que o cliente tente enviar) e exige troca no 1º login.
 # ===========================================================================
+resp_form = c_super.get("/admin/usuarios/globais/novo")
+assert resp_form.status_code == 200
+assert b'name="senha"' not in resp_form.data
+ok("Formulário de criação de super admin global não tem campo de senha")
+
 resp = c_super.post(
     "/admin/usuarios/globais/novo",
-    data={"nome": "Segundo Super Admin", "login": "super_novo", "senha": "senha123"},
-    follow_redirects=True,
+    data={"nome": "Segundo Super Admin", "login": "super_novo", "senha": "senha_que_deveria_ser_ignorada"},
 )
 assert resp.status_code == 200
 
@@ -116,17 +128,44 @@ with app.app_context():
     assert criado.empresa_id is None
     assert criado.is_super_admin is True
     assert criado.perfis == []
+    assert criado.deve_trocar_senha is True
+    assert not criado.checar_senha("senha_que_deveria_ser_ignorada")
     novo_super_id = criado.id
-ok("POST /admin/usuarios/globais/novo cria usuário com empresa_id=None (is_super_admin=True)")
+ok("POST /admin/usuarios/globais/novo cria usuário com empresa_id=None, deve_trocar_senha=True, ignorando senha enviada pelo cliente")
 
 texto = resp.data.decode("utf-8")
-assert "super_novo" in texto
+match = re.search(r'id="senha-temporaria"[^>]*>([^<]+)<', texto)
+assert match, "senha temporária não encontrada na resposta do POST"
+senha_temporaria = match.group(1)
+with app.app_context():
+    assert db.session.get(Usuario, novo_super_id).checar_senha(senha_temporaria)
+ok("Senha temporária é exibida uma única vez, direto na resposta do POST, e bate com o hash gravado")
+
+resp = c_super.get("/admin/usuarios")
+assert resp.status_code == 200
+assert "super_novo" in resp.data.decode("utf-8")
 ok("Após criar, a listagem em /admin/usuarios volta a mostrar o novo super admin global")
 
+c_novo_super_primeiro_login = login_como("super_novo", senha=senha_temporaria)
+resp = c_novo_super_primeiro_login.get("/admin/empresas", follow_redirects=False)
+assert resp.status_code == 302
+assert "/trocar-senha-obrigatoria" in resp.headers["Location"]
+ok("Novo super admin logando com a senha temporária cai no fluxo de troca obrigatória, como o do seed")
+
 # ===========================================================================
-# D) O novo super admin consegue logar e tem acesso completo, igual ao original.
+# D) Após trocar a senha temporária, o novo super admin tem acesso completo,
+#    igual ao original (reaproveita a sessão já logada da etapa C).
 # ===========================================================================
-c_novo_super = login_como("super_novo")
+c_novo_super = c_novo_super_primeiro_login
+resp = c_novo_super.post(
+    "/trocar-senha-obrigatoria",
+    data={"nova_senha": "SenhaDefinitivaValida123!", "confirmar_senha": "SenhaDefinitivaValida123!"},
+    follow_redirects=True,
+)
+assert resp.status_code == 200
+with app.app_context():
+    assert db.session.get(Usuario, novo_super_id).deve_trocar_senha is False
+ok("Novo super admin troca a senha temporária pela definitiva, flag deve_trocar_senha vira False")
 
 resp = c_novo_super.get("/admin/empresas")
 assert resp.status_code == 200
