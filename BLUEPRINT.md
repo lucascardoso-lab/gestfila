@@ -5663,6 +5663,83 @@ achado.
 
 ---
 
+## 10.64. ADENDO — "Botão pai" e "Fila" na tela de Botões do totem não filtravam por Unidade (mesma classe de bug do 10.53)
+
+> Bug real relatado pelo cliente, com prints: nos campos "Botão pai" e "Fila"
+> de `admin/totem_botoes/form.html`, era possível selecionar um botão-pai ou
+> uma fila de OUTRA unidade por engano. Mesma classe de bug já corrigida no
+> checklist "Filas de destino permitidas" de `admin/locais/form.html`
+> (adendo 10.53) - investigado antes de assumir que a correção seria
+> idêntica, porque não era: aqui são dois `<select>` (seleção única), não um
+> checklist de checkboxes, e havia uma segunda regra de negócio faltando
+> (item 3 abaixo) que o 10.53 não tinha.
+
+**1. Campo "Unidade" é editável de verdade nas DUAS telas:**
+`editar_totem_botao()` (`app/admin/totem_botoes.py`) grava
+`botao.unidade_id = dados["unidade_id"]` sem restringir à unidade original
+do botão - só valida que pertence à mesma empresa
+(`unidades_da_empresa(empresa)`). Ou seja, o filtro precisa ser em tempo
+real (JS no `change` do select "Unidade"), não um filtro estático feito uma
+vez no carregamento - igual à tela "Novo botão".
+
+**2. Nenhum `data-unidade-id` existia nos selects "Botão pai"/"Fila"** -
+adicionado do zero em cada `<option>` (e em cada `<optgroup>` do select de
+Fila, que já agrupava por unidade via `filas|groupby('unidade.nome')`).
+
+**3. Regra de negócio faltando, achada nesta investigação (não só o filtro
+de unidade): "Botão pai" precisa ser um botão-MENU (`fila_id` nulo), nunca
+um botão-folha.** `_candidatos_pai()` só excluía o próprio botão e seus
+descendentes (evita ciclo na hierarquia) - não impedia escolher um
+botão-folha como pai. Um botão-folha vira uma ação de gerar senha no totem
+(`_decorar_botoes`/`app/totem/routes.py`: `gera_senha = botao.fila_id is
+not None`), nunca uma entrada de submenu - um botão colocado como filho
+dele ficaria inalcançável na navegação real do totem, mesmo que a
+hierarquia fosse tecnicamente válida no banco. Corrigido filtrando
+`fila_id=None` na própria query de `_candidatos_pai` - isso também fecha o
+lado servidor de graça: `_validar_totem_botao` já rejeita qualquer
+`parent_id` que não esteja em `candidatos_pai`, então um botão-folha
+enviado via POST direto (bypassando o form) também passa a ser rejeitado,
+não só escondido da tela. Auto-referência (o próprio botão como pai dele
+mesmo) e ciclos via descendentes **já eram tratados corretamente antes**
+desta correção - confirmado, não precisou de mudança.
+
+**4. Arquitetura da sigla (10.47) fora do escopo, confirmado:** `Fila`
+pertence a uma unidade e o filtro por unidade cobre isso normalmente, mas
+`TotemBotao.sigla` (não `Fila.sigla`, deprecada) não tem nenhuma relação
+com este bug - nada nessa parte foi tocado.
+
+**Correção:**
+- `app/admin/totem_botoes.py::_candidatos_pai` - acrescenta `fila_id=None`
+  ao filtro da query (item 3).
+- `app/templates/admin/totem_botoes/form.html` - `data-unidade-id` em cada
+  `<option>` de "Botão pai" e "Fila" (e em cada `<optgroup>` de "Fila");
+  script novo que filtra (`hidden`, nunca remove do DOM) as opções que não
+  batem com a unidade escolhida no `<select id="unidade_id">`, tanto no
+  load quanto a cada `change` - mesmo padrão do 10.53. Uma seleção que sai
+  de vista é resetada (`select.value = ""`), não fica "escondida mas
+  marcada" até o submit. Como `<option>`/`<optgroup>` não têm nenhum
+  `display:` de autor em `gestfila.css` (confirmado antes de aplicar -
+  ver a recorrência do bug `[hidden]` vs. `display` de autor documentada
+  no 10.53), o `hidden` nativo funciona aqui sem precisar de uma regra CSS
+  própria, diferente dos três casos anteriores daquele padrão.
+
+**Testes:** novo `tests/test_regressao_totem_botoes_filtro_unidade.py` -
+`data-unidade-id` presente nas duas telas (novo/editar) para as opções das
+duas unidades; troca de Unidade no formulário (confirmado via HTML
+renderizado, mesmo estilo dos demais testes deste projeto) restringe as
+opções disponíveis; um botão-folha nunca aparece na lista de candidatos a
+pai (nem no HTML, nem aceito no POST); o próprio botão não aparece como
+opção de pai dele mesmo na edição; uma fila/pai de outra unidade
+selecionada continua rejeitada no servidor (`_validar_totem_botao`, já
+existia, teste novo só confirma que não regrediu). Suíte completa sem
+falhas.
+
+**Arquivos alterados:** `app/admin/totem_botoes.py` (`_candidatos_pai`),
+`app/templates/admin/totem_botoes/form.html` (atributos + script), novo
+`tests/test_regressao_totem_botoes_filtro_unidade.py`.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da

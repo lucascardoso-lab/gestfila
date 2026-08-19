@@ -173,8 +173,18 @@ def _descendentes(botao):
 
 def _candidatos_pai(empresa, botao_atual):
     """Botões que podem ser escolhidos como pai - exclui o próprio botão e seus descendentes
-    (evitaria um ciclo na hierarquia)."""
-    candidatos = TotemBotao.query.filter_by(empresa_id=empresa.id).order_by(TotemBotao.label).all()
+    (evitaria um ciclo na hierarquia), e exclui botões-FOLHA (`fila_id` preenchido) - achado
+    de revisão (adendo 10.64, mesma classe de bug do 10.53): um botão-folha vira uma ação de
+    gerar senha no totem (`_decorar_botoes`/`app/totem/routes.py`), nunca uma entrada de
+    submenu - um botão colocado como filho dele ficaria inalcançável na navegação real,
+    mesmo que a hierarquia fosse tecnicamente válida no banco. Filtrar aqui (não só no
+    cliente) também é o que faz `_validar_totem_botao` rejeitar a seleção no submit, sem
+    precisar de uma checagem própria: `pai` só é aceito se estiver nesta lista."""
+    candidatos = (
+        TotemBotao.query.filter_by(empresa_id=empresa.id, fila_id=None)
+        .order_by(TotemBotao.label)
+        .all()
+    )
     if botao_atual is None:
         return candidatos
     excluidos = _descendentes(botao_atual) | {botao_atual.id}

@@ -23,22 +23,24 @@
       </select>
 
       <label for="parent_id">Botão pai (deixe em branco para botão raiz)</label>
+      <p class="subtitulo" style="margin:.35rem 0 .5rem;">Só mostra botões-menu (sem fila vinculada) da mesma unidade escolhida acima - um botão-folha não pode ter filhos.</p>
       {% set parent_sel = valores.parent_id if valores else (botao.parent_id if botao else none) %}
       <select id="parent_id" name="parent_id">
         <option value="">Nenhum (botão raiz)</option>
         {% for candidato in candidatos_pai %}
-          <option value="{{ candidato.id }}" {{ 'selected' if candidato.id == parent_sel else '' }}>{{ candidato.label }}</option>
+          <option value="{{ candidato.id }}" data-unidade-id="{{ candidato.unidade_id }}" {{ 'selected' if candidato.id == parent_sel else '' }}>{{ candidato.label }}</option>
         {% endfor %}
       </select>
 
       <label for="fila_id">Fila (deixe em branco para botão apenas de navegação/submenu)</label>
+      <p class="subtitulo" style="margin:.35rem 0 .5rem;">Só mostra filas da mesma unidade escolhida acima.</p>
       {% set fila_sel = valores.fila_id if valores else (botao.fila_id if botao else none) %}
       <select id="fila_id" name="fila_id">
         <option value="">Nenhuma (apenas navegação)</option>
         {% for unidade_nome, itens_unidade in filas|groupby('unidade.nome') %}
-          <optgroup label="{{ unidade_nome|upper }}">
+          <optgroup label="{{ unidade_nome|upper }}" data-unidade-id="{{ itens_unidade[0].unidade_id }}">
             {% for fila in itens_unidade %}
-              <option value="{{ fila.id }}" {{ 'selected' if fila.id == fila_sel else '' }}>[{{ fila.unidade.sigla_exibicao }}] {{ fila.nome }}</option>
+              <option value="{{ fila.id }}" data-unidade-id="{{ fila.unidade_id }}" {{ 'selected' if fila.id == fila_sel else '' }}>[{{ fila.unidade.sigla_exibicao }}] {{ fila.nome }}</option>
             {% endfor %}
           </optgroup>
         {% endfor %}
@@ -55,4 +57,60 @@
       <p><button class="botao" type="submit" style="margin-top:1.5rem;">Salvar</button></p>
     </form>
   </div>
+
+  <script>
+    (function () {
+      // Filtro por unidade dos selects "Botão pai" e "Fila" (achado nesta sessão,
+      // mesma classe de bug já corrigida no checklist "Filas de destino
+      // permitidas" de admin/locais/form.html, adendo 10.53): `candidatos_pai` e
+      // `filas` continuam vindo da EMPRESA INTEIRA do servidor de propósito - o
+      // campo "Unidade" é um <select> dentro do MESMO formulário, que pode mudar
+      // antes de salvar sem reload, então um filtro estático de servidor não
+      // daria conta. O filtro por unidade acontece aqui no cliente: cada
+      // <option>/<optgroup> carrega data-unidade-id, e o JS abaixo esconde
+      // (nunca remove do DOM) os que não são da unidade selecionada no momento,
+      // tanto no load quanto a cada troca do select "Unidade". A regra "mesma
+      // unidade" continua validada de verdade no servidor
+      // (_validar_totem_botao, app/admin/totem_botoes.py) - isto aqui é só UX,
+      // pra não mostrar opção que o submit rejeitaria depois. A regra "botão pai
+      // precisa ser um botão-menu" (sem fila vinculada) já vem filtrada do
+      // servidor em `candidatos_pai` (_candidatos_pai) - não precisa de filtro
+      // extra aqui, só o de unidade.
+      const elUnidade = document.getElementById("unidade_id");
+      const elParent = document.getElementById("parent_id");
+      const elFila = document.getElementById("fila_id");
+
+      function filtrarSelectPorUnidade(select) {
+        const unidadeSelecionada = elUnidade.value;
+        let opcaoSelecionadaFicouInvalida = false;
+
+        Array.from(select.options).forEach((opcao) => {
+          if (!opcao.dataset.unidadeId) return; // opção "Nenhum(a)" - sempre visível
+          const mesmaUnidade = opcao.dataset.unidadeId === unidadeSelecionada;
+          opcao.hidden = !mesmaUnidade;
+          if (!mesmaUnidade && opcao.selected) opcaoSelecionadaFicouInvalida = true;
+        });
+
+        // Optgroups (só existem no select de Fila) ficam ocultos quando nenhuma
+        // opção interna sobrou visível - evita rótulo de grupo vazio na lista.
+        select.querySelectorAll("optgroup[data-unidade-id]").forEach((grupo) => {
+          grupo.hidden = grupo.dataset.unidadeId !== unidadeSelecionada;
+        });
+
+        // Uma opção selecionada que sai de vista não pode continuar "contando"
+        // silenciosamente até o submit - mesmo que o backend rejeitasse
+        // (_validar_totem_botao), a UX de manter marcado algo que sumiu da tela
+        // é confusa (mesmo princípio já aplicado ao checklist de locais/form.html).
+        if (opcaoSelecionadaFicouInvalida) select.value = "";
+      }
+
+      function filtrarTudoPorUnidade() {
+        filtrarSelectPorUnidade(elParent);
+        filtrarSelectPorUnidade(elFila);
+      }
+
+      elUnidade.addEventListener("change", filtrarTudoPorUnidade);
+      filtrarTudoPorUnidade();
+    })();
+  </script>
 {% endblock %}
