@@ -27,6 +27,22 @@ from app.models import Fila, LogAtendimento, Senha, Totem, Tv
 
 EVENTOS_INICIO_ATENDIMENTO = ("chamada_senha", "chamada_nome")
 
+# Rótulo do que FECHA um segmento em tempo_atendimento() (adendo 10.63 - achado
+# em revisão do adendo 10.62, não decisão original): sem isso, um segmento que
+# termina em 'fim_atendimento' (operador concluiu o atendimento ali mesmo) e um
+# que termina em 'realocado' (operador só repassou adiante) cairiam na MESMA
+# chave de agrupamento sempre que operador/setor/fila/local coincidissem -
+# misturando "tempo até concluir" com "tempo até repassar" numa única média,
+# sem forma de diferenciar no relatório. Constantes centralizadas aqui (não
+# strings soltas em queries.py/routes.py/templates) - mesmo padrão de
+# enum/constante já usado em EVENTO_LOG/SETOR_LOG (app/models/log_atendimento.py).
+TIPO_FECHAMENTO_CONCLUSAO = "conclusao"
+TIPO_FECHAMENTO_REPASSE = "repasse"
+TIPO_FECHAMENTO_ROTULOS = {
+    TIPO_FECHAMENTO_CONCLUSAO: "Conclusão",
+    TIPO_FECHAMENTO_REPASSE: "Repasse",
+}
+
 
 def _senhas_filtradas(filtros):
     query = Senha.query.filter(
@@ -156,31 +172,37 @@ def _pares_inicio_fim(filtros):
     return pares
 
 
-def _pares_inicio_realocado(filtros):
-    """Para cada senha com ao menos um hand-off (evento 'realocado'), retorna
-    (log_inicio, log_realocado, unidade_id) - mede o PRIMEIRO segmento de
-    atendimento (ex.: Recepção, seção 5.3), da chamada até a primeira realocação.
+def _segmentos_intermediarios_realocacao(filtros):
+    """Para cada senha com ao menos um hand-off (evento 'realocado'), retorna UM
+    SEGMENTO POR REALOCAÇÃO - (log_inicio, log_realocado, fila_id, local_id,
+    unidade_id) - não só o primeiro (adendo 10.62, generaliza a versão anterior
+    desta função, `_pares_inicio_realocado`, que media só o hand-off inicial).
 
-    Só o primeiro 'realocado' de cada senha é considerado: se ela for realocada
-    mais de uma vez (ex.: Recepção -> Fila A -> Fila B -> Coleta), os segmentos
-    entre hand-offs intermediários não são medidos aqui - escopo assumido desta
-    consulta (ver seção 7 do BLUEPRINT), não uma lacuna a corrigir depois. O último
-    segmento (da última chamada até 'fim_atendimento') já é coberto por
-    `_pares_inicio_fim`/`tempo_atendimento`, sem nenhuma mudança nesta função.
+    Uma senha realocada 3 vezes (ex.: Recepção -> Fila A -> Fila B -> Finalizado)
+    gera 3 segmentos aqui - um por 'realocado' -, mais o último (última chamada
+    -> 'fim_atendimento') já coberto por `_pares_inicio_fim`/`tempo_atendimento`,
+    sem mudança nesta função.
 
-    'Início' é o evento chamada_senha/chamada_nome mais recente ANTES desse
-    primeiro 'realocado' - mesmo princípio de `_pares_inicio_fim` (pega a última
-    chamada antes do evento que fecha o segmento), só que aqui quem fecha o
-    segmento é 'realocado' em vez de 'fim_atendimento'.
+    Pareamento (percorre os eventos de fronteira em ordem cronológica, um único
+    ponteiro `inicio_pendente`): toda realocação exige a senha estar em status
+    chamada/em_atendimento primeiro - ou seja, sempre existe uma chamada nova
+    (chamada_senha/chamada_nome) na fila de destino antes da PRÓXIMA realocação -,
+    então este pareamento sequencial nunca "pula" ou perde um segmento.
 
-    Sem fila_id/local_id (decisão registrada ao aprovar esta métrica): diferente
-    de `_pares_inicio_fim`, que aproxima fila/local pelo estado ATUAL da Senha (só
-    correto porque nada os altera entre a última chamada e o fim), aqui o
-    Senha.fila_id/local_id atuais já refletem o DESTINO da realocação, não a fila
-    de origem onde essa chamada realmente ocorreu - LogAtendimento não guarda um
-    snapshot de fila/local por evento. Usar o valor atual mostraria a fila errada
-    (a de destino, rotulada como segmento de origem), então as linhas resultantes
-    não têm fila/local - só `unidade_id` (que não muda com a realocação).
+    fila_id/local_id vêm do SNAPSHOT gravado no próprio evento 'realocado'
+    (`LogAtendimento.fila_id`/`local_id`, adendo 10.62 Parte 1 - já é a fila/local
+    de ORIGEM, capturados antes da mutação em `registrar_realocacao`). Só existe
+    pra logs gravados a partir desta mudança.
+
+    **Dado histórico cai no comportamento ANTIGO, por senha (decisão de produto
+    deliberada, não lacuna):** se QUALQUER 'realocado' dessa senha não tiver o
+    snapshot (`fila_id IS NULL` - log gravado antes desta mudança), a senha
+    INTEIRA usa a regra antiga - só o primeiro segmento, sem fila/local (só
+    `unidade_id`), exatamente como `_pares_inicio_realocado` fazia. Decisão por
+    senha (não por evento isolado): cobre o caso normal (senha 100% antes ou
+    100% depois do deploy) com uma regra simples; o caso raro de uma senha em
+    atendimento NO MOMENTO exato do deploy (alguns logs de cada lado) cai no
+    fallback antigo também - mais seguro que misturar segmentos parciais.
     """
     mapa_unidade = {
         row.id: row.unidade_id
@@ -198,71 +220,101 @@ def _pares_inicio_realocado(filtros):
     for log in logs:
         eventos_por_senha[log.senha_id].append(log)
 
-    pares = []
+    segmentos = []
     for senha_id, eventos in eventos_por_senha.items():
-        primeiro_realocado = min(
-            (e for e in eventos if e.evento == "realocado"),
-            key=lambda e: e.timestamp,
-            default=None,
-        )
-        if primeiro_realocado is None:
+        eventos.sort(key=lambda e: e.timestamp)
+        realocacoes = [e for e in eventos if e.evento == "realocado"]
+        if not realocacoes:
             continue
 
-        inicio = max(
-            (
-                e for e in eventos
-                if e.evento in EVENTOS_INICIO_ATENDIMENTO and e.timestamp <= primeiro_realocado.timestamp
-            ),
-            key=lambda e: e.timestamp,
-            default=None,
-        )
-        if inicio is not None:
-            pares.append((inicio, primeiro_realocado, mapa_unidade[senha_id]))
-    return pares
+        unidade_id = mapa_unidade[senha_id]
+        dado_novo = all(r.fila_id is not None for r in realocacoes)
+
+        if not dado_novo:
+            primeiro_realocado = realocacoes[0]
+            inicio = max(
+                (
+                    e for e in eventos
+                    if e.evento in EVENTOS_INICIO_ATENDIMENTO and e.timestamp <= primeiro_realocado.timestamp
+                ),
+                key=lambda e: e.timestamp,
+                default=None,
+            )
+            if inicio is not None:
+                segmentos.append((inicio, primeiro_realocado, None, None, unidade_id))
+            continue
+
+        inicio_pendente = None
+        for evento in eventos:
+            if evento.evento in EVENTOS_INICIO_ATENDIMENTO:
+                inicio_pendente = evento
+            elif evento.evento == "realocado":
+                if inicio_pendente is not None:
+                    segmentos.append((inicio_pendente, evento, evento.fila_id, evento.local_id, unidade_id))
+                    inicio_pendente = None
+
+    return segmentos
 
 
 def tempo_atendimento(filtros):
     """Relatório 2: tempo de atendimento por operador, setor, fila e local (seção 10.3 -
     permite ver o tempo médio de um guichê específico, não só do setor genérico).
 
-    Inclui também o tempo do PRIMEIRO segmento de atendimento (ex.: Recepção antes
-    de realocar para a Coleta, seção 5.3) via `_pares_inicio_realocado` - essas
-    linhas aparecem com `fila_id`/`local_id` = None (exibidos como "—" no template/
-    export, mesmo tratamento já usado para IDs ausentes; ver docstring de
-    `_pares_inicio_realocado` para o motivo). Sem overlap com as linhas de
-    `_pares_inicio_fim`: são pares de eventos disjuntos - uma senha só-recepção
-    (nunca realocada) não gera nenhuma linha nova aqui; uma senha Recepção->Coleta
-    gera exatamente 2 linhas (uma por segmento), nunca a mesma medida duas vezes.
+    Inclui também os segmentos INTERMEDIÁRIOS de atendimento - uma senha realocada
+    mais de uma vez (ex.: Recepção -> Fila A -> Fila B -> Finalizado) gera um
+    segmento por hand-off, não só o primeiro (adendo 10.62; antes, adendo/seção 7
+    documentava a limitação de só medir o primeiro e o último) - via
+    `_segmentos_intermediarios_realocacao`. Essas linhas trazem `fila_id`/
+    `local_id` reais quando o log tem o snapshot novo (ver docstring da função);
+    dado histórico sem esse snapshot cai no comportamento antigo (`fila_id`/
+    `local_id` = None, exibidos como "—" no template/export, mesmo tratamento já
+    usado para IDs ausentes). Sem overlap com as linhas de `_pares_inicio_fim`:
+    são pares de eventos disjuntos - uma senha só-recepção (nunca realocada) não
+    gera nenhuma linha nova aqui; uma senha realocada N vezes gera exatamente
+    N+1 linhas (N segmentos intermediários + 1 final), nunca a mesma medida
+    duas vezes.
 
-    Agrupamento por (operador, setor, unidade) para as linhas sem fila - `unidade_id`
-    entra na chave interna só para não misturar, num cenário raro de operador
-    atuando em mais de uma unidade, segmentos de unidades diferentes numa única
-    linha (já que não há `fila_id` para servir de desambiguador, como acontece nas
-    linhas de `_pares_inicio_fim`, onde uma fila já pertence a uma única unidade).
-    `unidade_id` não vira uma coluna própria no relatório - só evita esse
-    cruzamento indevido internamente.
+    Agrupamento por (operador, setor, unidade) só para as linhas SEM fila (dado
+    histórico, sem snapshot) - `unidade_id` entra na chave interna só para não
+    misturar, num cenário raro de operador atuando em mais de uma unidade,
+    segmentos de unidades diferentes numa única linha (já que não há `fila_id`
+    para servir de desambiguador nesse caso, diferente das linhas com fila real,
+    onde uma fila já pertence a uma única unidade). `unidade_id` não vira uma
+    coluna própria no relatório - só evita esse cruzamento indevido internamente.
+
+    `tipo_fechamento` (`TIPO_FECHAMENTO_CONCLUSAO`/`TIPO_FECHAMENTO_REPASSE`,
+    adendo 10.63 - achado em revisão do 10.62, não decisão original) SEMPRE
+    entra na chave de agrupamento, mesmo quando operador/setor/fila/local
+    coincidem: sem isso, um segmento que termina em `fim_atendimento`
+    (operador concluiu ali) e um que termina em `realocado` (só repassou
+    adiante) cairiam na mesma linha/média, sem forma de diferenciar "tempo até
+    concluir" de "tempo até repassar" no relatório.
     """
     grupos = defaultdict(list)
     for inicio, fim, fila_id, local_id in _pares_inicio_fim(filtros):
         if filtros.operador_id and inicio.usuario_id != filtros.operador_id:
             continue
-        chave = (inicio.usuario_id, inicio.setor, fila_id, local_id, None)
+        chave = (inicio.usuario_id, inicio.setor, fila_id, local_id, None, TIPO_FECHAMENTO_CONCLUSAO)
         grupos[chave].append((fim.timestamp - inicio.timestamp).total_seconds())
 
-    for inicio, realocado, unidade_id in _pares_inicio_realocado(filtros):
+    for inicio, realocado, fila_id, local_id, unidade_id in _segmentos_intermediarios_realocacao(filtros):
         if filtros.operador_id and inicio.usuario_id != filtros.operador_id:
             continue
-        chave = (inicio.usuario_id, inicio.setor, None, None, unidade_id)
+        if fila_id is not None:
+            chave = (inicio.usuario_id, inicio.setor, fila_id, local_id, None, TIPO_FECHAMENTO_REPASSE)
+        else:
+            chave = (inicio.usuario_id, inicio.setor, None, None, unidade_id, TIPO_FECHAMENTO_REPASSE)
         grupos[chave].append((realocado.timestamp - inicio.timestamp).total_seconds())
 
     resultado = []
-    for (operador_id, setor, fila_id, local_id, _unidade_id), tempos in grupos.items():
+    for (operador_id, setor, fila_id, local_id, _unidade_id, tipo_fechamento), tempos in grupos.items():
         resultado.append(
             {
                 "operador_id": operador_id,
                 "setor": setor,
                 "fila_id": fila_id,
                 "local_id": local_id,
+                "tipo_fechamento": tipo_fechamento,
                 "tempo_medio_segundos": round(sum(tempos) / len(tempos), 1),
                 "quantidade": len(tempos),
             }

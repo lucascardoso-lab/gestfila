@@ -356,7 +356,7 @@ def _emitir_senha(fila, unidade, botao, tipo_senha=None, qtd_acompanhantes=0):
     db.session.add(senha)
     db.session.flush()  # garante senha.id antes de gravar o log
 
-    db.session.add(LogAtendimento(senha_id=senha.id, evento="gerada", unidade_id=unidade.id))
+    db.session.add(LogAtendimento(senha_id=senha.id, evento="gerada", unidade_id=unidade.id, fila_id=fila.id))
     db.session.commit()
 
     # Bug corrigido: gerar a senha aqui nunca avisava as telas de atendimento -

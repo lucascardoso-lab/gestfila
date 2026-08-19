@@ -2,7 +2,7 @@
 Teste de regressão: correção da causa raiz identificada na investigação do
 relatório de tempo de atendimento (seção 7 do BLUEPRINT) - o botão Realocar
 (seção 10.2) editava o campo Nome e gravava um log 'chamada_nome' colado ao
-'realocado' (mesma request), que _pares_inicio_realocado() escolhia por engano
+'realocado' (mesma request), que _segmentos_intermediarios_realocacao() escolhia por engano
 como "início" do segmento de atendimento da fila de origem, medindo esse
 segmento como ~0s em vez do tempo real.
 
@@ -21,7 +21,7 @@ corrigido de fato, não só a query isolada:
 
 1. Cenário original do bug: Chamar -> Realocar (com Nome preenchido) -> Coleta
    chama depois -> Finaliza. Confirma que NENHUM log 'chamada_nome' é gravado
-   no Realocar, e que _pares_inicio_realocado()/tempo_atendimento() medem o
+   no Realocar, e que _segmentos_intermediarios_realocacao()/tempo_atendimento() medem o
    tempo real do segmento da Recepção (não ~0s).
 2. Cenário de idas-e-vindas (Chamar -> Aguardar com Nome -> Chamar de novo ->
    Realocar com Nome de novo): confirma que a correção NÃO quebrou o
@@ -49,7 +49,7 @@ from app import create_app
 from app.extensions import db
 from app.models import Empresa, Fila, Local, LogAtendimento, Perfil, Senha, Unidade, Usuario
 from app.relatorios.helpers import Filtros
-from app.relatorios.queries import _pares_inicio_realocado, tempo_atendimento
+from app.relatorios.queries import _segmentos_intermediarios_realocacao, tempo_atendimento
 
 app = create_app("testing")
 
@@ -219,13 +219,15 @@ with app.app_context():
     db.session.commit()
 
 with app.app_context():
-    pares = _pares_inicio_realocado(_filtros())
-    assert len(pares) == 1
-    inicio, realocado_log, unidade_id = pares[0]
+    segmentos = _segmentos_intermediarios_realocacao(_filtros())
+    assert len(segmentos) == 1
+    inicio, realocado_log, fila_id, local_id, _unidade_id = segmentos[0]
     assert inicio.evento == "chamada_senha"
+    assert fila_id == ids["fila_recepcao"]  # snapshot real (adendo 10.62) - log gravado via rota HTTP
+    assert local_id == ids["local_recepcao"]
     duracao = (realocado_log.timestamp - inicio.timestamp).total_seconds()
     assert duracao == 120.0, duracao
-ok("_pares_inicio_realocado: 'início' é o chamada_senha genuíno da Recepção (não o chamada_nome do Realocar, que nem existe mais) - segmento medido = 120s, não ~0s")
+ok("_segmentos_intermediarios_realocacao: 'início' é o chamada_senha genuíno da Recepção (não o chamada_nome do Realocar, que nem existe mais) - segmento medido = 120s, não ~0s, com fila/local reais")
 
 with app.app_context():
     linhas = tempo_atendimento(_filtros())
@@ -305,14 +307,16 @@ with app.app_context():
     db.session.commit()
 
 with app.app_context():
-    pares = _pares_inicio_realocado(_filtros())
-    par_senha2 = next(p for p in pares if p[0].senha_id == ids["senha2"])
-    inicio, realocado_log, unidade_id = par_senha2
+    segmentos = _segmentos_intermediarios_realocacao(_filtros())
+    segmento_senha2 = next(s for s in segmentos if s[0].senha_id == ids["senha2"])
+    inicio, realocado_log, fila_id, local_id, _unidade_id = segmento_senha2
     assert inicio.evento == "chamada_senha"
     assert inicio.timestamp == t0 + timedelta(seconds=90), inicio.timestamp
+    assert fila_id == ids["fila_recepcao"]
+    assert local_id == ids["local_recepcao"]
     duracao = (realocado_log.timestamp - inicio.timestamp).total_seconds()
     assert duracao == 60.0, duracao
-ok("Idas-e-vindas: 'início' correto continua sendo a RE-chamada (90s), não a 1ª chamada (0s) nem o chamada_nome do Aguardar (30s) - segmento = 60s, comportamento pré-existente preservado")
+ok("Idas-e-vindas: 'início' correto continua sendo a RE-chamada (90s), não a 1ª chamada (0s) nem o chamada_nome do Aguardar (30s) - segmento = 60s, comportamento pré-existente preservado, fila/local reais")
 
 print()
 print(f"TODOS OS {len(passos)} TESTES DE 'REALOCAR NÃO CONTA COMO CHAMADA' PASSARAM")

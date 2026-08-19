@@ -1,18 +1,26 @@
 """
-Teste de regressão: métrica de tempo do PRIMEIRO segmento de atendimento (ex.:
-Recepção antes de realocar para a Coleta, seção 5.3/adendo 10.2) no relatório
-"tempo de atendimento" (seção 7 do BLUEPRINT) - _pares_inicio_realocado() e sua
-integração em tempo_atendimento(), sem alterar _pares_inicio_fim()/o segmento já
-existente (última chamada -> fim_atendimento).
+Teste de regressão: métrica de tempo de segmentos de atendimento (ex.: Recepção
+antes de realocar para a Coleta, seção 5.3/adendo 10.2) no relatório "tempo de
+atendimento" (seção 7 do BLUEPRINT) - _segmentos_intermediarios_realocacao() e
+sua integração em tempo_atendimento(), sem alterar _pares_inicio_fim()/o
+segmento já existente (última chamada -> fim_atendimento).
 
-Cobre os 3 cenários combinados antes de implementar:
+Desde o adendo 10.62, este arquivo cobre especificamente o FALLBACK para dado
+HISTÓRICO (sem o snapshot fila_id/local_id em LogAtendimento, adendo 10.62
+Parte 1) - o helper `log()` abaixo grava os logs deliberadamente SEM
+fila_id/local_id, simulando logs gravados antes da migration. O cenário de
+dado NOVO (com snapshot, N segmentos completos) está em
+tests/test_regressao_segmentos_realocacao.py.
+
+Cobre os 3 cenários combinados:
 1. Senha só-recepção (nunca realocada): NENHUMA linha nova - só a de sempre.
 2. Senha Recepção -> Coleta: exatamente 2 linhas (uma por segmento), sem overlap
    de eventos entre elas (nenhum log usado nos dois pareamentos).
-3. Senha com múltiplos realocados (Recepção -> Fila A -> Fila B/Coleta): só o
-   PRIMEIRO segmento (chamada inicial -> 1º realocado) e o ÚLTIMO (última chamada
-   -> fim_atendimento) são medidos - o segmento intermediário (Fila A) não gera
-   nenhuma linha, por design (escopo assumido, registrado no BLUEPRINT).
+3. Senha com múltiplos realocados (Recepção -> Fila A -> Fila B/Coleta), SEM
+   snapshot: só o PRIMEIRO segmento (chamada inicial -> 1º realocado) e o
+   ÚLTIMO (última chamada -> fim_atendimento) são medidos - o segmento
+   intermediário (Fila A) não gera nenhuma linha - comportamento antigo,
+   preservado de propósito para dado sem o snapshot novo (fallback histórico).
 
 Constrói os logs_atendimento diretamente via ORM (não via rotas HTTP) e chama
 tempo_atendimento()/Filtros diretamente - mesmo estilo dos demais testes de

@@ -683,6 +683,7 @@ def talvez_atualizar_nome(senha, nome_form, operador, setor, emitir_tv=True, reg
             LogAtendimento(
                 senha_id=senha.id, evento="chamada_nome", usuario_id=operador.id,
                 unidade_id=senha.unidade_id, setor=setor,
+                fila_id=senha.fila_id, local_id=senha.local_id,
             )
         )
     db.session.commit()
@@ -703,6 +704,11 @@ def registrar_chamada_senha(senha, local, operador, setor):
             usuario_id=operador.id,
             unidade_id=senha.unidade_id,
             setor=setor,
+            # já refletem esta chamada especificamente: fila_id não muda aqui, e
+            # local_id acabou de ser atribuído acima (linha anterior) - nenhum dos
+            # dois é sobrescrito por uma mutação futura antes de o log ser criado.
+            fila_id=senha.fila_id,
+            local_id=senha.local_id,
         )
     )
     db.session.commit()
@@ -734,6 +740,7 @@ def registrar_realocacao(senha, fila_destino, operador, setor):
     'aguardando' nela (vai ser chamada de novo, agora por quem atende a fila destino) -
     preserva criada_em/nome_paciente/observacoes, limpa os dados do atendimento atual."""
     fila_origem_id = senha.fila_id
+    local_origem_id = senha.local_id
     senha.fila_id = fila_destino.id
     senha.status = "aguardando"
     senha.chamada_em = None
@@ -744,6 +751,11 @@ def registrar_realocacao(senha, fila_destino, operador, setor):
         LogAtendimento(
             senha_id=senha.id, evento="realocado", usuario_id=operador.id,
             unidade_id=senha.unidade_id, setor=setor,
+            # ORIGEM, não destino (adendo 10.62) - capturados acima, antes das
+            # atribuições que movem a senha pra fila_destino/limpam o local. É
+            # essa fila/local que fecha o segmento de atendimento que terminou
+            # agora, não a fila pra onde a senha está indo.
+            fila_id=fila_origem_id, local_id=local_origem_id,
         )
     )
     db.session.commit()
@@ -755,6 +767,7 @@ def registrar_realocacao(senha, fila_destino, operador, setor):
 def registrar_volta_espera(senha, operador, setor):
     """'Aguardar' (seção 10.2): pausa o atendimento e devolve a senha para a fila de
     espera da MESMA fila, preservando criada_em (não perde a posição/idade na fila)."""
+    local_id_antes = senha.local_id
     senha.status = "aguardando"
     senha.chamada_em = None
     senha.local_id = None
@@ -764,6 +777,7 @@ def registrar_volta_espera(senha, operador, setor):
         LogAtendimento(
             senha_id=senha.id, evento="voltou_aguardar", usuario_id=operador.id,
             unidade_id=senha.unidade_id, setor=setor,
+            fila_id=senha.fila_id, local_id=local_id_antes,
         )
     )
     db.session.commit()
@@ -788,6 +802,8 @@ def registrar_fim_atendimento(senha, operador, setor):
             usuario_id=operador.id,
             unidade_id=senha.unidade_id,
             setor=setor,
+            fila_id=senha.fila_id,
+            local_id=senha.local_id,
         )
     )
     db.session.commit()

@@ -5,7 +5,7 @@
 
 {% block conteudo %}
   <h1>Tempo de atendimento</h1>
-  <p class="subtitulo">Tempo entre a chamada (senha/nome) e o fim do atendimento, por operador/setor/fila.</p>
+  <p class="subtitulo">Tempo entre a chamada (senha/nome) e o fim do atendimento (Conclusão) ou uma realocação para outra fila (Repasse), por operador/setor/fila.</p>
   <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
 
   {{ form_filtros(filtros, opcoes, 'relatorios.tempo_atendimento_view', querystring, mostrar_operador=True) }}
@@ -14,7 +14,7 @@
     <p>Nenhum dado para os filtros selecionados.</p>
   {% else %}
     <table>
-      <thead><tr><th>Operador</th><th>Setor</th><th>Fila</th><th>Local</th><th>Quantidade</th><th>Tempo médio</th></tr></thead>
+      <thead><tr><th>Operador</th><th>Setor</th><th>Fila</th><th>Local</th><th>Tipo</th><th>Quantidade</th><th>Tempo médio</th></tr></thead>
       <tbody>
         {% for linha in linhas %}
           <tr>
@@ -22,6 +22,7 @@
             <td>{{ linha.setor or '—' }}</td>
             <td>{{ linha.fila }}</td>
             <td>{{ linha.local }}</td>
+            <td><span class="badge {{ linha.tipo_fechamento }}">{{ linha.tipo_fechamento_rotulo }}</span></td>
             <td>{{ linha.quantidade }}</td>
             <td>{{ (linha.tempo_medio_segundos / 60) | round(1) }} min</td>
           </tr>

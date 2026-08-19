@@ -252,18 +252,19 @@ Baseados na tabela `logs_atendimento`, calcular:
 
 Sugestão de implementação: views agregadas (`CREATE VIEW`) ou queries com `GROUP BY` direto via SQLAlchemy — não precisa de data warehouse para o volume esperado.
 
-**Tempo de atendimento — segmento inicial (hand-off Recepção → Coleta):** o
-relatório 2 também mede o PRIMEIRO segmento de atendimento de uma senha (ex.:
-Recepção, da chamada até realocar para a Coleta - seção 5.3), via
-`_pares_inicio_realocado` (`app/relatorios/queries.py`), além do último segmento
-já coberto (última chamada → `fim_atendimento`). Essas linhas aparecem sem
-fila/local (exibidos como "—") - `logs_atendimento` não guarda snapshot de
-fila/local por evento, e o `Senha.fila_id`/`local_id` atuais já refletem o
-destino da realocação, não a fila de origem onde essa chamada realmente
-ocorreu. **Limitação de escopo assumida, não bug:** só o PRIMEIRO hand-off é
-medido - uma senha realocada mais de uma vez (ex.: Recepção → Fila A → Fila B)
-não tem os segmentos intermediários medidos, só o primeiro (chamada inicial →
-1ª realocação) e o último (última chamada → `fim_atendimento`).
+**Tempo de atendimento — todos os segmentos de uma senha realocada (adendo
+10.62):** o relatório 2 mede CADA segmento de atendimento de uma senha (ex.:
+Recepção → Fila A → Fila B → Finalizado = 3 segmentos), via
+`_segmentos_intermediarios_realocacao` (`app/relatorios/queries.py`) para os
+segmentos intermediários, mais o último segmento já coberto (última chamada →
+`fim_atendimento`, `_pares_inicio_fim`, sem mudança). Cada segmento traz a
+fila/local reais em que ocorreu, a partir de um snapshot gravado no próprio
+evento (`LogAtendimento.fila_id`/`local_id`) - **exceto para dados gravados
+antes desta mudança**, que continuam exibidos exatamente como antes (só o
+primeiro segmento, sem fila/local, "—" no lugar) - decisão de produto
+deliberada, não uma lacuna a corrigir; ver adendo 10.62 para o detalhe
+completo (era só o PRIMEIRO e o último segmento que eram medidos, e sem
+fila/local para o primeiro - limitação anterior, já superada para dado novo).
 
 **Correção deliberada — Realocar não grava mais log `chamada_nome`:** o botão
 Realocar (seção 10.2) permite editar o campo Nome no mesmo formulário usado
@@ -5515,6 +5516,150 @@ especificamente ter sido carregada para o guia novo.
 **Sem mudança de código** - só documentação/config de exemplo; suíte de
 testes não roda contra um vhost Apache real, não há teste automatizado
 possível para esse achado (mesmo racional da 10.59, itens 1-3).
+
+---
+
+## 10.62. ADENDO — Tempo de atendimento mede TODOS os segmentos de uma senha realocada (não só o 1º e o último)
+
+> Pedido do cliente: uma senha realocada mais de uma vez (ex.: Recepção →
+> Fila A → Fila B → Finalizado) deve ter os 3 segmentos medidos no relatório
+> de tempo de atendimento, cada um com fila/local corretos - não só o
+> primeiro (chamada → 1ª realocação) e o último (última chamada →
+> `fim_atendimento`), como documentado antes na seção 7 do BLUEPRINT
+> (limitação assumida ali, agora superada para dado novo).
+
+**Decisões de produto confirmadas antes de implementar:**
+- Segmentos de qualquer duração contam no tempo médio, mesmo poucos segundos
+  - sem filtro de "provável erro de clique".
+- **Dados históricos (atendimentos já registrados antes deste deploy) NUNCA
+  ganham a granularidade nova** - continuam exibidos exatamente como antes
+  (1º/último segmento, "—" quando aplicável). Só atendimentos cujos eventos
+  de realocação forem gravados a partir deste deploy têm os N segmentos
+  corretos, com fila/local reais. Decisão consciente, documentada aqui - não
+  é uma lacuna a "corrigir" depois com uma migração de dados retroativa.
+
+**Parte 1 - Snapshot de fila/local por evento** (pré-requisito, sem o qual
+não dá pra saber ONDE um segmento intermediário aconteceu):
+- Migration `9c1f6a3e5d7b` adiciona `logs_atendimento.fila_id`/`local_id`
+  (FK `filas.id`/`locais.id`, **nullable, sem migração de dados** - linhas
+  antigas ficam `NULL` pra sempre, de propósito).
+- Levantados os **7 pontos** do código que gravam em `logs_atendimento`
+  (confirmado lendo o código, não assumido): `gerada`
+  (`app/totem/routes.py`), `chamada_nome`/`chamada_senha`/`realocado`/
+  `voltou_aguardar`/`fim_atendimento` (`app/atendimento/helpers.py`) e
+  `encerramento_automatico_sistema` (`app/middleware/encerramento.py`).
+  `inicio_atendimento` está no enum mas nunca é gravado - sem mudança, já
+  documentado no topo de `app/relatorios/queries.py`. Todos os 7 passaram a
+  gravar `fila_id`/`local_id` da `Senha` no momento exato daquele evento.
+- **Dois pontos exigiram capturar o valor ANTES da mutação da própria ação**
+  (os outros 5 já liam o estado correto no momento de criar o log, sem
+  mudança de ordem): `registrar_realocacao` grava a fila/local de **ORIGEM**
+  (`fila_origem_id`/`local_origem_id`, capturados antes de mover a senha
+  pra `fila_destino`/limpar `local_id`) - é esse par que fecha o segmento
+  que terminou agora, não o destino pra onde a senha está indo.
+  `registrar_volta_espera` captura `local_id` antes de zerá-lo, pela mesma
+  razão.
+
+**Parte 2 - Generalização para N segmentos**
+(`app/relatorios/queries.py::_segmentos_intermediarios_realocacao`,
+substitui `_pares_inicio_realocado`): em vez de pegar só o primeiro
+`realocado` de cada senha, percorre TODOS os eventos de fronteira
+(`chamada_senha`/`chamada_nome`/`realocado`) em ordem cronológica com um
+único ponteiro `inicio_pendente` - toda realocação exige a senha estar em
+status chamada/em_atendimento primeiro (ou seja, sempre existe uma chamada
+nova na fila de destino antes da PRÓXIMA realocação), então o pareamento
+sequencial nunca pula um segmento. Uma senha realocada N vezes gera
+exatamente N segmentos intermediários aqui, mais 1 final (via
+`_pares_inicio_fim`, sem mudança) = N+1 no total.
+
+**Abordagem escolhida: iteração em Python, não self-join/`LAG`/`LEAD` em
+SQL.** Mesma filosofia já declarada no topo do arquivo (`app/relatorios/
+queries.py`) - agregação em Python mantém o código idêntico em SQLite
+(testes) e MySQL (produção), simples de testar, e o volume do projeto não
+justifica SQL específico de banco. A bifurcação "dado novo vs. histórico"
+(abaixo) também seria bem mais incômoda de expressar em SQL portável do que
+como um `if`/`else` em Python.
+
+**Fallback pra dado histórico, decidido POR SENHA (não por evento
+isolado):** se QUALQUER `realocado` de uma senha não tiver o snapshot
+(`fila_id IS NULL` - log de antes deste deploy), a senha inteira usa a regra
+ANTIGA - só o primeiro segmento, sem fila/local (só `unidade_id`), igual
+`_pares_inicio_realocado` fazia. Cobre o caso normal (senha 100% antes ou
+100% depois do deploy) com uma regra simples; o caso raro de uma senha em
+atendimento no momento exato do deploy (parte dos logs de cada lado) cai no
+mesmo fallback antigo - mais seguro que misturar segmentos parciais, e
+documentado aqui como a ressalva pedida (incerteza reconhecida, não
+escondida).
+
+**Operador de cada segmento:** confirmado sem necessidade de mudança - é o
+`usuario_id` do evento que ABRE aquele segmento (`chamada_senha`/
+`chamada_nome`), que já é sempre o operador que de fato realizou aquela
+chamada específica, inclusive para chamadas em filas de destino após uma
+realocação. Nenhum campo novo foi necessário para isso.
+
+**`_pares_inicio_fim` (segmento final) não mudou** - já estava correta para
+dado novo e antigo (nada muta `fila_id`/`local_id` entre a última chamada e
+o Finalizar, então a aproximação pelo estado atual da `Senha` já era exata).
+`ranking_operadores()` (relatório 4) também não mudou - continua usando só
+`_pares_inicio_fim` (tempo do último segmento), fora do escopo deste pedido.
+
+**Arquivos:** `migrations/versions/9c1f6a3e5d7b_*.py` (novo),
+`app/models/log_atendimento.py` (colunas `fila_id`/`local_id` +
+relationships), `app/totem/routes.py`, `app/atendimento/helpers.py`,
+`app/middleware/encerramento.py` (os 7 pontos de gravação),
+`app/relatorios/queries.py` (`_segmentos_intermediarios_realocacao`
+substitui `_pares_inicio_realocado`; `tempo_atendimento` atualizada pra
+consumir fila/local reais quando disponíveis).
+
+---
+
+## 10.63. ADENDO — "Conclusão" vs. "Repasse": tempo_atendimento() misturava dois tipos de segmento na mesma linha (achado em revisão do 10.62)
+
+> **Não foi uma decisão original - foi um efeito colateral encontrado em
+> revisão do adendo 10.62, apontado antes da aprovação final.** Antes da
+> 10.62, um segmento intermediário (que termina em `realocado`) sempre tinha
+> `fila_id=None` na chave de agrupamento de `tempo_atendimento()` - o que, por
+> acidente, também impedia essa linha de colidir com a de um segmento final
+> (que termina em `fim_atendimento`, sempre com `fila_id` real). A 10.62 deu
+> fila/local REAIS aos segmentos intermediários (o ponto central daquele
+> adendo) - e, sem perceber, apagou essa separação incidental: um operador
+> que às vezes finaliza e às vezes repassa na MESMA fila/local passou a ter
+> os dois tempos médios misturados numa única linha, sem forma de diferenciar
+> "tempo até concluir de verdade" de "tempo até só repassar adiante".
+
+**Correção:** `tipo_fechamento` entra na chave de agrupamento de
+`tempo_atendimento()` (`app/relatorios/queries.py`), sempre - mesmo quando
+operador/setor/fila/local coincidem entre uma linha de `_pares_inicio_fim`
+(fecha em `fim_atendimento`) e uma de `_segmentos_intermediarios_realocacao`
+(fecha em `realocado`). Dois valores possíveis, centralizados como
+constantes (não strings soltas espalhadas por `queries.py`/`routes.py`/
+templates, mesmo padrão de `EVENTO_LOG`/`SETOR_LOG` em
+`app/models/log_atendimento.py`): `TIPO_FECHAMENTO_CONCLUSAO = "conclusao"` e
+`TIPO_FECHAMENTO_REPASSE = "repasse"`, mais `TIPO_FECHAMENTO_ROTULOS` (dict
+de rótulo pro humano: "Conclusão"/"Repasse") - as três em
+`app/relatorios/queries.py`, importadas por `app/relatorios/routes.py` (não
+redefinidas lá).
+
+**Exposição na tela/export (não só campo interno do dict):** nova coluna
+"Tipo" em `app/templates/relatorios/tempo_atendimento.html`, entre "Local" e
+"Quantidade" - badge reaproveitando o MESMO padrão visual já usado em
+`volume.html` (`.badge.prioridade`/`.badge.normal`, definidos em
+`relatorios/_layout.html`): `.badge.conclusao` usa a paleta "positiva" já
+existente (verde-primária), `.badge.repasse` usa o neutro já existente
+(cinza) - nenhuma cor nova introduzida. CSV/Excel (`tempo_atendimento_view`,
+`app/relatorios/routes.py`) ganham uma coluna `tipo` com o mesmo rótulo
+("Conclusão"/"Repasse"), ao lado das colunas já existentes.
+
+**Testes:** `tests/test_regressao_segmentos_realocacao.py` estendido -
+cenário novo com o MESMO operador/fila/local, uma senha concluída
+(`fim_atendimento`, 200s) e outra repassada (`realocado`, 10s): confirma
+exatamente 2 linhas (`tipo_fechamento` "conclusao" e "repasse"), cada uma com
+sua própria média (200s e 10s), não uma única linha misturada (ex.: uma
+média incorreta de 105s). Os 4 segmentos do teste de 3 realocações também
+ganharam asserção de `tipo_fechamento` (3 "repasse" + 1 "conclusao" final).
+`ranking_operadores()` (relatório 4) não usa `tipo_fechamento` - continua
+agrupando só por operador (sem `fila_id` na chave), fora do escopo deste
+achado.
 
 ---
 

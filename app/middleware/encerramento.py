@@ -52,6 +52,8 @@ def cancelar_senhas_em_andamento():
                 usuario_id=None,  # ação do sistema, não de um operador logado
                 unidade_id=senha.unidade_id,
                 setor=senha.setor,
+                fila_id=senha.fila_id,
+                local_id=senha.local_id,
             )
         )
     db.session.commit()

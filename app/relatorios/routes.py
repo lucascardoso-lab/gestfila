@@ -7,6 +7,7 @@ from . import relatorios_bp
 from .export import exportar
 from .helpers import _unidades_ids_visiveis, filtros_para_querystring, mapas_nomes, opcoes_filtro, resolver_filtros
 from .queries import (
+    TIPO_FECHAMENTO_ROTULOS,
     coletar_alertas,
     ranking_operadores,
     resumo_recursos,
@@ -124,10 +125,15 @@ def tempo_atendimento_view():
         # (core/routes.py), BLUEPRINT.md seção 10.32: a coluna "Fila" já existe
         # ao lado, formato combinado descartado após conferência visual real.
         linha["local"] = locais.get(linha["local_id"], "—") if linha["local_id"] else "—"
+        # Rótulo pro humano (Conclusão/Repasse, adendo 10.63) - a linha já
+        # carrega o valor bruto ("conclusao"/"repasse") em tipo_fechamento,
+        # este campo novo é só a versão exibível (HTML + export).
+        linha["tipo_fechamento_rotulo"] = TIPO_FECHAMENTO_ROTULOS[linha["tipo_fechamento"]]
 
     if request.args.get("formato") in ("csv", "xlsx"):
         colunas = [
             {"operador": l["operador"], "setor": l["setor"], "fila": l["fila"], "local": l["local"],
+             "tipo": l["tipo_fechamento_rotulo"],
              "quantidade": l["quantidade"], "tempo_medio_segundos": l["tempo_medio_segundos"]}
             for l in linhas
         ]
