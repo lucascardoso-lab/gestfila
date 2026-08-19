@@ -16,23 +16,23 @@
     {% endif %}
   {% endif %}
 
-  <div class="grade">
+  <div class="grade" id="grade-botoes">
     {% for item in botoes %}
       {% if item.gera_senha %}
         {% if item.precisa_escolher_tipo %}
           {# 2+ tipos ativos na fila - precisa de uma escolha real, não dá pra pular. #}
-          <a class="botao-totem" href="{{ url_for('totem.confirmar_geracao', slug=totem.slug, botao_id=item.botao.id) }}">{{ item.botao.label }}</a>
+          <a class="botao-totem" data-botao-id="{{ item.botao.id }}" href="{{ url_for('totem.confirmar_geracao', slug=totem.slug, botao_id=item.botao.id) }}">{{ item.botao.label }}</a>
         {% else %}
           {# 0 ou 1 tipo ativo - nada a escolher, gera direto (sem tela de confirmação
              extra, pedido do cliente) - mesmo POST que a rota de geração já usava. #}
-          <form method="post" action="{{ url_for('totem.gerar_senha', slug=totem.slug, botao_id=item.botao.id) }}">
+          <form method="post" data-botao-id="{{ item.botao.id }}" action="{{ url_for('totem.gerar_senha', slug=totem.slug, botao_id=item.botao.id) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             {% if item.tipo_unico %}<input type="hidden" name="tipo_senha_id" value="{{ item.tipo_unico.id }}">{% endif %}
             <button type="submit" class="botao-totem">{{ item.botao.label }}</button>
           </form>
         {% endif %}
       {% elif item.tem_filhos %}
-        <a class="botao-totem navegacao" href="{{ url_for('totem.submenu', slug=totem.slug, botao_id=item.botao.id) }}">{{ item.botao.label }}</a>
+        <a class="botao-totem navegacao" data-botao-id="{{ item.botao.id }}" href="{{ url_for('totem.submenu', slug=totem.slug, botao_id=item.botao.id) }}">{{ item.botao.label }}</a>
       {% else %}
         <div class="botao-totem desabilitado">{{ item.botao.label }}</div>
       {% endif %}
@@ -40,4 +40,47 @@
       <p class="mensagem">Nenhuma opção disponível neste momento.</p>
     {% endfor %}
   </div>
+  <p class="mensagem" id="mensagem-fora-horario" hidden>Nenhuma opção disponível neste momento.</p>
+
+  <script>
+    (function () {
+      // Esconde botões de fila fora do horário de funcionamento (seção 10.1),
+      // atualizando SOZINHO enquanto a tela fica aberta sem navegação - achado
+      // na investigação: não existe (nem existiu) uma reimplementação de
+      // Fila.aberta_em() em JavaScript neste projeto (os widgets "Atendendo
+      // agora" só embutem um booleano JÁ calculado pelo servidor). Reaproveitar
+      // essa mesma lógica no NAVEGADOR do totem reabriria o histórico de bugs
+      // de fuso deste projeto (10.37/10.39/10.54); e a cascata de um botão-menu
+      // depende de descendentes que nem chegam ao HTML desta tela (o totem é
+      // multi-página - um submenu só carrega ao navegar). Por isso o cálculo
+      // continua 100% no servidor (app/totem/routes.py::
+      // _status_visibilidade_botoes) - aqui só aplicamos o resultado (`hidden`)
+      // e reconsultamos a cada 45s via fetch, sem reload da página.
+      const STATUS_INICIAL = {{ status_visibilidade | tojson }};
+      const grade = document.getElementById("grade-botoes");
+      const elementos = Array.from(grade.querySelectorAll("[data-botao-id]"));
+      const mensagemVazio = document.getElementById("mensagem-fora-horario");
+
+      function aplicarStatus(status) {
+        let algumVisivel = false;
+        elementos.forEach((el) => {
+          const visivel = status[el.dataset.botaoId] !== false; // ausente no mapa = deixa visível (não regride se o poll falhar/vier incompleto)
+          el.hidden = !visivel;
+          if (visivel) algumVisivel = true;
+        });
+        mensagemVazio.hidden = elementos.length === 0 || algumVisivel;
+      }
+
+      aplicarStatus(STATUS_INICIAL);
+
+      function atualizar() {
+        fetch("{{ url_for('totem.status_visibilidade_filas', slug=totem.slug) }}")
+          .then((resp) => (resp.ok ? resp.json() : null))
+          .then((status) => { if (status) aplicarStatus(status); })
+          .catch(() => {}); // sem conexão momentânea - mantém o último estado conhecido, tenta de novo no próximo ciclo
+      }
+
+      setInterval(atualizar, 45000);
+    })();
+  </script>
 {% endblock %}

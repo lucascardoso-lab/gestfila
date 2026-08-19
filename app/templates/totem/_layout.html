@@ -34,6 +34,13 @@
       cursor: pointer; padding: 1rem; line-height: 1.25;
       box-shadow: 0 4px 14px rgba(192,57,43,.28);
     }
+    /* 4ª ocorrência do mesmo padrão já corrigido 3x neste projeto (seção
+       10.53): `[hidden] { display: none; }` é regra de origem UA - qualquer
+       `display:` de origem AUTOR no mesmo elemento sempre vence, independente
+       de especificidade. `.botao-totem` acima tem `display: flex`, então o
+       `hidden` nativo aplicado por menu.html (filtro por horário de
+       funcionamento) seria silenciosamente ignorado sem esta regra própria. */
+    .botao-totem[hidden] { display: none; }
     .botao-totem:hover { background: var(--gf-primaria-escura); }
     /* --gf-escuro-fixo (não --gf-cinza-escuro): botão "navegação" continua
        escuro em qualquer tema - mesmo motivo do fundo do <nav>. */

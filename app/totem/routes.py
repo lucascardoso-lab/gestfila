@@ -1,4 +1,6 @@
-from flask import abort, redirect, render_template, request, url_for
+from collections import defaultdict
+
+from flask import abort, jsonify, redirect, render_template, request, url_for
 from sqlalchemy import func, update
 
 from app.atendimento.helpers import emitir_atualizacao_fila
@@ -23,6 +25,83 @@ def _totem_por_slug_ou_404(slug):
     app/utils/slug.py)."""
     totem = Totem.query.filter_by(slug=slug).first_or_404()
     return totem, totem.unidade
+
+
+def _status_visibilidade_botoes(unidade):
+    """Pra CADA botão ativo da unidade, calcula se deveria estar visível AGORA no
+    totem, dado o horário de funcionamento (seção 10.1) - achado nesta
+    investigação: NÃO existe (nem existiu) uma reimplementação de
+    `Fila.aberta_em()` em JavaScript neste projeto - os widgets "Atendendo
+    agora" (seção 10.10, iniciar_turno.html/_redirecionar_busca.html/
+    dashboard_queries.py) só embutem um booleano JÁ calculado pelo servidor no
+    render, nunca recalculado no cliente. Dado o histórico de bugs de fuso
+    deste projeto (10.37/10.39/10.54, sempre por resolver hora/dia FORA do
+    código central de fuso), replicar essa conta no relógio do NAVEGADOR do
+    totem reabriria o mesmo risco - por isso o cálculo continua 100% aqui,
+    reaproveitando a MESMA `aberta_em()` já usada em toda parte, e o cliente só
+    aplica o resultado (ver `menu.html`).
+
+    - Botão-FOLHA (`fila_id` preenchido): visível se `fila.aberta_em()`. Uma
+      fila SEM `horario_funcionamento` configurado (vazio/None - não deveria
+      acontecer no fluxo normal, a coluna tem default, mas tratado
+      defensivamente) é sempre considerada ABERTA - ausência de configuração
+      nunca esconde um botão, só uma configuração que bloqueia o período atual.
+    - Botão-MENU (`fila_id` nulo): visível se não tiver NENHUM descendente-folha
+      (puramente navegacional, nada aqui pra avaliar) OU se PELO MENOS UM
+      descendente-folha, em QUALQUER profundidade (não só filhos diretos),
+      estiver visível.
+
+    Calcula a árvore INTEIRA da unidade de uma vez (não só o nível pedido) -
+    necessário porque o totem é multi-página (cada submenu é uma navegação de
+    servidor separada, `submenu()` abaixo): um botão-menu na tela raiz pode ter
+    netos (descendentes de um filho que é ele mesmo um submenu) que nunca
+    chegam ao HTML da tela atual - só o servidor, com a árvore completa, pode
+    decidir a cascata corretamente. Usada tanto no embutido inicial
+    (`tela_raiz`/`submenu`) quanto no endpoint de poll
+    (`status_visibilidade_filas`) - uma implementação só, chamada duas vezes.
+    """
+    botoes = TotemBotao.query.filter_by(unidade_id=unidade.id, ativo=True).all()
+    filhos_por_pai = defaultdict(list)
+    for botao in botoes:
+        filhos_por_pai[botao.parent_id].append(botao)
+
+    memo = {}
+
+    def calcular(botao):
+        if botao.id in memo:
+            return memo[botao.id]
+        if botao.fila_id is not None:
+            fila = botao.fila
+            tem_folha = True
+            aberto = True if not fila or not fila.horario_funcionamento else fila.aberta_em()
+        else:
+            tem_folha = False
+            aberto = False
+            for filho in filhos_por_pai.get(botao.id, []):
+                filho_tem_folha, filho_aberto = calcular(filho)
+                if filho_tem_folha:
+                    tem_folha = True
+                    aberto = aberto or filho_aberto
+            if not tem_folha:
+                aberto = True
+        memo[botao.id] = (tem_folha, aberto)
+        return memo[botao.id]
+
+    return {botao.id: calcular(botao)[1] for botao in botoes}
+
+
+@totem_bp.route("/<slug>/status-visibilidade-filas")
+@limiter.limit("60 per minute")
+def status_visibilidade_filas(slug):
+    """Endpoint de poll (JS de `menu.html`, a cada ~45s) - devolve `{botao_id:
+    bool}` pra TODOS os botões ativos da unidade, recalculado a cada chamada
+    (mesma função do embutido inicial). Permite a tela do totem "abrir
+    sozinha" quando uma fila entra no horário, sem depender de F5, mesmo tendo
+    ficado aberta o dia inteiro sem navegação (ver `_status_visibilidade_botoes`)."""
+    totem, unidade = _totem_por_slug_ou_404(slug)
+    if not unidade.ativo or not totem.ativo:
+        return jsonify({})
+    return jsonify(_status_visibilidade_botoes(unidade))
 
 
 def _validar_botao(botao_id, unidade):
@@ -145,7 +224,8 @@ def tela_raiz(slug):
         .all()
     )
     return render_template(
-        "totem/menu.html", unidade=unidade, totem=totem, botoes=_decorar_botoes(botoes), botao_pai=None
+        "totem/menu.html", unidade=unidade, totem=totem, botoes=_decorar_botoes(botoes), botao_pai=None,
+        status_visibilidade=_status_visibilidade_botoes(unidade),
     )
 
 
@@ -165,7 +245,8 @@ def submenu(slug, botao_id):
         .all()
     )
     return render_template(
-        "totem/menu.html", unidade=unidade, totem=totem, botoes=_decorar_botoes(botoes), botao_pai=botao_pai
+        "totem/menu.html", unidade=unidade, totem=totem, botoes=_decorar_botoes(botoes), botao_pai=botao_pai,
+        status_visibilidade=_status_visibilidade_botoes(unidade),
     )
 
 

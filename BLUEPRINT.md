@@ -5740,6 +5740,112 @@ falhas.
 
 ---
 
+## 10.65. ADENDO — Totem esconde botões de fila fora do horário de funcionamento, atualizando sozinho sem F5
+
+> Nova feature pedida pelo cliente: em vez de deixar um botão de fila
+> clicável fora do horário configurado (`Fila.horario_funcionamento`, seção
+> 10.1) - o toque leva à tela "fora do horário de funcionamento" só depois de
+> navegar, `confirmar_geracao()`/`app/totem/routes.py` -, o botão deve
+> simplesmente **sumir** da tela enquanto a fila estiver fechada, e reaparecer
+> sozinho quando ela abrir, sem precisar de F5 (a tela do totem fica aberta o
+> dia inteiro sem interação nenhuma). Decisões já confirmadas com o cliente:
+> um botão-MENU também some se TODOS os seus descendentes-folha estiverem
+> fora do horário no momento.
+
+**Investigação (antes de implementar - 2 premissas do pedido original não se
+confirmaram):**
+
+1. **Formato de `horario_funcionamento` confirmado:** dict por dia da semana
+   (`app/models/fila.py::DIAS_SEMANA`, 7 dias), cada um com só DOIS períodos
+   booleanos (`manha` = 00:00–11:59, `tarde` = 12:00–23:59) - sem horário
+   exato, sem múltiplos intervalos por dia.
+
+2. **Não existe (nem existiu) uma reimplementação de `Fila.aberta_em()` em
+   JavaScript neste projeto** - premissa do pedido original. Os 3 lugares que
+   mostram "● Atendendo agora" (adendo 10.10: `iniciar_turno.html`,
+   `_redirecionar_busca.html`, `dashboard_queries.py`) recebem um booleano JÁ
+   calculado pelo SERVIDOR no render (`"aberta": {{ fila.aberta_em() |
+   tojson }}`) - um retrato estático da hora do request, nunca recalculado no
+   cliente. Não havia uma "2ª versão JS" pra reaproveitar.
+
+3. **Consequência de (2): não havia uma decisão já tomada sobre fuso no
+   cliente pra replicar.** Dado o histórico deste projeto (10.37/10.39/10.54 -
+   sempre bugs por resolver hora/dia FORA do código central de fuso,
+   `app/utils/tempo.py`), fazer o NAVEGADOR do totem recalcular dia/período
+   reabriria o mesmo risco: um totem físico com o relógio/fuso do SO mal
+   configurado erraria silenciosamente - exatamente a categoria de bug que a
+   10.37 eliminou ao mover a decisão de fuso pra dentro do código
+   (`FUSO_HORARIO`), longe de qualquer configuração ambiente.
+
+4. **Achado que mudou a arquitetura da correção:** o totem é multi-página -
+   cada nível de submenu é uma navegação de SERVIDOR separada
+   (`totem/routes.py::submenu`). Um botão-menu na tela raiz pode ter
+   descendentes-folha vários níveis abaixo que NUNCA chegam ao HTML da tela
+   atual (só ao navegar pra dentro). Calcular a cascata "todos os
+   descendentes-folha fora do horário" no cliente é estruturalmente
+   impossível sem os dados de páginas ainda não carregadas.
+
+Diante de (2)-(4), a abordagem foi confirmada com o cliente antes de
+implementar: cálculo 100% no SERVIDOR (reaproveitando a mesma
+`Fila.aberta_em()` de sempre - zero lógica de dia/período nova, zero
+reimplementação divergente), exposto de duas formas (mesma função,
+`_status_visibilidade_botoes`, chamada duas vezes):
+- **Embutido inicial:** `tela_raiz()`/`submenu()` passam
+  `status_visibilidade={{botao_id: bool}}` pro template - primeira pintura já
+  correta, sem esperar uma chamada de rede.
+- **Endpoint de poll:** `GET /totem/<slug>/status-visibilidade-filas` (JSON
+  leve, `{botao_id: bool}` de TODOS os botões ativos da unidade) - o JS de
+  `menu.html` consulta a cada 45s (`setInterval`) e reaplica `hidden`, sem
+  reload. O relógio do navegador do totem nunca entra na conta - só decide
+  QUANDO perguntar de novo, nunca O QUE responder.
+
+**Regra de cálculo (`_status_visibilidade_botoes`, `app/totem/routes.py`):**
+- Botão-FOLHA (`fila_id` preenchido): visível se `fila.aberta_em()`. **Fila
+  SEM `horario_funcionamento` configurado (vazio/`None`) é sempre considerada
+  ABERTA** - ausência de configuração nunca esconde um botão (fallback pedido
+  explicitamente, mesmo a coluna tendo um default que normalmente evita esse
+  caso).
+- Botão-MENU (`fila_id` nulo): visível se não tiver NENHUM descendente-folha
+  (puramente navegacional, nada aqui pra avaliar - nunca escondido por esta
+  lógica) OU se PELO MENOS UM descendente-folha, em QUALQUER profundidade
+  (não só filhos diretos), estiver visível.
+
+> **Achado de CSS (4ª ocorrência do mesmo padrão já documentado 3x nesta
+> seção 10.53):** `.botao-totem { display: flex; ... }`
+> (`app/templates/totem/_layout.html`) é uma regra de origem AUTOR - um
+> `hidden` nativo aplicado direto num `<a class="botao-totem">` seria
+> silenciosamente ignorado (`[hidden] { display: none }` é regra de origem
+> UA, sempre perde de qualquer `display:` de autor no mesmo elemento,
+> independente de especificidade). Corrigido com `.botao-totem[hidden] {
+> display: none; }`, mesma técnica das 3 ocorrências anteriores. O `<form>`
+> que envolve um botão-folha de submit direto não precisou da mesma correção -
+> não tem nenhum `display:` de autor no seletor `form` deste template.
+
+**UX adicional (não pedida explicitamente, mas mesma lógica da mensagem vazia
+já existente):** se TODOS os botões da tela ficarem escondidos (ex.: fila
+única da unidade, fora do horário), aparece a mesma mensagem "Nenhuma opção
+disponível neste momento." já usada quando o servidor não retorna nenhum
+botão - antes, a grade simplesmente ficaria visualmente vazia sem nenhuma
+explicação.
+
+**Testes:** novo `tests/test_regressao_totem_horario_funcionamento.py` (9
+casos, relógio simulado via patch de `app.utils.tempo._instante_utc`, mesmo
+padrão de `test_regressao_fuso_horario.py`) - fila dentro do horário agora
+(visível) e fora (escondido); fila sem `horario_funcionamento` (sempre
+visível); botão-menu com todos os descendentes-folha fechados (escondido) e
+com pelo menos um aberto (visível); botão-menu sem nenhum descendente-folha
+(nunca escondido); presença do embutimento inicial (`STATUS_INICIAL`) e do
+`setInterval`/`aplicarStatus` no HTML; endpoint de poll respondendo o mesmo
+cálculo do embutido inicial. Suíte completa sem falhas.
+
+**Arquivos alterados:** `app/totem/routes.py`
+(`_status_visibilidade_botoes`, rota `status_visibilidade_filas`, embutido em
+`tela_raiz`/`submenu`); `app/templates/totem/menu.html` (`data-botao-id` +
+script); `app/templates/totem/_layout.html` (`.botao-totem[hidden]`); novo
+`tests/test_regressao_totem_horario_funcionamento.py`.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da
