@@ -1,3 +1,5 @@
+import sys
+
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_limiter import Limiter
@@ -12,8 +14,12 @@ migrate = Migrate()
 csrf = CSRFProtect()
 limiter = Limiter(key_func=get_remote_address)
 
-# async_mode fixo em "eventlet" porque é o worker definido para produção (seção 10 do
-# BLUEPRINT: "Gunicorn + eventlet worker"). O monkey-patch do eventlet é feito só no
-# entrypoint real do servidor (run.py), nunca aqui, para não afetar testes/ferramentas
-# que apenas importam o pacote `app`.
-socketio = SocketIO(async_mode="eventlet")
+# async_mode "eventlet" em produção/Linux, casando com o worker do Gunicorn (seção 10
+# do BLUEPRINT: "Gunicorn + eventlet worker"). No Windows (dev local), o eventlet NÃO
+# torna subprocess.run() cooperativo direito - a geração de PDF (adendo 10.67, que roda
+# o Playwright em subprocess isolado) trava o hub inteiro do servidor local nesse SO
+# (achado real, não hipotético - reproduzido e investigado). "threading" usa threads
+# reais do SO, que não sofrem dessa limitação. O monkey-patch do eventlet continua
+# sendo feito só no entrypoint real do servidor (run.py), nunca aqui.
+_ASYNC_MODE = "eventlet" if sys.platform != "win32" else "threading"
+socketio = SocketIO(async_mode=_ASYNC_MODE)

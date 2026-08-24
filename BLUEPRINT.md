@@ -6197,22 +6197,52 @@ relatorios.py` ajustado.
 
 ---
 
-## 10.68. ADENDO — README de produção: cache do Chromium é por usuário, `sudo playwright install` sozinho não basta pro Gunicorn (www-data) enxergar o navegador
+## 10.68. ADENDO — Dois achados independentes na exportação de PDF (adendo 10.67): eventlet trava no Windows local + cache do Chromium por usuário em produção
 
-> Achado numa instalação real em produção (servidor `srv-painelsenha`),
-> seguindo o passo de instalação do Chromium documentado pelo adendo 10.67:
-> `sudo venv/bin/playwright install --with-deps chromium` (o comando
-> original) instala as dependências de sistema (`apt`, precisa de root) E
-> baixa o binário do Chromium - mas o binário vai pro cache do usuário que
-> RODA o comando (`~/.cache/ms-playwright`, convenção padrão do Playwright).
-> Rodado via `sudo` sem trocar de usuário, esse "usuário que roda" é `root`
-> (`/root/.cache/ms-playwright`) - o Gunicorn de produção roda como
-> `www-data` (`gestfila.service`, passo 9 do README), um usuário DIFERENTE,
-> com seu próprio cache vazio. Resultado: o `apt install` funcionou, mas a
-> primeira exportação de PDF em produção falhou com "Executable doesn't
-> exist" - um erro que só apareceu na hora de usar a feature, não durante a
-> instalação, exatamente o tipo de gap fácil de não notar seguindo o guia
-> literal.
+> Dois problemas descobertos em sessões de debug separadas, ambos
+> decorrentes do mesmo recurso novo (exportação de PDF, 10.67), com causas e
+> correções independentes - registrados juntos aqui por serem do mesmo
+> adendo pai, não por serem a mesma causa.
+
+**Achado 1 - `eventlet.monkey_patch()` incondicional travava o servidor de
+DESENVOLVIMENTO LOCAL inteiro no Windows ao clicar em "Exportar PDF" (painel
+de TV parava de atualizar via WebSocket, novas abas travavam):** causa raiz
+confirmada por teste - `eventlet.monkey_patch()` torna `subprocess.run()`
+cooperativo com o hub de greenthreads do eventlet no LINUX, mas não no
+Windows (limitação de plataforma do próprio eventlet, não um bug deste
+projeto). O worker de PDF (`app/relatorios/_pdf_worker.py`, adendo 10.67)
+roda em `subprocess.run()` a partir do processo Flask - sem a cooperação do
+eventlet nesse SO, essa chamada bloqueia de verdade o único hub do servidor
+de desenvolvimento (`socketio.run()`, `run.py`), travando toda e qualquer
+outra requisição/WebSocket enquanto o PDF é gerado. Em produção (Gunicorn +
+worker eventlet em Linux, README) isso nunca foi um problema - a limitação é
+específica do Windows.
+
+**Correção:** `eventlet.monkey_patch()` (`run.py`) e o `async_mode` do
+`SocketIO` (`app/extensions.py`) passam a ser condicionados por
+`sys.platform` - `"eventlet"`/monkey-patch ativo em produção/Linux (sem
+mudança de comportamento lá), `"threading"`/monkey-patch pulado no Windows
+(dev local) - `"threading"` usa threads reais do SO, que não sofrem dessa
+limitação de cooperação. **Validado**: painel de TV confirmado "CONECTADO"
+via WebSocket em tempo real no Windows depois da mudança, e a exportação de
+PDF parou de travar o servidor local.
+
+**Achado 2 - cache do Chromium é por usuário, `sudo playwright install`
+sozinho não basta pro Gunicorn (`www-data`) enxergar o navegador em
+PRODUÇÃO:** achado numa instalação real em produção (servidor
+`srv-painelsenha`), seguindo o passo de instalação do Chromium documentado
+pelo adendo 10.67: `sudo venv/bin/playwright install --with-deps chromium`
+(o comando original) instala as dependências de sistema (`apt`, precisa de
+root) E baixa o binário do Chromium - mas o binário vai pro cache do usuário
+que RODA o comando (`~/.cache/ms-playwright`, convenção padrão do
+Playwright). Rodado via `sudo` sem trocar de usuário, esse "usuário que
+roda" é `root` (`/root/.cache/ms-playwright`) - o Gunicorn de produção roda
+como `www-data` (`gestfila.service`, passo 9 do README), um usuário
+DIFERENTE, com seu próprio cache vazio. Resultado: o `apt install`
+funcionou, mas a primeira exportação de PDF em produção falhou com
+"Executable doesn't exist" - um erro que só apareceu na hora de usar a
+feature, não durante a instalação, exatamente o tipo de gap fácil de não
+notar seguindo o guia literal.
 
 **Correção:** passo de instalação do Chromium (README, seção "Instalação em
 produção") dividido em DOIS comandos com usuários diferentes - `sudo
@@ -6236,8 +6266,16 @@ install chromium`) foi aplicada nesse mesmo servidor e validada com sucesso
 depois: PDF gerado nos 4 relatórios, e o RBAC (403 pro perfil `atendente`)
 confirmado em produção também.
 
-**Arquivos alterados:** `README.md` (passo 5.1 da seção "Instalação em
-produção").
+**Testes:** suíte completa (68 arquivos) reexecutada sem falhas depois do
+Achado 1 - CI (Linux) não muda de comportamento (`_ASYNC_MODE` continua
+`"eventlet"` lá), a suíte de testes nunca importa `run.py`/passa pelo
+monkey-patch de qualquer forma (`create_app("testing")` direto). Achado 1
+validado manualmente (não por teste automatizado - é comportamento de
+WebSocket/servidor de desenvolvimento real, fora do escopo dos scripts de
+regressão deste projeto); Achado 2 validado em produção real (ver acima).
+
+**Arquivos alterados:** `app/extensions.py`, `run.py` (Achado 1);
+`README.md` (passo 5.1 da seção "Instalação em produção", Achado 2).
 
 ---
 
