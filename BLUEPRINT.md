@@ -5985,6 +5985,218 @@ por_senha`); novos `tests/test_regressao_segmentos_espera.py` e
 
 ---
 
+## 10.67. ADENDO — Exportação de relatórios em PDF (complementar ao CSV/Excel existente)
+
+> Pedido: além da exportação em CSV/Excel já existente (seção 7, via
+> `pandas`/`openpyxl`), adicionar exportação em PDF para os relatórios do
+> perfil Gerencial/Admin - uso principal é impressão/arquivamento e anexo em
+> prestação de contas. O pedido original trazia três premissas que a
+> investigação (antes de implementar, não presumida) derrubou ou revisou -
+> registradas aqui em detalhe porque mudaram a arquitetura da correção.
+
+**1. WeasyPrint (biblioteca original do pedido) não funciona nesta máquina de
+desenvolvimento só com `pip install` - testado, não presumido:**
+```
+pip install weasyprint   →  sucesso (baixa o wheel)
+from weasyprint import HTML  →  falha
+OSError: cannot load library 'libgobject-2.0-0': error 0x7e.
+```
+WeasyPrint depende de bibliotecas nativas do ecossistema GTK (Pango/Cairo/
+GObject) carregadas via `dlopen` em tempo de EXECUÇÃO, não de instalação -
+`pip install -r requirements.txt` completa "com sucesso" e engana, o import
+só quebra na hora de gerar um PDF de verdade. Isso quebraria o "só `pip
+install` e roda" que o README documenta hoje. **Trocado por Chromium
+headless via Playwright** (`playwright install chromium` - baixa o
+navegador consigo mesmo, sem depender de instalador de sistema separado em
+nenhum SO) - testado e confirmado gerando um PDF de verdade nesta mesma
+máquina sem nenhum passo manual extra além desse.
+
+**2. Nenhum dos 4 relatórios exportáveis tem `nome_paciente` - a parte do
+pedido sobre "PDF sem nome do paciente por padrão, checkbox pra incluir com
+permissão explícita, log de quem viu o nome" foi REMOVIDA do escopo, não
+implementada:** `tempo_espera`, `tempo_atendimento`, `volume`,
+`ranking-operadores` são todos agregados (por fila/unidade/dia/operador -
+médias, contagens), nenhum é uma listagem por senha. `nome_paciente` só
+aparece em `ultimas_chamadas()` (dashboard operacional, sem exportação
+nenhuma). Além disso, `Perfil.permissoes` (coluna JSON que serviria de base
+pra uma permissão granular) existe no schema mas nunca é lida em nenhum
+lugar do código - não havia infraestrutura de permissão fina pra
+reaproveitar, só o RBAC grosso `gerencial`/`admin` que já protege todo o
+blueprint. **Decisão confirmada com o cliente:** não construir essa parte
+agora (nada pra ela agir hoje); se um relatório por senha/paciente for
+criado no futuro, essa decisão volta à mesa com um alvo real.
+
+**3. Playwright chamado direto dentro do processo Flask emite um aviso real
+de threading não-cooperativa com o eventlet - testado antes de decidir a
+arquitetura final:**
+```
+1 RLock(s) were not greened, to fix this error make sure you run
+eventlet.monkey_patch() before importing any other modules.
+```
+`run.py` chama `eventlet.monkey_patch()` globalmente (Gunicorn `--worker-
+class eventlet` em produção, README) - um único worker eventlet processa
+MUITAS requisições concorrentes numa única thread do SO; se a geração de
+PDF bloquear essa thread de verdade (não de forma cooperativa), todas as
+outras requisições daquele worker ficariam paradas enquanto um PDF é
+gerado. **Corrigido isolando a geração num SUBPROCESS de verdade**
+(`app/relatorios/_pdf_worker.py`, chamado via `subprocess.run()` em
+`app/relatorios/pdf.py`) - o processo filho roda um Python novo, sem o
+monkey-patch do pai, então o Playwright roda sem nenhuma interferência; o
+processo PAI só espera o resultado via `subprocess.run()`, que o eventlet
+já sabe tornar cooperativo (não bloqueia as outras requisições enquanto
+espera). `_pdf_worker.py` é deliberadamente um script standalone (rodado
+como arquivo, não como `-m app.relatorios._pdf_worker`) - não passa pela
+árvore de import de `app/relatorios/__init__.py` (que importaria toda a
+árvore de rotas/queries à toa só pra converter HTML em PDF).
+
+**Geração via HTML → PDF, reaproveitando o MESMO template da tela, como
+pedido originalmente:** os 4 templates de relatório
+(`tempo_espera.html`/`tempo_atendimento.html`/`volume.html`/`ranking.html`)
+passaram de `{% extends "relatorios/_layout.html" %}` fixo para `{% extends
+layout_relatorio %}` - uma variável de contexto com default
+`"relatorios/_layout.html"` (`@relatorios_bp.context_processor`, `app/
+relatorios/__init__.py`) que a exportação em PDF sobrescreve explicitamente
+para `"relatorios/_layout_impressao.html"` (novo - sem `<nav>`/dark-mode/
+formulário de filtros interativo, cabeçalho com empresa/filtros aplicados
+por extenso, rodapé com data/hora de geração). O MESMO `{% block conteudo
+%}` (a tabela em si) é reaproveitado nos dois formatos - um ajuste visual
+futuro na tabela já reflete na tela E no PDF automaticamente, sem duas
+fontes de verdade. `{{ form_filtros(...) }}` (formulário + links de
+exportar) é pulado via `{% if not modo_impressao %}` (outra variável do
+mesmo context_processor).
+
+`relatorios/print.css` (novo, incluído INLINE via `{% include %}` dentro de
+`<style>` em `_layout_impressao.html`, não como `<link>` externo - o HTML
+entregue ao worker precisa ser 100% auto-contido, sem recurso externo a
+buscar, já que o worker roda isolado sem servidor por trás) - cores LITERAIS
+(não `var(--gf-*)`), mesma decisão já tomada pro cupom impresso do totem
+(`totem/senha_gerada.html`): um PDF impresso/arquivado é sempre "papel
+branco, tinta preta", independente do tema de quem gerou o relatório.
+Paginação (`Página X de Y`) via `@page { @bottom-right { content: counter
+(page) ...} }` - testado antes de assumir que funcionaria: ao contrário do
+que se poderia temer (Chromium tem suporte historicamente incompleto de CSS
+Paged Media), o motor de impressão do Chromium via `page.pdf()`
+(Playwright) renderiza esses counters corretamente, confirmado extraindo o
+texto de um PDF de teste multi-página com `pypdf`.
+
+**Log de auditoria da exportação (novo, não existia para CSV/Excel) - passa
+a valer pros TRÊS formatos, não só PDF:** nova tabela
+`logs_exportacao_relatorio` (`app/models/log_exportacao.py` +
+migration `b3d6f8a1c4e7`) - usuário, empresa, timestamp, tipo de relatório,
+formato do arquivo, filtros aplicados (unidade/fila/operador/período). Sem
+o campo de nome do paciente incluído (item 2 acima, removido do escopo).
+Motivado pela mesma lente de LGPD já usada no restante do projeto (README,
+seção "Dado sensível"): registrar quem exportou o quê é parte de conseguir
+responder "quem teve acesso a este dado" se algum dia for preciso - não é
+redundante com `LogAtendimento` (que audita o ATENDIMENTO em si, não o
+ACESSO/exportação de dados por um usuário do admin).
+
+**Dispatch de exportação unificado numa função só, não duplicado 4x:**
+`_exportar_relatorio()` (`app/relatorios/routes.py`) - as 4 rotas tinham o
+MESMO bloco `if request.args.get("formato") in ("csv", "xlsx"): ...`
+duplicado; cada uma precisaria ganhar o mesmo trecho novo de PDF + log de
+auditoria. Diferente do caso de `_segmentos_espera_por_senha`/`_segmentos_
+intermediarios_realocacao` (`queries.py`, adendo 10.66 - mantidas
+separadas de propósito, fallbacks de dado histórico divergentes), aqui o
+dispatch é IDÊNTICO entre os 4 relatórios - função única, não duplicação.
+
+**Filtros e período no PDF idênticos aos já existentes na tela (seção 7):**
+nenhum filtro novo introduzido. `filtros_legiveis()` (`app/relatorios/
+helpers.py`) resolve IDs pra nomes (unidade/fila/operador) e formata o
+período por extenso, pro arquivo ser autoexplicativo fora do sistema.
+
+**Falha na geração do PDF é recuperável, não um 500 cru:** `renderizar_pdf()`
+levanta `FalhaGeracaoPdf` (timeout do subprocess ou saída de erro) -
+`_exportar_relatorio()` captura, loga e devolve um flash de erro + redirect
+de volta pro relatório (sugerindo CSV/Excel como alternativa), em vez de
+quebrar a requisição inteira.
+
+> **Achado adicional, na revisão antes da aprovação (não presumido) - o
+> Chromium deixava pastas de perfil temporárias pra trás no Windows:**
+> `p.chromium.launch()` sozinho usa um perfil interno do próprio Chromium
+> (pasta `scoped_dir*` dentro do temp do SO) - gerando várias dezenas de PDFs
+> em sequência nesta máquina e inspecionando o temp depois, as pastas
+> ficavam pra trás mesmo após `browser.close()` (vazias - não é vazamento de
+> espaço em disco de verdade, mas lixo acumulando indefinidamente numa
+> máquina de produção rodando por meses, sem nenhuma limpeza automática).
+> **Corrigido** (`app/relatorios/_pdf_worker.py`) usando
+> `launch_persistent_context(perfil_dir)` com um `tempfile.mkdtemp()`
+> PRÓPRIO, removido explicitamente em `finally` (`shutil.rmtree`, cobre tanto
+> o caminho de sucesso quanto exceção) - testado de novo depois da correção,
+> zero resíduo. O worker nunca escreve o HTML/PDF em disco em nenhum ponto
+> (HTML chega via stdin, PDF sai via stdout, `subprocess.run(...,
+> capture_output=True)`) - só o perfil interno do Chromium tocava disco, e
+> agora tem ciclo de vida garantido.
+
+> **Dois achados adicionais, na revisão SEGUINTE antes da aprovação final -
+> um deles bloqueante por bater num padrão de bug já visto 3x neste
+> projeto:**
+>
+> **1. BLOQUEANTE - `gerado_em=datetime.utcnow()` no rodapé do PDF era a
+> MESMA classe de bug já corrigida pelos adendos 10.37/10.39/10.54** (hora/
+> data do servidor em UTC, em vez do fuso da clínica resolvido no código,
+> `app/utils/tempo.py::agora_na_clinica()`). Um PDF impresso/arquivado
+> mostrando "Gerado em 23:47" quando na clínica são 20:47 é exatamente o
+> tipo de coisa que um usuário nota e reporta - e o tipo de regressão fácil
+> de deixar passar porque `datetime.utcnow()` "funciona" nos testes
+> automatizados (que não fixam fuso por padrão). **Corrigido:** troca direta
+> por `agora_na_clinica()` (já importada/usada em todo o resto do projeto
+> pra esse exato propósito - nenhuma lógica de fuso nova). **Testado com o
+> relógio simulado** (`patch("app.utils.tempo._instante_utc", ...)`, mesmo
+> padrão de `test_regressao_fuso_horario.py`) num instante UTC onde a hora
+> de Brasília é visivelmente diferente (23:47 UTC = 20:47 Brasília) -
+> confirma "20:47" no rodapé do PDF gerado de verdade, não "23:47".
+>
+> **2. `registrar_exportacao()` rodava ANTES de `renderizar_pdf()` ter
+> sucesso** - se a geração falhasse (`FalhaGeracaoPdf`), o log de auditoria
+> já tinha sido gravado como se a exportação tivesse ocorrido, mesmo o
+> usuário só recebendo um flash de erro. Pra um log cujo propósito é
+> auditoria LGPD ("quem teve acesso a este dado"), registrar uma tentativa
+> falha como acesso real é impreciso. **Corrigido:** `registrar_exportacao()`
+> movida pra DEPOIS do sucesso nos 3 formatos (CSV/Excel também, por
+> consistência, não só PDF) - no caminho de PDF, só roda depois de
+> `renderizar_pdf()` retornar sem exceção. **Testado** com
+> `renderizar_pdf` mockado pra lançar `FalhaGeracaoPdf`: confirma que a
+> contagem de `logs_exportacao_relatorio` não muda quando a geração falha.
+
+**Fora de escopo nesta versão (candidatos a adendo futuro, não implementados
+agora):** relatório agendado/recorrente (envio automático por e-mail);
+geração de PDF combinando mais de um tipo de relatório num único arquivo;
+a permissão granular de nome_paciente (item 2 acima).
+
+**Testes:** novo `tests/test_regressao_exportacao_pdf.py` (6 casos, PDF
+gerado de PONTA A PONTA - não mockado, sobe o subprocess/Chromium de
+verdade e extrai o texto de volta com `pypdf`) - PDF contém os filtros
+aplicados no cabeçalho E o dado real da tabela (mesmo template da tela); log
+de auditoria gravado corretamente para os três formatos (CSV, Excel, PDF);
+RBAC idêntico ao das rotas de exportação existentes (403 para perfil sem
+acesso a relatórios, mesmo pedindo `formato=pdf`); rodapé usa o fuso da
+clínica, não UTC do servidor (relógio simulado, item 1 da revisão acima);
+falha na geração do PDF não grava log de auditoria (`renderizar_pdf`
+mockado, item 2 da revisão acima). `tests/test_regressao_
+exportacao_relatorios.py` ajustado - `formato=pdf` deixou de ser "formato
+desconhecido, ignorado" (comportamento antigo testado ali) e virou um
+formato real; o caso de "formato inválido cai pro HTML" passou a usar
+`formato=json` (verdadeiramente desconhecido) pra continuar cobrindo esse
+comportamento. Suíte completa (68 arquivos) sem falhas.
+
+**Arquivos alterados:** `requirements.txt` (`playwright`, `pypdf` - este
+último só para a suíte de testes); `.github/workflows/tests.yml` (`playwright
+install --with-deps chromium`); `README.md` (passo de instalação do Chromium,
+dev local E produção Ubuntu); `app/relatorios/pdf.py` (novo),
+`app/relatorios/_pdf_worker.py` (novo); `app/templates/relatorios/print.css`
+(novo), `app/templates/relatorios/_layout_impressao.html` (novo);
+`app/models/log_exportacao.py` (novo), migration `b3d6f8a1c4e7`;
+`app/relatorios/__init__.py` (`context_processor`); `app/relatorios/
+helpers.py` (`filtros_legiveis`, `registrar_exportacao`); `app/relatorios/
+routes.py` (`_exportar_relatorio`, as 4 rotas); `app/templates/relatorios/
+_macros.html` (link "PDF"); os 4 templates de relatório (`{% extends
+layout_relatorio %}` + `{% if not modo_impressao %}`); novo
+`tests/test_regressao_exportacao_pdf.py`; `tests/test_regressao_exportacao_
+relatorios.py` ajustado.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da

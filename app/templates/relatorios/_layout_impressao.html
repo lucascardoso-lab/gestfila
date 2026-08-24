@@ -1,0 +1,47 @@
+{# Layout de impressão dos relatórios (adendo 10.67) - reaproveita o MESMO
+   {% block conteudo %} dos templates de tela (tempo_espera.html/tempo_
+   atendimento.html/volume.html/ranking.html, cada um continua com {% extends
+   layout_relatorio %} - variável de contexto que aponta pra ESTE arquivo só
+   na exportação em PDF; no resto do tempo, "relatorios/_layout.html" via
+   default do context_processor do blueprint, app/relatorios/__init__.py).
+   Ajuste visual futuro na TABELA de um relatório já reflete nos dois
+   formatos automaticamente - um só {% block conteudo %} pra manter.
+
+   Diferenças deliberadas do layout de tela: sem <nav>/dark-mode/barra de
+   contexto (nada disso faz sentido num arquivo que só existe pra imprimir/
+   arquivar); SEM link externo pra gestfila.css - o worker de PDF
+   (app/relatorios/_pdf_worker.py) roda isolado, sem servidor por trás pra
+   responder a um url_for('static', ...), então o CSS de impressão
+   (print.css) é incluído INLINE via {% include %} - o HTML final chega ao
+   worker 100% auto-contido, sem nenhum recurso externo a buscar. #}
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <title>{% block titulo %}Relatório{% endblock %} - GESTFILA</title>
+  <style>
+    {% include "relatorios/print.css" %}
+  </style>
+</head>
+<body>
+  <main>
+    <header class="cabecalho-impressao">
+      <h1>{{ self.titulo() }}</h1>
+      <p class="contexto-empresa"><strong>{{ empresa.nome }}</strong></p>
+      {% if filtros_legiveis %}
+        <ul class="filtros-aplicados">
+          {% for item in filtros_legiveis %}
+            <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    </header>
+
+    {% block conteudo %}{% endblock %}
+
+    <footer class="rodape-impressao">
+      Gerado em {{ gerado_em.strftime('%d/%m/%Y %H:%M') }} — GESTFILA
+    </footer>
+  </main>
+</body>
+</html>

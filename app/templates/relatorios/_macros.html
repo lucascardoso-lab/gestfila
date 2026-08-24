@@ -48,5 +48,6 @@
     Exportar:
     <a href="{{ url_for(endpoint, formato='csv', **querystring) }}">CSV</a>
     <a href="{{ url_for(endpoint, formato='xlsx', **querystring) }}">Excel</a>
+    <a href="{{ url_for(endpoint, formato='pdf', **querystring) }}">PDF</a>
   </p>
 {% endmacro %}

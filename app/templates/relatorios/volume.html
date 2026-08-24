@@ -1,4 +1,4 @@
-{% extends "relatorios/_layout.html" %}
+{% extends layout_relatorio %}
 {% from "relatorios/_macros.html" import form_filtros with context %}
 
 {% block titulo %}Volume de senhas{% endblock %}
@@ -6,9 +6,10 @@
 {% block conteudo %}
   <h1>Volume de senhas</h1>
   <p class="subtitulo">Senhas geradas por fila/unidade/dia, prioridade vs. normal.</p>
-  <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
-
-  {{ form_filtros(filtros, opcoes, 'relatorios.volume', querystring) }}
+  {% if not modo_impressao %}
+    <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
+    {{ form_filtros(filtros, opcoes, 'relatorios.volume', querystring) }}
+  {% endif %}
 
   {% if not linhas %}
     <p>Nenhum dado para os filtros selecionados.</p>

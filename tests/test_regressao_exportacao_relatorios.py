@@ -14,9 +14,12 @@ sido exercitada por nenhum teste automatizado, apesar de usar pandas/openpyxl
    foco é que o parâmetro `formato` desvia a rota do render_template normal
    pra exportar(), com os dados já filtrados/legíveis (nome da fila/unidade,
    não IDs crus) chegando ao arquivo baixado.
-3) `formato` inválido/ausente não aciona a exportação - continua renderizando
-   a página HTML normalmente (comportamento por exclusão em
-   `request.args.get("formato") in ("csv", "xlsx")`).
+3) `formato` ausente ou verdadeiramente inválido (ex.: 'json') não aciona a
+   exportação - continua renderizando a página HTML normalmente
+   (`_exportar_relatorio` retorna `None` fora de `("csv", "xlsx", "pdf")`,
+   app/relatorios/routes.py). `formato=pdf` passou a ser um formato real
+   (adendo 10.67, exportação em PDF) - cobertura de ponta a ponta fica em
+   tests/test_regressao_exportacao_pdf.py, não duplicada aqui.
 
 Execução: python -m tests.test_regressao_exportacao_relatorios (a partir da
 raiz do projeto, com o virtualenv ativado).
@@ -148,10 +151,14 @@ assert resp.status_code == 200
 assert resp.mimetype == "text/html"
 ok("Sem `formato` (ou valor inválido) na querystring, a rota renderiza a página HTML normalmente, sem exportar")
 
-resp = c_admin.get("/relatorios/volume?formato=pdf")
+resp = c_admin.get("/relatorios/volume?formato=json")
 assert resp.status_code == 200
 assert resp.mimetype == "text/html"
-ok("`formato` desconhecido (ex.: 'pdf') é ignorado - continua renderizando HTML, não quebra")
+ok("`formato` verdadeiramente desconhecido (ex.: 'json') é ignorado - continua renderizando HTML, não quebra")
+
+# `formato=pdf` passou a ser um formato real (adendo 10.67) - cobertura de
+# ponta a ponta (geração de PDF de verdade, log de auditoria) fica em
+# tests/test_regressao_exportacao_pdf.py, não duplicada aqui.
 
 print()
 print(f"TODOS OS {len(passos)} TESTES DE EXPORTACAO DE RELATORIOS (CSV/XLSX) PASSARAM")

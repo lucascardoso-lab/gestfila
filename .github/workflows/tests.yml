@@ -22,6 +22,16 @@ jobs:
       - name: Instalar dependências
         run: pip install -r requirements.txt
 
+      # Exportação de relatórios em PDF (adendo 10.67) - "pip install" sozinho
+      # baixa o pacote playwright, mas NÃO o Chromium em si (binário separado,
+      # gerenciado pelo próprio playwright) - sem este passo, os testes que
+      # geram PDF de verdade falhariam com "Executable doesn't exist" ao
+      # tentar lançar o navegador. `--with-deps` também instala as
+      # dependências de sistema do Chromium na imagem ubuntu-latest do runner
+      # (libnss3, libatk etc.) - sem ele, o binário baixa mas não roda.
+      - name: Instalar Chromium (Playwright, exportação em PDF)
+        run: python -m playwright install --with-deps chromium
+
       # Sem banco de dados externo (nem MySQL como service container): a
       # suíte de testes (tests/test_regressao_*.py) sempre roda com
       # create_app("testing"), e TestingConfig (app/config.py) usa SQLite em

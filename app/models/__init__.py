@@ -14,6 +14,7 @@ from .local_rodizio_fila import LocalRodizioFila
 from .turno_ativo import TurnoAtivo
 from .senha import Senha
 from .log_atendimento import LogAtendimento
+from .log_exportacao import LogExportacaoRelatorio
 
 __all__ = [
     "usuario_perfil",
@@ -36,4 +37,5 @@ __all__ = [
     "TurnoAtivo",
     "Senha",
     "LogAtendimento",
+    "LogExportacaoRelatorio",
 ]

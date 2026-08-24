@@ -1,4 +1,4 @@
-{% extends "relatorios/_layout.html" %}
+{% extends layout_relatorio %}
 {% from "relatorios/_macros.html" import form_filtros with context %}
 
 {% block titulo %}Ranking de operadores{% endblock %}
@@ -6,15 +6,17 @@
 {% block conteudo %}
   <h1>Ranking de operadores</h1>
   <p class="subtitulo">Volume de chamadas (senha + nome) e tempo médio de atendimento.</p>
-  <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
+  {% if not modo_impressao %}
+    <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
 
-  <p class="aviso">
-    O tempo médio é calculado a partir do botão "Finalizar" da tela de Atendimento -
-    aparecerá como "—" apenas para operadores sem nenhum atendimento finalizado no
-    período filtrado. O volume (quantidade de chamadas) já é real.
-  </p>
+    <p class="aviso">
+      O tempo médio é calculado a partir do botão "Finalizar" da tela de Atendimento -
+      aparecerá como "—" apenas para operadores sem nenhum atendimento finalizado no
+      período filtrado. O volume (quantidade de chamadas) já é real.
+    </p>
 
-  {{ form_filtros(filtros, opcoes, 'relatorios.ranking', querystring) }}
+    {{ form_filtros(filtros, opcoes, 'relatorios.ranking', querystring) }}
+  {% endif %}
 
   {% if not linhas %}
     <p>Nenhum dado para os filtros selecionados.</p>

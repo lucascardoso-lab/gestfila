@@ -1,11 +1,21 @@
-from flask import render_template, request
+from flask import Response, current_app, flash, redirect, render_template, request, url_for
 
 from app.admin.helpers import resolver_empresa_contexto
 from app.models import Empresa
+from app.utils.tempo import agora_na_clinica
 
 from . import relatorios_bp
 from .export import exportar
-from .helpers import _unidades_ids_visiveis, filtros_para_querystring, mapas_nomes, opcoes_filtro, resolver_filtros
+from .helpers import (
+    _unidades_ids_visiveis,
+    filtros_legiveis,
+    filtros_para_querystring,
+    mapas_nomes,
+    opcoes_filtro,
+    registrar_exportacao,
+    resolver_filtros,
+)
+from .pdf import FalhaGeracaoPdf, renderizar_pdf
 from .queries import (
     TIPO_FECHAMENTO_ROTULOS,
     coletar_alertas,
@@ -17,6 +27,71 @@ from .queries import (
     ultimas_chamadas,
     volume_senhas,
 )
+
+
+def _exportar_relatorio(tipo_relatorio, nome_base, template, empresa, filtros, linhas, colunas, opcoes):
+    """Dispatch compartilhado pelos 3 formatos de exportação (CSV/Excel/PDF,
+    adendo 10.67) - usado pelas 4 rotas de relatório abaixo. Retorna a
+    Response de exportação se `?formato=` pedir um dos 3; retorna `None`
+    (sinalizando "não é uma exportação, renderize a tela normal") caso
+    contrário - mesmo padrão que cada rota já checava individualmente antes,
+    só que agora numa função só (as 4 rotas tinham o MESMO bloco
+    `if request.args.get("formato") in (...)` duplicado, e cada uma
+    precisaria ganhar o mesmo trecho novo de PDF + log de auditoria -
+    diferente do caso de `_segmentos_espera_por_senha`/`_segmentos_
+    intermediarios_realocacao` em `queries.py`, aqui o dispatch é
+    IDÊNTICO entre os 4 relatórios, não há fallback/formato de dado
+    divergente que justifique manter 4 cópias).
+
+    PDF renderiza o MESMO `template` da tela (`layout_relatorio` trocado pra
+    `_layout_impressao.html` via context - ver `app/relatorios/__init__.py`),
+    não um template à parte - qualquer ajuste visual futuro na tabela já
+    reflete nos dois formatos automaticamente.
+
+    `registrar_exportacao()` só é chamado APÓS o arquivo ser produzido com
+    sucesso (revisão antes da aprovação) - antes, era chamado antes de saber
+    se o PDF renderizava; se `renderizar_pdf()` falhasse, o log de auditoria
+    já tinha gravado a exportação como se tivesse ocorrido, mesmo o usuário
+    não recebendo nada além de um flash de erro. Pra um log cujo propósito é
+    auditoria LGPD ("quem teve acesso a este dado"), registrar uma tentativa
+    falha como acesso real é impreciso - CSV/Excel nunca tinham esse risco
+    (não há um caminho de erro capturado pra eles hoje), mas a ordem foi
+    corrigida pros 3 formatos por consistência, não só o PDF."""
+    formato = request.args.get("formato")
+    if formato not in ("csv", "xlsx", "pdf"):
+        return None
+
+    if formato in ("csv", "xlsx"):
+        resposta = exportar(colunas, nome_base, formato)
+        registrar_exportacao(tipo_relatorio, formato, empresa, filtros)
+        return resposta
+
+    html = render_template(
+        template,
+        empresa=empresa, filtros=filtros, linhas=linhas, opcoes=opcoes,
+        querystring=filtros_para_querystring(filtros, empresa),
+        layout_relatorio="relatorios/_layout_impressao.html", modo_impressao=True,
+        filtros_legiveis=filtros_legiveis(filtros, opcoes),
+        # Fuso da CLÍNICA (app/utils/tempo.py, seção 10.36/10.37), não UTC do
+        # servidor - mesma classe de bug já corrigida 3x neste projeto
+        # (10.37/10.39/10.54): um PDF impresso/arquivado mostrando "Gerado em
+        # 23:47" quando na clínica são 20:47 é o tipo de coisa que o usuário
+        # nota e reporta. datetime.utcnow() aqui seria reabrir esse bug num
+        # 4º call-site.
+        gerado_em=agora_na_clinica(),
+    )
+    try:
+        pdf_bytes = renderizar_pdf(html)
+    except FalhaGeracaoPdf:
+        current_app.logger.exception("Falha ao gerar PDF do relatório %s", tipo_relatorio)
+        flash("Não foi possível gerar o PDF agora. Tente novamente ou use CSV/Excel.", "error")
+        return redirect(url_for(request.endpoint, **filtros_para_querystring(filtros, empresa)))
+
+    registrar_exportacao(tipo_relatorio, formato, empresa, filtros)
+    return Response(
+        pdf_bytes, mimetype="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{nome_base}.pdf"'},
+    )
 
 
 def _empresa_ou_selecao(destino):
@@ -95,17 +170,22 @@ def tempo_espera():
         linha["fila"] = filas.get(linha["fila_id"], "—")
         linha["unidade"] = unidades.get(linha["unidade_id"], "—")
 
-    if request.args.get("formato") in ("csv", "xlsx"):
-        colunas = [
-            {"data": l["data"], "unidade": l["unidade"], "fila": l["fila"],
-             "quantidade": l["quantidade"], "tempo_medio_segundos": l["tempo_medio_segundos"]}
-            for l in linhas
-        ]
-        return exportar(colunas, "tempo_medio_espera", request.args["formato"])
+    opcoes = opcoes_filtro(empresa)
+    colunas = [
+        {"data": l["data"], "unidade": l["unidade"], "fila": l["fila"],
+         "quantidade": l["quantidade"], "tempo_medio_segundos": l["tempo_medio_segundos"]}
+        for l in linhas
+    ]
+    resposta_exportacao = _exportar_relatorio(
+        "tempo_medio_espera", "tempo_medio_espera", "relatorios/tempo_espera.html",
+        empresa, filtros, linhas, colunas, opcoes,
+    )
+    if resposta_exportacao is not None:
+        return resposta_exportacao
 
     return render_template(
         "relatorios/tempo_espera.html", empresa=empresa, filtros=filtros, linhas=linhas,
-        opcoes=opcoes_filtro(empresa), querystring=filtros_para_querystring(filtros, empresa),
+        opcoes=opcoes, querystring=filtros_para_querystring(filtros, empresa),
     )
 
 
@@ -130,18 +210,23 @@ def tempo_atendimento_view():
         # este campo novo é só a versão exibível (HTML + export).
         linha["tipo_fechamento_rotulo"] = TIPO_FECHAMENTO_ROTULOS[linha["tipo_fechamento"]]
 
-    if request.args.get("formato") in ("csv", "xlsx"):
-        colunas = [
-            {"operador": l["operador"], "setor": l["setor"], "fila": l["fila"], "local": l["local"],
-             "tipo": l["tipo_fechamento_rotulo"],
-             "quantidade": l["quantidade"], "tempo_medio_segundos": l["tempo_medio_segundos"]}
-            for l in linhas
-        ]
-        return exportar(colunas, "tempo_atendimento", request.args["formato"])
+    opcoes = opcoes_filtro(empresa)
+    colunas = [
+        {"operador": l["operador"], "setor": l["setor"], "fila": l["fila"], "local": l["local"],
+         "tipo": l["tipo_fechamento_rotulo"],
+         "quantidade": l["quantidade"], "tempo_medio_segundos": l["tempo_medio_segundos"]}
+        for l in linhas
+    ]
+    resposta_exportacao = _exportar_relatorio(
+        "tempo_atendimento", "tempo_atendimento", "relatorios/tempo_atendimento.html",
+        empresa, filtros, linhas, colunas, opcoes,
+    )
+    if resposta_exportacao is not None:
+        return resposta_exportacao
 
     return render_template(
         "relatorios/tempo_atendimento.html", empresa=empresa, filtros=filtros, linhas=linhas,
-        opcoes=opcoes_filtro(empresa), querystring=filtros_para_querystring(filtros, empresa),
+        opcoes=opcoes, querystring=filtros_para_querystring(filtros, empresa),
     )
 
 
@@ -158,17 +243,22 @@ def volume():
         linha["fila"] = filas.get(linha["fila_id"], "—")
         linha["unidade"] = unidades.get(linha["unidade_id"], "—")
 
-    if request.args.get("formato") in ("csv", "xlsx"):
-        colunas = [
-            {"data": l["data"], "unidade": l["unidade"], "fila": l["fila"],
-             "prioridade": l["prioridade"], "normal": l["normal"], "total": l["total"]}
-            for l in linhas
-        ]
-        return exportar(colunas, "volume_senhas", request.args["formato"])
+    opcoes = opcoes_filtro(empresa)
+    colunas = [
+        {"data": l["data"], "unidade": l["unidade"], "fila": l["fila"],
+         "prioridade": l["prioridade"], "normal": l["normal"], "total": l["total"]}
+        for l in linhas
+    ]
+    resposta_exportacao = _exportar_relatorio(
+        "volume_senhas", "volume_senhas", "relatorios/volume.html",
+        empresa, filtros, linhas, colunas, opcoes,
+    )
+    if resposta_exportacao is not None:
+        return resposta_exportacao
 
     return render_template(
         "relatorios/volume.html", empresa=empresa, filtros=filtros, linhas=linhas,
-        opcoes=opcoes_filtro(empresa), querystring=filtros_para_querystring(filtros, empresa),
+        opcoes=opcoes, querystring=filtros_para_querystring(filtros, empresa),
     )
 
 
@@ -184,14 +274,19 @@ def ranking():
     for linha in linhas:
         linha["operador"] = operadores.get(linha["operador_id"], "—")
 
-    if request.args.get("formato") in ("csv", "xlsx"):
-        colunas = [
-            {"operador": l["operador"], "volume": l["volume"], "tempo_medio_segundos": l["tempo_medio_segundos"]}
-            for l in linhas
-        ]
-        return exportar(colunas, "ranking_operadores", request.args["formato"])
+    opcoes = opcoes_filtro(empresa)
+    colunas = [
+        {"operador": l["operador"], "volume": l["volume"], "tempo_medio_segundos": l["tempo_medio_segundos"]}
+        for l in linhas
+    ]
+    resposta_exportacao = _exportar_relatorio(
+        "ranking_operadores", "ranking_operadores", "relatorios/ranking.html",
+        empresa, filtros, linhas, colunas, opcoes,
+    )
+    if resposta_exportacao is not None:
+        return resposta_exportacao
 
     return render_template(
         "relatorios/ranking.html", empresa=empresa, filtros=filtros, linhas=linhas,
-        opcoes=opcoes_filtro(empresa), querystring=filtros_para_querystring(filtros, empresa),
+        opcoes=opcoes, querystring=filtros_para_querystring(filtros, empresa),
     )

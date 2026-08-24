@@ -3,9 +3,11 @@ from datetime import datetime
 from typing import Optional
 
 from flask import g, request
+from flask_login import current_user
 
 from app.admin.helpers import filas_da_empresa, unidades_da_empresa
-from app.models import Unidade, Usuario
+from app.extensions import db
+from app.models import LogExportacaoRelatorio, Unidade, Usuario
 from app.utils.tempo import agora_na_clinica, janela_dia_clinica_em_utc
 
 
@@ -139,6 +141,62 @@ def filtros_para_querystring(filtros, empresa):
     if g.is_super_admin:
         qs["empresa_id"] = empresa.id
     return qs
+
+
+def filtros_legiveis(filtros, opcoes):
+    """Filtros aplicados, por extenso (não os valores brutos/IDs) - alimenta o
+    cabeçalho do PDF exportado (adendo 10.67), pra o arquivo ser
+    autoexplicativo fora do sistema (e-mail, impresso, pasta compartilhada).
+    Omite um filtro inteiramente quando não está aplicado ("todas as
+    unidades", por exemplo, não vira uma linha "Unidade: todas") - só o
+    período sempre aparece, porque `resolver_filtros` sempre resolve um
+    (default "hoje", adendo 10.54)."""
+    partes = []
+    if filtros.unidade_id:
+        nome = next((u.nome for u in opcoes["unidades"] if u.id == filtros.unidade_id), None)
+        if nome:
+            partes.append(f"Unidade: {nome}")
+    if filtros.fila_id:
+        nome = next((f.nome for f in opcoes["filas"] if f.id == filtros.fila_id), None)
+        if nome:
+            partes.append(f"Fila: {nome}")
+    if filtros.operador_id:
+        nome = next((o.nome for o in opcoes["operadores"] if o.id == filtros.operador_id), None)
+        if nome:
+            partes.append(f"Operador: {nome}")
+
+    data_inicio = datetime.strptime(filtros.data_inicio_str, "%Y-%m-%d").strftime("%d/%m/%Y")
+    data_fim = datetime.strptime(filtros.data_fim_str, "%Y-%m-%d").strftime("%d/%m/%Y")
+    if data_inicio == data_fim:
+        partes.append(f"Período: {data_inicio}")
+    else:
+        partes.append(f"Período: {data_inicio} a {data_fim}")
+
+    return partes
+
+
+def registrar_exportacao(tipo_relatorio, formato, empresa, filtros):
+    """Log de auditoria de exportação (adendo 10.67) - grava pros 3 formatos
+    (CSV, Excel e PDF; nenhum tinha esse registro antes). Motivado pela mesma
+    lente de LGPD já usada no restante do projeto (README, seção "Dado
+    sensível"): registrar quem exportou o quê é parte de conseguir responder
+    "quem teve acesso a este dado" se algum dia for preciso - não é redundante
+    com LogAtendimento (que audita o ATENDIMENTO em si, não o ACESSO/
+    exportação de dados por um usuário do admin)."""
+    db.session.add(
+        LogExportacaoRelatorio(
+            usuario_id=current_user.id,
+            empresa_id=empresa.id,
+            tipo_relatorio=tipo_relatorio,
+            formato=formato,
+            unidade_id=filtros.unidade_id,
+            fila_id=filtros.fila_id,
+            operador_id=filtros.operador_id,
+            data_inicio=filtros.data_inicio_str,
+            data_fim=filtros.data_fim_str,
+        )
+    )
+    db.session.commit()
 
 
 def mapas_nomes(empresa):

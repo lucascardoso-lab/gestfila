@@ -12,7 +12,7 @@ Toda a especificação funcional, o histórico de decisões de produto e as regr
 | Banco | MySQL 8 (driver PyMySQL) |
 | Front (totem/painel/admin) | Jinja2 + JS puro + Socket.IO client |
 | Servidor de produção | Gunicorn + worker `eventlet`, atrás de Apache2 (proxy reverso com suporte a WebSocket) — ver `deploy/` |
-| Relatórios/export | pandas + openpyxl |
+| Relatórios/export | pandas + openpyxl (CSV/Excel) + Chromium headless via Playwright (PDF) |
 
 Detalhes completos na [seção 10 do BLUEPRINT.md](BLUEPRINT.md).
 
@@ -31,6 +31,15 @@ Detalhes completos na [seção 10 do BLUEPRINT.md](BLUEPRINT.md).
    ```
    pip install -r requirements.txt
    ```
+
+   A exportação de relatórios em PDF (adendo 10.67) usa Chromium headless via
+   Playwright — `pip install` sozinho baixa só o pacote Python, o navegador em
+   si é um passo separado (uma vez só por máquina, não por deploy):
+   ```
+   playwright install chromium
+   ```
+   Sem isso, a tela funciona normalmente e CSV/Excel continuam exportando —
+   só o botão "PDF" falha (erro tratado, com flash de aviso, não um 500 cru).
 
 3. **Configurar variáveis de ambiente**
 
@@ -111,6 +120,15 @@ As instruções abaixo assumem um servidor Ubuntu/Debian limpo e usam `/var/www/
    source venv/bin/activate
    pip install --upgrade pip
    pip install -r requirements.txt
+   ```
+
+   Exportação de relatórios em PDF (adendo 10.67): instale o Chromium do
+   Playwright com `--with-deps` (também instala as bibliotecas de sistema que
+   ele precisa — libnss3, libatk etc. — um Ubuntu limpo não vem com elas).
+   `sudo` sozinho reseta o `PATH` e perderia o venv ativado acima — chame o
+   `python` de DENTRO do venv explicitamente, não o `playwright` do PATH:
+   ```bash
+   sudo venv/bin/python -m playwright install --with-deps chromium
    ```
 
 6. **Criar o banco de dados**

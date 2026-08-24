@@ -1,4 +1,4 @@
-{% extends "relatorios/_layout.html" %}
+{% extends layout_relatorio %}
 {% from "relatorios/_macros.html" import form_filtros with context %}
 
 {% block titulo %}Tempo médio de espera{% endblock %}
@@ -6,9 +6,10 @@
 {% block conteudo %}
   <h1>Tempo médio de espera</h1>
   <p class="subtitulo">Tempo entre a geração da senha e a chamada, por fila/unidade/dia.</p>
-  <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
-
-  {{ form_filtros(filtros, opcoes, 'relatorios.tempo_espera', querystring) }}
+  {% if not modo_impressao %}
+    <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
+    {{ form_filtros(filtros, opcoes, 'relatorios.tempo_espera', querystring) }}
+  {% endif %}
 
   {% if not linhas %}
     <p>Nenhum dado para os filtros selecionados.</p>

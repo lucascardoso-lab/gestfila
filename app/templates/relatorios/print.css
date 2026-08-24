@@ -1,0 +1,72 @@
+/* CSS de impressão dos relatórios (adendo 10.67, exportação em PDF) - incluído
+   INLINE dentro de <style> por relatorios/_layout_impressao.html (via a tag
+   Jinja "include"), não como <link> externo: o HTML entregue ao worker de PDF
+   (app/relatorios/_pdf_worker.py) precisa ser 100% auto-contido, sem nenhum
+   recurso externo a buscar (o worker roda isolado, sem servidor Flask rodando
+   por trás pra responder a um url_for('static', ...)).
+
+   Cores LITERAIS, não var(--gf-*) (mesma decisão já tomada pro cupom impresso
+   do totem, totem/senha_gerada.html): um PDF impresso/arquivado é sempre
+   "papel branco, tinta preta", independente do tema (claro/escuro/automático)
+   de quem gerou o relatório na tela - não teria sentido um PDF "escuro". */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: #fff;
+  color: #1a1a1a;
+  font-size: 11pt;
+}
+
+main { padding: 0 1.5rem; }
+
+.cabecalho-impressao {
+  border-bottom: 2px solid #1a1a1a;
+  padding-bottom: .75rem;
+  margin-bottom: 1.25rem;
+}
+.cabecalho-impressao h1 { font-size: 1.3rem; margin: 0 0 .25rem; }
+.cabecalho-impressao .contexto-empresa { font-size: .9rem; color: #444; margin: 0 0 .5rem; }
+.cabecalho-impressao .filtros-aplicados {
+  font-size: .85rem; color: #444; margin: 0; list-style: none; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 0 1.25rem;
+}
+.cabecalho-impressao .filtros-aplicados li::before { content: "•"; margin-right: .35rem; color: #999; }
+
+h1 { font-size: 1.2rem; margin: 0 0 .5rem; }
+.subtitulo { color: #555; font-size: .85rem; margin-bottom: 1rem; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #ccc; font-size: 10pt; }
+th { background: #f0f0f0; color: #333; }
+tr:last-child td { border-bottom: none; }
+
+/* Badges (Prioridade/Normal, Conclusão/Repasse) viram texto simples com
+   contorno leve no papel - a cor de fundo por si só é frágil em impressão P&B
+   (impressora sem toner colorido, fotocópia) - o contorno garante que a
+   distinção continua legível mesmo sem cor nenhuma chegando ao papel. */
+.badge {
+  display: inline-block; padding: .05rem .5rem; border-radius: 999px;
+  font-size: 9pt; border: 1px solid #999;
+}
+
+.rodape-impressao {
+  margin-top: 2rem; padding-top: .5rem; border-top: 1px solid #ccc;
+  font-size: 8.5pt; color: #777;
+}
+
+@page {
+  size: A4;
+  margin: 15mm 12mm;
+  /* Numeração de página nativa do motor de impressão (Chromium via
+     Playwright, page.pdf()) - counter(page)/counter(pages) só funcionam
+     dentro de @page (::before/::after de elementos normais não têm acesso a
+     esses counters). */
+  @bottom-right {
+    content: "Página " counter(page) " de " counter(pages);
+    font-size: 8.5pt;
+    color: #777;
+  }
+}
