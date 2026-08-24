@@ -122,14 +122,27 @@ As instruções abaixo assumem um servidor Ubuntu/Debian limpo e usam `/var/www/
    pip install -r requirements.txt
    ```
 
-   Exportação de relatórios em PDF (adendo 10.67): instale o Chromium do
-   Playwright com `--with-deps` (também instala as bibliotecas de sistema que
-   ele precisa — libnss3, libatk etc. — um Ubuntu limpo não vem com elas).
-   `sudo` sozinho reseta o `PATH` e perderia o venv ativado acima — chame o
-   `python` de DENTRO do venv explicitamente, não o `playwright` do PATH:
+   **5.1. Instalar o Chromium para geração de PDF (adendo 10.67)**
+
+   A exportação de relatórios em PDF usa Chromium headless via Playwright. São dois comandos separados, com usuários diferentes — não é um detalhe opcional, é a causa mais comum de "PDF não gera em produção" (adendo 10.68): o Playwright guarda o binário do navegador no cache do usuário que roda o `install`, e o serviço (`gestfila.service`) roda como `www-data`, não como o seu usuário SSH.
+
    ```bash
-   sudo venv/bin/python -m playwright install --with-deps chromium
+   # 1) Dependências de sistema (apt) — precisa de root, roda uma vez só
+   sudo venv/bin/playwright install --with-deps chromium
+
+   # 2) Binário do Chromium no cache do usuário REAL do serviço (www-data)
+   sudo mkdir -p /var/www/.cache
+   sudo chown www-data:www-data /var/www/.cache
+   sudo -u www-data venv/bin/playwright install chromium
    ```
+
+   Para confirmar que funcionou, sem depender do navegador nem do Gunicorn ainda estar no ar:
+
+   ```bash
+   sudo -u www-data venv/bin/python3 -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); b = p.chromium.launch(); print('OK', b.version); b.close(); p.stop()"
+   ```
+
+   Deve imprimir `OK` seguido da versão do Chromium. Se aparecer `Executable doesn't exist at /var/www/.cache/...`, o passo 2 acima não foi executado como `www-data` de fato — confira o usuário com `whoami` dentro do comando `sudo -u www-data` (ou rode `sudo -u www-data whoami` isoladamente para confirmar).
 
 6. **Criar o banco de dados**
    ```bash

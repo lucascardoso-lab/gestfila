@@ -6197,6 +6197,50 @@ relatorios.py` ajustado.
 
 ---
 
+## 10.68. ADENDO — README de produção: cache do Chromium é por usuário, `sudo playwright install` sozinho não basta pro Gunicorn (www-data) enxergar o navegador
+
+> Achado numa instalação real em produção (servidor `srv-painelsenha`),
+> seguindo o passo de instalação do Chromium documentado pelo adendo 10.67:
+> `sudo venv/bin/playwright install --with-deps chromium` (o comando
+> original) instala as dependências de sistema (`apt`, precisa de root) E
+> baixa o binário do Chromium - mas o binário vai pro cache do usuário que
+> RODA o comando (`~/.cache/ms-playwright`, convenção padrão do Playwright).
+> Rodado via `sudo` sem trocar de usuário, esse "usuário que roda" é `root`
+> (`/root/.cache/ms-playwright`) - o Gunicorn de produção roda como
+> `www-data` (`gestfila.service`, passo 9 do README), um usuário DIFERENTE,
+> com seu próprio cache vazio. Resultado: o `apt install` funcionou, mas a
+> primeira exportação de PDF em produção falhou com "Executable doesn't
+> exist" - um erro que só apareceu na hora de usar a feature, não durante a
+> instalação, exatamente o tipo de gap fácil de não notar seguindo o guia
+> literal.
+
+**Correção:** passo de instalação do Chromium (README, seção "Instalação em
+produção") dividido em DOIS comandos com usuários diferentes - `sudo
+venv/bin/playwright install --with-deps chromium` (root, só as dependências
+de sistema + o binário no cache de root, descartável) e `sudo mkdir -p
+/var/www/.cache && sudo chown www-data:www-data /var/www/.cache && sudo -u
+www-data venv/bin/playwright install chromium` (o binário no cache que o
+Gunicorn (`www-data`) de fato vai usar em runtime) - mais um comando de
+verificação (`sudo -u www-data venv/bin/python3 -c "..."`) que sobe e fecha
+um Chromium de verdade como `www-data`, sem depender do Gunicorn/da tela de
+relatórios estarem no ar pra confirmar que o passo funcionou.
+
+**Confirmado em servidor de produção real** (mesmo padrão dos achados de
+instalação já registrados, 10.59/10.61) - reproduzido no servidor
+`srv-painelsenha`: `journalctl -u gestfila` mostrou exatamente o erro
+previsto, `Executable doesn't exist at /var/www/.cache/ms-playwright/...`,
+confirmando que `sudo venv/bin/playwright install --with-deps chromium`
+sozinho (rodando como root) de fato deixa o binário fora do alcance do
+Gunicorn (`www-data`). A correção (`sudo -u www-data venv/bin/playwright
+install chromium`) foi aplicada nesse mesmo servidor e validada com sucesso
+depois: PDF gerado nos 4 relatórios, e o RBAC (403 pro perfil `atendente`)
+confirmado em produção também.
+
+**Arquivos alterados:** `README.md` (passo 5.1 da seção "Instalação em
+produção").
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da
