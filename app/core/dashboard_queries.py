@@ -14,6 +14,8 @@ from flask_login import current_user
 
 from app.admin.helpers import resolver_unidade_contexto, unidades_da_empresa
 from app.models import Fila, LogAtendimento, Senha
+from app.relatorios.helpers import Filtros
+from app.relatorios.queries import _segmentos_espera_por_senha
 
 # Mesma definição de "chamada" já usada em relatorios/queries.py (EVENTOS_INICIO_
 # ATENDIMENTO) - 'chamada_nome' deliberadamente NÃO é gravado pelo Realocar (seção 7
@@ -92,39 +94,35 @@ def calcular_kpis(empresa, unidades_visiveis):
 
 
 def _tempo_medio_espera_hoje(empresa, unidades_visiveis, inicio_hoje, fim_hoje):
-    """Tempo médio entre 'gerada' e 'chamada_senha' (mesmo par de eventos de
-    `tempo_medio_espera` em relatorios/queries.py), só que agregado num único número
-    (não por fila/dia) e restrito às senhas CRIADAS hoje - None sem nenhuma senha
-    chamada ainda hoje, nunca 0 (evita sugerir 'espera zero' quando na verdade não há
-    dado nenhum)."""
-    senha_ids = [
-        row.id
-        for row in Senha.query.filter(
-            Senha.empresa_id == empresa.id,
-            Senha.unidade_id.in_(unidades_visiveis),
-            Senha.criada_em >= inicio_hoje,
-            Senha.criada_em < fim_hoje,
-        ).with_entities(Senha.id)
+    """Tempo médio de espera das senhas CRIADAS hoje, agregado num único número
+    (não por fila/dia, diferente do relatório completo) - None sem nenhum
+    intervalo de espera fechado ainda hoje, nunca 0 (evita sugerir 'espera
+    zero' quando na verdade não há dado nenhum).
+
+    Reaproveita `_segmentos_espera_por_senha` (`app/relatorios/queries.py`,
+    adendo 10.66) - até esta correção, esta função tinha uma implementação
+    PRÓPRIA (não chamava a de `relatorios/queries.py`) com o MESMO padrão de
+    bug do relatório completo antes do 10.66: dict que sobrescrevia em caso de
+    múltiplos 'chamada_senha', e só considerava ('gerada', 'chamada_senha') -
+    nunca 'chamada_nome'/'realocado'/'voltou_aguardar'. Agora ganha de graça
+    TODOS os intervalos de espera do dia (não só o primeiro por senha) e o
+    mesmo fallback de dado histórico, sem duplicar a lógica de pareamento.
+
+    Formato de saída NÃO MUDOU (contrato usado por `dashboard.html`/
+    `calcular_kpis` - um único `int` de segundos ou `None`), só a fonte dos
+    intervalos - `_segmentos_espera_por_senha` retorna um por ESTÁGIO da
+    jornada; aqui todos são achatados numa única média, sem distinguir fila
+    nem estágio (esse detalhamento é o que o relatório completo, "Tempo médio
+    de espera", já oferece)."""
+    filtros = Filtros(
+        empresa_id=empresa.id, unidades_permitidas=unidades_visiveis, unidade_id=None,
+        fila_id=None, operador_id=None, data_inicio=inicio_hoje, data_fim_exclusivo=fim_hoje,
+        data_inicio_str="", data_fim_str="",
+    )
+    tempos = [
+        (fechamento.timestamp - abertura.timestamp).total_seconds()
+        for abertura, fechamento, _fila_id, _unidade_id in _segmentos_espera_por_senha(filtros)
     ]
-    if not senha_ids:
-        return None
-
-    logs = LogAtendimento.query.filter(
-        LogAtendimento.senha_id.in_(senha_ids),
-        LogAtendimento.evento.in_(("gerada", "chamada_senha")),
-    ).all()
-
-    eventos_por_senha = {}
-    for log in logs:
-        eventos_por_senha.setdefault(log.senha_id, {})[log.evento] = log.timestamp
-
-    tempos = []
-    for eventos in eventos_por_senha.values():
-        gerada_em = eventos.get("gerada")
-        chamada_em = eventos.get("chamada_senha")
-        if gerada_em is not None and chamada_em is not None:
-            tempos.append((chamada_em - gerada_em).total_seconds())
-
     if not tempos:
         return None
     return round(sum(tempos) / len(tempos))

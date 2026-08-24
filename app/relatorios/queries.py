@@ -27,6 +27,13 @@ from app.models import Fila, LogAtendimento, Senha, Totem, Tv
 
 EVENTOS_INICIO_ATENDIMENTO = ("chamada_senha", "chamada_nome")
 
+# Eventos que ABREM/FECHAM um intervalo de ESPERA (tempo_medio_espera, adendo
+# 10.66 - ver docstring de _segmentos_espera_por_senha): uma senha começa a
+# esperar quando é gerada, quando é realocada pra outra fila, ou quando volta
+# a aguardar (operador usa "Aguardar") - e para de esperar na próxima chamada
+# (chamada_senha/chamada_nome, = EVENTOS_INICIO_ATENDIMENTO acima).
+EVENTOS_ABERTURA_ESPERA = ("gerada", "realocado", "voltou_aguardar")
+
 # Rótulo do que FECHA um segmento em tempo_atendimento() (adendo 10.63 - achado
 # em revisão do adendo 10.62, não decisão original): sem isso, um segmento que
 # termina em 'fim_atendimento' (operador concluiu o atendimento ali mesmo) e um
@@ -59,8 +66,67 @@ def _senhas_filtradas(filtros):
     return query
 
 
-def tempo_medio_espera(filtros):
-    """Relatório 1: tempo médio entre 'gerada' e 'chamada_senha', por fila/unidade/dia."""
+def _segmentos_espera_por_senha(filtros):
+    """Pra cada senha, retorna UM SEGMENTO DE ESPERA POR ESTÁGIO da jornada -
+    (log_abertura, log_fechamento, fila_id, unidade_id) - não só 'gerada' até a
+    1ª chamada (achado/corrigido: mesma classe de bug já corrigida em
+    tempo_atendimento pelo 10.62/10.63, agora neste relatório irmão - nunca
+    tinha sido tocada porque não era o escopo daquela correção).
+
+    Bugs confirmados na versão anterior desta consulta (código removido):
+    1. `eventos_por_senha[senha_id][evento] = timestamp` era um dict simples -
+       múltiplos 'chamada_senha' pra mesma senha (ex.: 'Tocar' não gera log,
+       mas uma RE-chamada depois de 'voltou_aguardar' gera) se SOBRESCREVIAM
+       na iteração, sem `.order_by()` garantindo qual sobrevivia - resultado
+       não-determinístico, dependente da ordem de retorno do banco.
+    2. Buscava só os eventos `("gerada", "chamada_senha")` - nunca
+       'chamada_nome' (2º estágio, ex. Coleta - `chamada_nome` é o evento de
+       chamada REAL lá, `chamada_senha` só existe no 1º estágio/Recepção),
+       nunca 'realocado', nunca 'voltou_aguardar'. Uma senha Recepção->Coleta
+       nunca tinha o segundo intervalo de espera capturado.
+    3. Consequência de 1+2: só existia 1 intervalo por senha, ignorando todo o
+       resto da jornada depois de qualquer realocação/re-chamada.
+
+    Pareamento (MESMA técnica de `_segmentos_intermediarios_realocacao`,
+    ponteiro sequencial sobre eventos ordenados por timestamp - eventos.sort(),
+    não `.order_by()` no SQL, mesma convenção já usada nesta função irmã):
+    eventos que ABREM um intervalo de espera são `EVENTOS_ABERTURA_ESPERA`
+    ('gerada'/'realocado'/'voltou_aguardar'); eventos que FECHAM são
+    `EVENTOS_INICIO_ATENDIMENTO` ('chamada_senha'/'chamada_nome') - nomeado
+    assim porque são os MESMOS eventos que abrem um segmento de ATENDIMENTO em
+    `_pares_inicio_fim`/`_segmentos_intermediarios_realocacao` (fechar espera =
+    abrir atendimento, é o mesmo instante).
+
+    **fila_id vem do snapshot do evento de FECHAMENTO (chamada_senha/
+    chamada_nome), e isso dá DESTINO, não origem - INVERSO da convenção de
+    `_segmentos_intermediarios_realocacao` (que usa o snapshot de 'realocado',
+    ORIGEM, capturado ANTES da mutação em `registrar_realocacao`). Não é uma
+    inconsistência: as duas funções seguem a MESMA regra ("usa o snapshot do
+    evento que fecha o segmento") - a diferença de origem/destino é
+    consequência de QUAL evento fecha cada tipo de segmento. O snapshot de
+    'realocado' é capturado ANTES da senha mudar de fila (por isso é origem);
+    o snapshot de 'chamada_senha'/'chamada_nome' é gravado DEPOIS de qualquer
+    realocação anterior já ter movido a senha (por isso já reflete a fila onde
+    o paciente estava esperando quando foi chamado = destino). Decisão de
+    produto confirmada com o cliente: cada intervalo de espera pertence à fila
+    onde o paciente estava esperando, não à fila de onde ele veio.
+
+    Sem `tipo_fechamento` (diferente do 10.63): aqui não há risco de colisão -
+    a fila de DESTINO já separa os estágios naturalmente (Recepção/Triagem/
+    Coleta têm fila_id diferentes, viram linhas diferentes por construção),
+    não existe o cenário do 10.63 (mesmo operador/fila/local em dois tipos de
+    fechamento).
+
+    **Dado histórico cai no comportamento ANTIGO, por senha (mesma decisão do
+    10.62):** se QUALQUER evento relevante desta senha não tiver o snapshot
+    (`fila_id IS NULL` - log gravado antes do 10.62), a senha INTEIRA usa a
+    regra antiga - só 'gerada' até a 1ª 'chamada_senha' (nunca 'chamada_nome'/
+    'realocado'/'voltou_aguardar', igual ao escopo original desta consulta),
+    com fila_id/unidade_id do estado ATUAL da `Senha` (mesma fonte que o
+    código antigo já usava) - só a NÃO-determinismo do bug 1 é corrigida
+    (agora sempre pega a 'chamada_senha' cronologicamente mais cedo, já que
+    `eventos` vem ordenado).
+    """
     mapa_senha = {
         row.id: (row.fila_id, row.unidade_id)
         for row in _senhas_filtradas(filtros).with_entities(Senha.id, Senha.fila_id, Senha.unidade_id)
@@ -68,23 +134,59 @@ def tempo_medio_espera(filtros):
     if not mapa_senha:
         return []
 
+    eventos_relevantes = EVENTOS_ABERTURA_ESPERA + EVENTOS_INICIO_ATENDIMENTO
     logs = LogAtendimento.query.filter(
         LogAtendimento.senha_id.in_(mapa_senha.keys()),
-        LogAtendimento.evento.in_(("gerada", "chamada_senha")),
+        LogAtendimento.evento.in_(eventos_relevantes),
     ).all()
 
-    eventos_por_senha = defaultdict(dict)
+    eventos_por_senha = defaultdict(list)
     for log in logs:
-        eventos_por_senha[log.senha_id][log.evento] = log.timestamp
+        eventos_por_senha[log.senha_id].append(log)
 
-    grupos = defaultdict(list)
+    segmentos = []
     for senha_id, eventos in eventos_por_senha.items():
-        gerada_em = eventos.get("gerada")
-        chamada_em = eventos.get("chamada_senha")
-        if gerada_em is None or chamada_em is None:
+        eventos.sort(key=lambda e: e.timestamp)
+        fila_atual, unidade_atual = mapa_senha[senha_id]
+        dado_novo = all(e.fila_id is not None for e in eventos)
+
+        if not dado_novo:
+            gerada_evt = next((e for e in eventos if e.evento == "gerada"), None)
+            # `eventos` já está ordenado por timestamp - o 1º "chamada_senha"
+            # encontrado é sempre o cronologicamente mais cedo (determinístico).
+            chamada_evt = next((e for e in eventos if e.evento == "chamada_senha"), None)
+            if gerada_evt is not None and chamada_evt is not None:
+                segmentos.append((gerada_evt, chamada_evt, fila_atual, unidade_atual))
             continue
-        fila_id, unidade_id = mapa_senha[senha_id]
-        grupos[(fila_id, unidade_id, gerada_em.date())].append((chamada_em - gerada_em).total_seconds())
+
+        abertura_pendente = None
+        for evento in eventos:
+            if evento.evento in EVENTOS_ABERTURA_ESPERA:
+                abertura_pendente = evento
+            elif evento.evento in EVENTOS_INICIO_ATENDIMENTO:
+                if abertura_pendente is not None:
+                    segmentos.append((abertura_pendente, evento, evento.fila_id, evento.unidade_id))
+                    abertura_pendente = None
+
+    return segmentos
+
+
+def tempo_medio_espera(filtros):
+    """Relatório 1: tempo médio de espera por fila/unidade/dia - CADA intervalo
+    de espera da jornada de uma senha (não só 'gerada' até a 1ª chamada), via
+    `_segmentos_espera_por_senha` (ver docstring lá para o histórico do bug
+    corrigido e a convenção de fila de DESTINO).
+
+    `data` usa o dia do evento que ABRE cada segmento (quando aquela espera
+    específica começou) - não mais sempre `gerada_em.date()`: um segmento
+    aberto por 'realocado'/'voltou_aguardar' pode cair em outro dia civil da
+    'gerada' original, e é o dia em que ELE começou que importa pro relatório
+    "por dia".
+    """
+    grupos = defaultdict(list)
+    for abertura, fechamento, fila_id, unidade_id in _segmentos_espera_por_senha(filtros):
+        chave = (fila_id, unidade_id, abertura.timestamp.date())
+        grupos[chave].append((fechamento.timestamp - abertura.timestamp).total_seconds())
 
     resultado = []
     for (fila_id, unidade_id, dia), tempos in grupos.items():

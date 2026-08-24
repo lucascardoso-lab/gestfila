@@ -5846,6 +5846,145 @@ script); `app/templates/totem/_layout.html` (`.botao-totem[hidden]`); novo
 
 ---
 
+## 10.66. ADENDO — "Tempo médio de espera" media só o 1º intervalo da jornada, não cada estágio (mesma classe de bug do 10.62/10.63, agora no relatório irmão)
+
+> Pergunta de arquitetura levantada pelo cliente ao usar o relatório na
+> prática: "Tempo médio de espera" mede CADA intervalo de espera da jornada
+> de uma senha (geração -> 1ª chamada, realocação -> chamada seguinte, etc.)
+> ou só o primeiro? Suspeita do cliente: mesma limitação que
+> `tempo_atendimento` tinha antes do 10.62/10.63 - correção que nunca tocou
+> este relatório, porque não era o escopo dela na época.
+
+**Investigação confirmou a suspeita, com 3 bugs concretos** em
+`tempo_medio_espera` (`app/relatorios/queries.py`, código removido):
+
+1. `eventos_por_senha[senha_id][evento] = timestamp` era um dict simples -
+   múltiplos `chamada_senha` pra mesma senha (ex.: re-chamada depois de
+   `voltou_aguardar`) se sobrescreviam na iteração, e a query não tinha
+   `.order_by()` garantindo qual sobrevivia - resultado NÃO-determinístico.
+2. Buscava só os eventos `("gerada", "chamada_senha")` - nunca
+   `chamada_nome` (evento de chamada REAL do 2º estágio, ex. Coleta - ver
+   `EVENTOS_INICIO_ATENDIMENTO`), nunca `realocado`, nunca `voltou_aguardar`.
+   Uma senha Recepção->Coleta nunca tinha o segundo intervalo capturado.
+3. Consequência de 1+2: só existia 1 intervalo por senha, ignorando todo o
+   resto da jornada depois de qualquer realocação/re-chamada.
+
+**Investigação do item "os outros eventos já têm o snapshot de fila_id/
+local_id, ou só `realocado`?" (pedida ANTES de escrever a correção final -
+mudaria o escopo se a resposta fosse negativa):** confirmado que **todos os
+7 pontos de gravação de `LogAtendimento`** (`app/totem/routes.py`,
+`app/atendimento/helpers.py`, `app/middleware/encerramento.py`) já populam
+`fila_id`/`local_id` desde o 10.62 - `gerada`, `chamada_senha`,
+`chamada_nome`, `voltou_aguardar`, `realocado`, `fim_atendimento`,
+`encerramento_automatico_sistema`. A suposição inicial (só `realocado` tinha
+o snapshot) estava errada - o docstring de `_segmentos_intermediarios_
+realocacao` só *lê* o snapshot de `realocado` porque é tudo que aquela
+função específica precisa, não porque os outros eventos não o tenham.
+**Consequência: nenhuma migration nova foi necessária, o escopo da correção
+não mudou.**
+
+**Correção:** nova `_segmentos_espera_por_senha` (`app/relatorios/
+queries.py`) - MESMA técnica de `_segmentos_intermediarios_realocacao`
+(10.62: ponteiro sequencial sobre eventos ordenados por `timestamp` via
+`eventos.sort()`, não `.order_by()` no SQL - mesma convenção já usada na
+função irmã), com os papéis invertidos: eventos que ABREM um intervalo de
+ESPERA são `EVENTOS_ABERTURA_ESPERA` (`gerada`/`realocado`/
+`voltou_aguardar`); eventos que FECHAM são `EVENTOS_INICIO_ATENDIMENTO`
+(`chamada_senha`/`chamada_nome` - mesma constante já usada pra abrir um
+segmento de ATENDIMENTO, porque é o MESMO instante: fechar espera = abrir
+atendimento). `tempo_medio_espera` ficou uma função fina que só agrupa o
+resultado, sem mudar a assinatura/formato de retorno (mesmas chaves
+`fila_id`/`unidade_id`/`data`/`tempo_medio_segundos`/`quantidade`) - nenhuma
+mudança em `relatorios/routes.py` nem nos templates foi necessária.
+
+**Decisões de produto confirmadas com o cliente antes de implementar:**
+- **Cada intervalo pertence à fila de DESTINO (onde o paciente passa a
+  esperar), não à origem - INVERSO da convenção de `tempo_atendimento`
+  (10.62, que usa origem).** Registrado aqui explicitamente para não parecer
+  uma inconsistência não percebida: as duas funções seguem a MESMA regra
+  ("usa o snapshot do evento que fecha o segmento") - a diferença de
+  origem/destino é consequência de QUAL evento fecha cada tipo de segmento.
+  O snapshot de `realocado` é capturado ANTES da senha mudar de fila (por
+  isso é origem, `registrar_realocacao`); o snapshot de `chamada_senha`/
+  `chamada_nome` é gravado DEPOIS de qualquer realocação anterior já ter
+  movido a senha (por isso já reflete a fila de destino).
+- **Sem `tipo_fechamento` aqui** (diferente do 10.63) - a fila de destino já
+  separa os estágios naturalmente por construção (Recepção/Triagem/Coleta
+  têm `fila_id` diferentes), sem o risco de colisão que motivou o 10.63 em
+  `tempo_atendimento` (mesmo operador/fila/local em dois tipos de
+  fechamento).
+- **Dado histórico (sem snapshot) cai no comportamento ANTIGO, por senha**
+  (mesma decisão do 10.62): 1 intervalo só, `gerada` -> 1ª `chamada_senha`
+  (nunca `chamada_nome`/`realocado`/`voltou_aguardar`, igual ao escopo
+  original desta consulta), fila/unidade do estado ATUAL da `Senha` (mesma
+  fonte que o código antigo já usava) - só a não-determinismo do bug 1 é
+  corrigida também para esses casos (sempre pega a `chamada_senha`
+  cronologicamente mais cedo, já que os eventos vêm ordenados).
+
+**Extração de função genérica reaproveitável pelos dois relatórios? Não -
+decisão registrada com justificativa:** apesar do algoritmo de pareamento
+(ponteiro sequencial) ser idêntico, os DOIS relatórios têm formas de
+fallback histórico estruturalmente diferentes (`tempo_atendimento` usa
+fila/local `None` + só `unidade_id`; `tempo_medio_espera` usa o estado ATUAL
+da `Senha` para fila E unidade) e usam o snapshot de eventos diferentes
+(fechamento único vs. múltiplos tipos de fechamento). Forçar uma função
+genérica exigiria parâmetros/callbacks pra customizar o formato do
+fallback, sem reduzir complexidade de verdade - o padrão já estabelecido
+neste arquivo é MANTER funções irmãs separadas com nomes claros
+(`_pares_inicio_fim` e `_segmentos_intermediarios_realocacao` já coexistem
+assim, mesmo compartilhando bastante estrutura) em vez de abstrair
+cross-relatório. `_segmentos_espera_por_senha` é uma função nova e curta
+(~15 linhas de lógica de pareamento), duplicar esse trecho custa menos do
+que generalizar com parâmetros.
+
+**Achado seguinte, corrigido no MESMO lote (o cliente pediu explicitamente
+não deixar para depois):** `app/core/dashboard_queries.py::_tempo_medio_
+espera_hoje` (tile "Tempo médio de espera" do dashboard operacional) era uma
+implementação INDEPENDENTE (não chamava `tempo_medio_espera()` de
+`relatorios/queries.py`) com o MESMO padrão de bug (dict-overwrite, só
+`("gerada", "chamada_senha")`) - agregada num único número do dia, não por
+fila.
+
+Antes de mudar, o contrato atual foi confirmado (não alterado, por pedido
+explícito): a função recebe `(empresa, unidades_visiveis, inicio_hoje,
+fim_hoje)` e devolve um único `int` (segundos, arredondado) ou `None` -
+consumido por `calcular_kpis()`/`dashboard.html`/`/api/dashboard/kpis` como
+um número escalar, nunca uma lista por fila. **Esse formato de saída não
+mudou.**
+
+**Correção:** `_tempo_medio_espera_hoje` passou a reaproveitar
+`_segmentos_espera_por_senha` (mesma função do relatório completo, acima) -
+monta um `Filtros(empresa_id=empresa.id, unidades_permitidas=unidades_
+visiveis, unidade_id=None, fila_id=None, ..., data_inicio=inicio_hoje,
+data_fim_exclusivo=fim_hoje)` e achata TODOS os intervalos retornados numa
+única média, sem distinguir fila/estágio (esse detalhamento continua sendo
+exclusivo do relatório completo). Ganha de graça: todos os estágios da
+jornada (não só o primeiro), `chamada_nome` além de `chamada_senha`,
+resultado determinístico, e o mesmo fallback de dado histórico - sem
+duplicar a lógica de pareamento uma terceira vez.
+
+**Testes:** novo `tests/test_regressao_segmentos_espera.py` (6 casos) -
+senha com 2 realocações (3 intervalos, cada um na fila de destino correta);
+senha sem realocação (1 intervalo, sem regressão); múltiplos
+`chamada_senha` na mesma fila via `voltou_aguardar` (2 intervalos somados,
+resultado determinístico - prova que o bug do dict-overwrite foi
+corrigido); segmento fechado por `chamada_nome` (não só `chamada_senha`);
+dado histórico simulado (sem snapshot em nenhum evento) cai no fallback de
+1 intervalo, sem erro, fila/unidade do estado atual da `Senha`. Mais novo
+`tests/test_regressao_dashboard_tempo_espera_hoje.py` (3 casos) - senha
+realocada hoje (a média do tile passa a incluir os 2 intervalos, não só o
+1º); nenhuma senha com intervalo fechado hoje (`None`, não `0`); dado
+histórico (fallback, sem erro). Suíte completa (67 arquivos) sem falhas.
+
+**Arquivos alterados:** `app/relatorios/queries.py`
+(`EVENTOS_ABERTURA_ESPERA`, `_segmentos_espera_por_senha`,
+`tempo_medio_espera` reescrita); `app/core/dashboard_queries.py`
+(`_tempo_medio_espera_hoje` reescrita, reaproveitando `_segmentos_espera_
+por_senha`); novos `tests/test_regressao_segmentos_espera.py` e
+`tests/test_regressao_dashboard_tempo_espera_hoje.py`.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da
