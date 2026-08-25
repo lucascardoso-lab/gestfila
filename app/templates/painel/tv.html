@@ -324,6 +324,66 @@
         setInterval(dispararHeartbeatTts, HEARTBEAT_TTS_INTERVALO_MS);
       }
 
+      // TESTES ISOLADOS DE DIAGNÓSTICO (só ?debug_voz=1, rodam sozinhos, sem
+      // precisar de chamada de senha real nem interação manual na TV) -
+      // achado ao vivo nesta investigação: speechSynthesis.speak() é
+      // chamado, speaking vira true, mas nem onstart/onend/onerror disparam
+      // NUNCA (só o watchdog de 15s força a liberação) - diferente do motor
+      // de TTS já descrito no adendo 10.33 ("finge funcionar", mas ao menos
+      // dispara onend). Duas hipóteses concorrentes pra essa TV específica,
+      // isoladas aqui uma de cada vez:
+      // - Teste A: speak() SEM fala.voice/fala.lang explícitos (texto puro,
+      //   motor usa o que quer que seja o padrão do sistema) - isola se
+      //   ATRIBUIR voice a um SpeechSynthesisVoice específico é o que trava
+      //   o motor nesse navegador (bug já visto em outros navegadores
+      //   embarcados).
+      // - Teste B: speak() COM fala.voice igual ao de produção, mas SEM
+      //   rodar despertarSaidaAudio() (Web Audio API/AudioContext) antes -
+      //   isola se é uma contenção entre o AudioContext do tom de despertar
+      //   e o pipeline interno do speechSynthesis (dispositivo de áudio
+      //   compartilhado num SO embarcado).
+      // cancel() antes do Teste B garante um estado limpo mesmo se o Teste A
+      // tiver travado (mesmo padrão do motor "preso" que o watchdog de
+      // produção já lida) - só existe aqui, no caminho de debug; nunca no
+      // fluxo real (permanece exatamente como o adendo 10.58 decidiu).
+      if (DEBUG_VOZ) {
+        const anexarListenersTesteDebug = (rotulo, utterance) => {
+          utterance.onstart = () => logarOverlayDebugVoz("[TTS-TESTE] " + rotulo + " - onstart disparou às " + new Date().toLocaleTimeString("pt-BR"));
+          utterance.onend = () => logarOverlayDebugVoz("[TTS-TESTE] " + rotulo + " - onend disparou às " + new Date().toLocaleTimeString("pt-BR"));
+          utterance.onerror = (evento) => logarOverlayDebugVoz("[TTS-TESTE] " + rotulo + " - onerror disparou às " +
+            new Date().toLocaleTimeString("pt-BR") + " - error=" + JSON.stringify(evento && evento.error));
+        };
+
+        const rodarTesteA = () => {
+          logarOverlayDebugVoz("=== [TTS-TESTE] Teste A: speak() SEM voice/lang explícitos (texto puro) ===");
+          const utt = new SpeechSynthesisUtterance("Teste A, fala sem voz selecionada.");
+          anexarListenersTesteDebug("Teste A", utt);
+          speechSynthesis.speak(utt);
+          logarOverlayDebugVoz("[TTS-TESTE] Teste A: speak() chamado - speaking=" + speechSynthesis.speaking +
+            " pending=" + speechSynthesis.pending);
+        };
+
+        const rodarTesteB = () => {
+          logarOverlayDebugVoz("=== [TTS-TESTE] Teste B: speak() COM voice explícito, SEM despertarSaidaAudio() antes ===");
+          speechSynthesis.cancel(); // estado limpo mesmo se o Teste A tiver travado (só no caminho de debug)
+          const utt = new SpeechSynthesisUtterance("Teste B, fala com voz selecionada, sem tom de despertar.");
+          if (vozPreferidaCache) {
+            utt.voice = vozPreferidaCache;
+            utt.lang = vozPreferidaCache.lang;
+          }
+          anexarListenersTesteDebug("Teste B", utt);
+          speechSynthesis.speak(utt);
+          logarOverlayDebugVoz("[TTS-TESTE] Teste B: speak() chamado - speaking=" + speechSynthesis.speaking +
+            " pending=" + speechSynthesis.pending);
+        };
+
+        setTimeout(() => {
+          logarOverlayDebugVoz("=== [TTS-TESTE] Iniciando testes isolados (independentes da fila real de chamadas) ===");
+          rodarTesteA();
+          setTimeout(rodarTesteB, 6000); // espaço suficiente pra ver se o Teste A conclui ou trava, antes de B
+        }, 3000); // 3s: dá tempo de getVoices()/voiceschanged já terem resolvido
+      }
+
       // Escolhe a melhor voz pt disponível, em vez da primeira que aparecer -
       // vozes "Online"/"Natural"/"Neural" (Edge/Windows mais recente) e vozes
       // "Google" (Chrome) usam síntese muito mais natural que as vozes SAPI
