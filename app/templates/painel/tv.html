@@ -156,6 +156,54 @@
       // interno ao motor de voz, fora do alcance do JS).
       const DEBUG_TIMING = new URLSearchParams(window.location.search).get("debug") === "1";
 
+      // INSTRUMENTAÇÃO TEMPORÁRIA DE DIAGNÓSTICO (mesmo padrão do adendo 10.33 -
+      // ?debug_audio_html5=1/?debug_voz=1, removida depois daquele diagnóstico
+      // fechado) - investigação de "TV sem áudio no TTS" numa Samsung Internet/
+      // Tizen específica onde outro sistema (CHAME FÁCIL) fala normalmente na
+      // mesma TV. Mostra na PRÓPRIA TELA da TV (não só no console) o resultado
+      // de speechSynthesis.getVoices() e de vozPtPreferida() - depurador remoto
+      // do Tizen (porta 8080) pode não responder nesse firmware, então isto não
+      // depende dele. LEMBRAR DE REMOVER após o diagnóstico ser fechado (mesmo
+      // como foi feito na 10.33) - não é pra sobreviver em produção.
+      const DEBUG_VOZ = new URLSearchParams(window.location.search).get("debug_voz") === "1";
+      let elOverlayDebugVoz = null;
+
+      function criarOverlayDebugVoz() {
+        const el = document.createElement("div");
+        el.id = "overlay-debug-voz";
+        el.style.cssText = [
+          "position:fixed", "top:0", "left:0", "right:0", "z-index:99999",
+          "max-height:70vh", "overflow-y:auto",
+          "background:rgba(0,0,0,.92)", "color:#0f0",
+          "font:20px/1.4 monospace", "padding:1rem",
+          "white-space:pre-wrap", "word-break:break-word",
+        ].join(";");
+        el.textContent = "[DEBUG_VOZ] painel/tv.html - overlay de diagnóstico de speechSynthesis\n";
+        document.body.appendChild(el);
+        return el;
+      }
+
+      function logarOverlayDebugVoz(linha) {
+        if (!DEBUG_VOZ) return;
+        if (!elOverlayDebugVoz) elOverlayDebugVoz = criarOverlayDebugVoz();
+        elOverlayDebugVoz.textContent += linha + "\n";
+      }
+
+      function logarVozesDebugVoz(origem) {
+        if (!DEBUG_VOZ) return;
+        const vozes = speechSynthesis.getVoices();
+        logarOverlayDebugVoz(
+          "--- " + origem + " (" + new Date().toLocaleTimeString("pt-BR") + ") ---\n" +
+          "getVoices() retornou " + vozes.length + " voz(es):\n" +
+          (vozes.length
+            ? vozes.map((v, i) => "  [" + i + "] name=" + JSON.stringify(v.name) + " lang=" + JSON.stringify(v.lang)).join("\n")
+            : "  (lista vazia)") +
+          "\nvozPtPreferida() -> " + (vozPreferidaCache
+            ? "name=" + JSON.stringify(vozPreferidaCache.name) + " lang=" + JSON.stringify(vozPreferidaCache.lang)
+            : "null (nenhuma voz com lang começando em \"pt\")")
+        );
+      }
+
       const elStatus = document.getElementById("status-conexao");
       const elRelogio = document.getElementById("relogio");
       const elData = document.getElementById("data");
@@ -233,18 +281,22 @@
       // falarChamada() (ver mais abaixo).
       let vozesCache = [];
       let vozPreferidaCache = null;
+      if (DEBUG_VOZ && !("speechSynthesis" in window)) {
+        logarOverlayDebugVoz("*** \"speechSynthesis\" in window === false - este navegador não tem Web Speech API ***");
+      }
       if ("speechSynthesis" in window) {
-        const atualizarVozesCache = () => {
+        const atualizarVozesCache = (origemDebug) => {
           vozesCache = speechSynthesis.getVoices();
           vozPreferidaCache = vozPtPreferida();
+          logarVozesDebugVoz(origemDebug);
         };
-        atualizarVozesCache();
-        speechSynthesis.onvoiceschanged = atualizarVozesCache;
+        atualizarVozesCache("chamada inicial (getVoices no load)");
+        speechSynthesis.onvoiceschanged = () => atualizarVozesCache("evento voiceschanged");
 
         let tentativasPollVozes = 0;
         const pollVozes = setInterval(() => {
-          atualizarVozesCache();
           tentativasPollVozes += 1;
+          atualizarVozesCache("poll de segurança #" + tentativasPollVozes);
           if (vozesCache.length > 0 || tentativasPollVozes >= 20) {
             clearInterval(pollVozes); // achou vozes, ou desistiu após ~5s (20 x 250ms)
           }
@@ -394,20 +446,35 @@
         // nada com que sincronizar.
         const concluir = aoTerminar || function () {};
 
+        // [TTS] item 1 do overlay de debug: confirma que falarChamada() foi
+        // de fato invocada, com o texto que SERIA falado (calculado aqui
+        // mesmo que um early-return abaixo impeça a fala de verdade).
+        const textoFalaDebug = montarTextoChamada(dados);
+        logarOverlayDebugVoz("[TTS] falarChamada() invocada às " + new Date().toLocaleTimeString("pt-BR") +
+          " - texto: " + JSON.stringify(textoFalaDebug));
+
         if (!TV_SOM_ATIVO) {
+          logarOverlayDebugVoz("[TTS] TV_SOM_ATIVO=false - não fala (som desativado no cadastro desta TV)");
           concluir(); // som desativado para esta TV (cadastro admin)
           return;
         }
         if (TV_USA_AUDIO_PREGRAVADO) {
+          logarOverlayDebugVoz("[TTS] TV_USA_AUDIO_PREGRAVADO=true - usa fallback pré-gravado, não speechSynthesis");
           falarChamadaPregravada(dados, concluir);
           return; // esta TV não usa speechSynthesis
         }
         if (!("speechSynthesis" in window)) {
+          logarOverlayDebugVoz("[TTS] \"speechSynthesis\" in window === false - não fala");
           concluir(); // sem suporte a TTS - degrada graciosamente
           return;
         }
 
+        // [TTS] item 2 do overlay de debug: lê vozPreferidaCache NO MOMENTO
+        // desta chamada específica (não o valor do load) - confirma se é
+        // realmente a voz esperada aqui, não só no carregamento da página.
         const voz = vozPreferidaCache;
+        logarOverlayDebugVoz("[TTS] voz usada nesta chamada: " +
+          (voz ? (JSON.stringify(voz.name) + " / " + JSON.stringify(voz.lang)) : "null"));
         if (!voz) {
           // Nenhuma voz pt-* instalada neste navegador/SO (ex.: Edge no Windows
           // usa as vozes OneCore do próprio SO - se só o pacote de voz em
@@ -420,6 +487,7 @@
           // áudio pré-gravado desta TV (Tv.usa_audio_pregravado) no cadastro.
           console.warn("GESTFILA: nenhuma voz pt-* disponível neste navegador - chamada não foi falada. " +
             "Instale a voz Português (Brasil) no sistema operacional ou ligue o áudio pré-gravado desta TV.");
+          logarOverlayDebugVoz("[TTS] nenhuma voz pt-* nesta chamada - early-return, NÃO fala");
           concluir();
           return;
         }
@@ -467,12 +535,36 @@
         // `onend`/`onerror` nunca disparar dentro de WATCHDOG_FALA_TIMEOUT_MS
         // (motor preso num estado inconsistente) - nunca como mecanismo
         // normal de transição entre chamadas.
+        // [TTS] itens 4/5/6 do overlay de debug: `concluirUmaVez` recebe o
+        // `evento` nativo do listener (onend/onerror chamam o handler com o
+        // Event como 1º argumento) SEM mudar as atribuições `fala.onend =
+        // concluirUmaVez;`/`fala.onerror = concluirUmaVez;` abaixo - só
+        // SpeechSynthesisErrorEvent tem a propriedade `.error`
+        // ("synthesis-failed"/"audio-busy"/"canceled"/"not-allowed" etc, que
+        // pode ser exatamente a causa raiz nesta TV), um `onend` normal não
+        // tem - usado aqui só pra distinguir qual dos dois disparou, sem
+        // precisar de dois wrappers diferentes.
         let concluida = false;
-        const concluirUmaVez = () => {
+        const concluirUmaVez = (evento) => {
           if (concluida) return;
           concluida = true;
           clearTimeout(watchdog);
+          if (evento && evento.error !== undefined) {
+            logarOverlayDebugVoz("[TTS] onerror disparou às " + new Date().toLocaleTimeString("pt-BR") +
+              " - error=" + JSON.stringify(evento.error) +
+              " charIndex=" + evento.charIndex +
+              " elapsedTime=" + evento.elapsedTime);
+          } else {
+            logarOverlayDebugVoz("[TTS] onend/conclusão disparou às " + new Date().toLocaleTimeString("pt-BR"));
+          }
           concluir();
+        };
+        // onstart não existia antes desta instrumentação (a fala nunca tinha
+        // um listener nesse evento) - adicionado só pra logar, sem nenhum
+        // efeito no fluxo real (não chama concluirUmaVez nem nada além do
+        // log).
+        fala.onstart = () => {
+          logarOverlayDebugVoz("[TTS] onstart disparou às " + new Date().toLocaleTimeString("pt-BR"));
         };
         fala.onend = concluirUmaVez;
         fala.onerror = concluirUmaVez; // erro do motor não pode travar a fila pra sempre
@@ -480,10 +572,20 @@
           console.warn("GESTFILA: watchdog de fala disparado - speechSynthesis não terminou em " +
             (WATCHDOG_FALA_TIMEOUT_MS / 1000) + "s, possível estado inconsistente do motor. " +
             "Chamando cancel() como recuperação de borda (não é o fluxo normal).");
+          logarOverlayDebugVoz("[TTS] WATCHDOG disparado (" + (WATCHDOG_FALA_TIMEOUT_MS / 1000) +
+            "s sem onend/onerror) - cancelando a síntese como recuperação de borda");
           speechSynthesis.cancel();
           concluirUmaVez();
         }, WATCHDOG_FALA_TIMEOUT_MS);
+
+        // [TTS] item 3 do overlay de debug: confirma que a linha do speak()
+        // foi de fato alcançada e executada.
+        logarOverlayDebugVoz("[TTS] speechSynthesis.speak() chamado às " + new Date().toLocaleTimeString("pt-BR"));
         speechSynthesis.speak(fala);
+        // [TTS] item 7 do overlay de debug: estado da fila do motor de síntese
+        // logo APÓS o speak() - lido de forma síncrona, não espera nada.
+        logarOverlayDebugVoz("[TTS] estado pós-speak(): speaking=" + speechSynthesis.speaking +
+          " pending=" + speechSynthesis.pending + " paused=" + speechSynthesis.paused);
       }
 
       // Heartbeat periódico (ver constantes HEARTBEAT_TTS_* acima) - dispara
@@ -537,15 +639,24 @@
         // onended poderiam chamar callback() pro MESMO evento, disparando
         // falarChamada() duas vezes. `chamado` garante uma única execução
         // não importa qual caminho dispare primeiro.
+        //
+        // [TTS] instrumentação de debug (?debug_voz=1): esta função roda
+        // ANTES de falarChamada() em toda rajada nova (tocarTom) - se ela
+        // travar aqui dentro sem nunca chamar `callback`, falarChamada()
+        // nunca é invocada e nenhum log dela aparece, mesmo com tudo certo
+        // do lado da voz. Cada caminho de saída abaixo loga qual foi tomado.
+        logarOverlayDebugVoz("[TTS] despertarSaidaAudio() chamado");
         let chamado = false;
         const chamarUmaVez = () => {
           if (chamado) return;
           chamado = true;
+          logarOverlayDebugVoz("[TTS] despertarSaidaAudio() -> callback()");
           callback();
         };
 
         const AudioContextClasse = window.AudioContext || window.webkitAudioContext;
         if (!AudioContextClasse) {
+          logarOverlayDebugVoz("[TTS] despertarSaidaAudio() - sem AudioContext/webkitAudioContext neste navegador");
           chamarUmaVez(); // sem Web Audio API - degrada graciosamente pra falarChamada() direto
           return;
         }
@@ -554,6 +665,7 @@
             audioContextDespertar = new AudioContextClasse();
           }
           const ctx = audioContextDespertar;
+          logarOverlayDebugVoz("[TTS] despertarSaidaAudio() - AudioContext.state=" + ctx.state);
 
           const iniciarTom = () => {
             const oscilador = ctx.createOscillator();
@@ -567,12 +679,14 @@
               if (DEBUG_TIMING) {
                 console.log(`[GESTFILA debug] despertarSaidaAudio: tom terminou às ${new Date().toLocaleTimeString("pt-BR")}`);
               }
+              logarOverlayDebugVoz("[TTS] despertarSaidaAudio() - oscilador.onended (tom terminou normalmente)");
               chamarUmaVez();
             };
 
             if (DEBUG_TIMING) {
               console.log(`[GESTFILA debug] despertarSaidaAudio: tom disparado às ${new Date().toLocaleTimeString("pt-BR")}`);
             }
+            logarOverlayDebugVoz("[TTS] despertarSaidaAudio() - oscilador.start() chamado");
             oscilador.start();
             oscilador.stop(ctx.currentTime + DESPERTAR_AUDIO_DURACAO_MS / 1000);
           };
@@ -582,11 +696,16 @@
           // é assíncrono (retorna Promise); só inicia o tom depois dele
           // resolver, pra não tentar tocar num contexto ainda suspenso.
           if (ctx.state === "suspended") {
-            ctx.resume().then(iniciarTom).catch(() => chamarUmaVez());
+            logarOverlayDebugVoz("[TTS] despertarSaidaAudio() - AudioContext suspenso, chamando resume()");
+            ctx.resume().then(iniciarTom).catch((erro) => {
+              logarOverlayDebugVoz("[TTS] despertarSaidaAudio() - resume() rejeitado: " + erro);
+              chamarUmaVez();
+            });
           } else {
             iniciarTom();
           }
         } catch (erro) {
+          logarOverlayDebugVoz("[TTS] despertarSaidaAudio() - exceção: " + erro);
           chamarUmaVez(); // qualquer falha do AudioContext - degrada graciosamente
         }
       }
@@ -854,14 +973,19 @@
         // ocioso agora = ninguém em andamento E fila vazia = esta é a
         // primeira chamada de uma rajada nova (decisão 1 acima).
         const tocarTom = !processandoFila && filaChamadas.length === 0;
+        logarOverlayDebugVoz("[TTS] enfileirarChamada() - tocarTom=" + tocarTom +
+          " filaChamadas.length(antes)=" + filaChamadas.length + " processandoFila=" + processandoFila);
         filaChamadas.push({ dados, tocarTom });
         processarProximaDaFila();
       }
 
       function processarProximaDaFila() {
+        logarOverlayDebugVoz("[TTS] processarProximaDaFila() chamado - processandoFila=" + processandoFila +
+          " filaChamadas.length=" + filaChamadas.length);
         if (processandoFila) return; // já tem uma chamada em andamento - ela mesma chama isto de novo ao terminar
         const item = filaChamadas.shift();
         if (!item) return; // fila vazia, nada a processar agora
+        logarOverlayDebugVoz("[TTS] processarProximaDaFila() - iniciando turno, tocarTom=" + item.tocarTom);
         processandoFila = true;
 
         const t0 = DEBUG_TIMING ? performance.now() : 0;
@@ -904,6 +1028,7 @@
       // emitido pelo backend nas salas tv_<id>/fila_<id>. Só enfileira - todo
       // o resto (tom/fala/visual/ordem) é responsabilidade da fila acima.
       socket.on("chamada", (dados) => {
+        logarOverlayDebugVoz("[TTS] evento 'chamada' recebido do servidor: " + JSON.stringify(dados));
         enfileirarChamada(dados);
       });
 
