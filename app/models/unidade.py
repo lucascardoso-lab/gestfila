@@ -20,6 +20,12 @@ class Unidade(db.Model):
     endereco = db.Column(db.Text, nullable=True)
     telefone = db.Column(db.String(30), nullable=True)
 
+    # Rede de segurança do banco para a validação da tela de Unidades (adendo
+    # 10.71) - NULL (sem sigla, usa o fallback) pode repetir à vontade.
+    __table_args__ = (
+        db.UniqueConstraint("empresa_id", "sigla", name="uq_unidades_empresa_sigla"),
+    )
+
     empresa = db.relationship("Empresa", back_populates="unidades")
     usuarios = db.relationship("Usuario", secondary=usuario_unidade, back_populates="unidades")
 
@@ -29,7 +35,13 @@ class Unidade(db.Model):
         que misturam várias unidades (ex.: '[MAT] Recepção 1-01'). `sigla` é opcional -
         sem ela, cai nos 3 primeiros caracteres do nome como fallback, sempre em
         maiúsculas."""
-        return (self.sigla or self.nome[:3]).upper()
+        return Unidade.sigla_efetiva(self.sigla, self.nome)
+
+    @staticmethod
+    def sigla_efetiva(sigla, nome):
+        """Mesma regra de sigla_exibicao, para valores ainda não gravados (ex.:
+        validar o formulário de Unidade antes de salvar - adendo 10.71)."""
+        return (sigla or nome[:3]).upper()
 
     def __repr__(self):
         return f"<Unidade {self.id} {self.nome}>"

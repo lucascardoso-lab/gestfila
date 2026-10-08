@@ -2,30 +2,49 @@
 
 {% block titulo %}{{ 'Editar unidade' if unidade else 'Nova unidade' }}{% endblock %}
 
+{# `valores` (POST com erro de validação) tem prioridade sobre o que está
+   gravado - o admin não perde o que digitou. #}
+{% macro valor(campo) -%}
+  {{ ((valores[campo] if valores else (unidade[campo] if unidade else '')) or '') }}
+{%- endmacro %}
+
 {% block conteudo %}
   <h1>{{ 'Editar unidade' if unidade else 'Nova unidade' }}</h1>
   {% set nome_tela = self.titulo() %}
   {% include "admin/_breadcrumb.html" %}
+  {% if unidade and pendencias_prefixo %}
+    {% with pendencias = pendencias_prefixo %}
+      {% include "admin/unidades/_aviso_prefixo_locais.html" %}
+    {% endwith %}
+  {% endif %}
   <div class="card">
     <form method="post">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
       <label for="nome">Nome</label>
-      <input type="text" id="nome" name="nome" value="{{ unidade.nome if unidade else '' }}" required autofocus>
+      <input type="text" id="nome" name="nome" value="{{ valor('nome') }}" required autofocus>
+
+      <label for="sigla">Sigla (opcional)</label>
+      <input type="text" id="sigla" name="sigla" value="{{ valor('sigla') }}" maxlength="4"
+             style="text-transform: uppercase; max-width: 8rem;"
+             {% if unidade %}placeholder="{{ unidade.sigla_exibicao }}"{% endif %}>
+      <p class="subtitulo" style="margin:.35rem 0 .5rem;">
+        Usada para identificar filas e locais desta unidade (ex.: [MAT] Coleta). Até 4 caracteres.
+        {% if unidade and not unidade.sigla %}Sem sigla cadastrada, a sigla automática é {{ unidade.sigla_exibicao }}.{% endif %}
+      </p>
 
       <label for="endereco">Endereço (opcional)</label>
-      {# `(unidade.endereco if unidade else '') or ''` - bug real corrigido:
-         só tratar "unidade é None" (tela de Nova) não bastava. Numa unidade
-         JÁ existente com endereco nunca preenchido (Python None), o Jinja
-         renderizava a string literal "None" dentro do campo - se o admin
-         salvasse sem tocar nele, esse texto virava o valor de verdade no
-         banco (passava no "or None" do backend por ser uma string não-vazia,
-         mesmo sendo o texto errado). Cupom impresso passava a mostrar "None"
-         como se fosse o endereço real. #}
-      <textarea id="endereco" name="endereco" rows="2" placeholder="Rua, número, bairro, cidade - aparece no cupom impresso do totem">{{ (unidade.endereco if unidade else '') or '' }}</textarea>
+      {# `... or ''` - bug real corrigido: numa unidade JÁ existente com
+         endereco nunca preenchido (Python None), o Jinja renderizava a
+         string literal "None" dentro do campo - se o admin salvasse sem
+         tocar nele, esse texto virava o valor de verdade no banco (passava
+         no "or None" do backend por ser uma string não-vazia, mesmo sendo o
+         texto errado). Cupom impresso passava a mostrar "None" como se fosse
+         o endereço real. #}
+      <textarea id="endereco" name="endereco" rows="2" placeholder="Rua, número, bairro, cidade - aparece no cupom impresso do totem">{{ valor('endereco') }}</textarea>
 
       <label for="telefone">Telefone (opcional)</label>
-      <input type="text" id="telefone" name="telefone" value="{{ (unidade.telefone if unidade else '') or '' }}" placeholder="(00) 0000-0000">
+      <input type="text" id="telefone" name="telefone" value="{{ valor('telefone') }}" placeholder="(00) 0000-0000">
 
       <p><button class="botao" type="submit" style="margin-top:1.5rem;">Salvar</button></p>
     </form>

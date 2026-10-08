@@ -11,9 +11,10 @@ from flask import g, has_request_context
 from sqlalchemy.orm import joinedload
 
 
-def _chave_colisao(texto):
-    """Mesma noção de "igual" da collation `utf8mb4_0900_ai_ci` de `filas.nome`
-    (case- E accent-insensitive): "COLETA", "Coleta" e "Cóleta" colidem."""
+def chave_colisao(texto):
+    """Mesma noção de "igual" da collation `utf8mb4_0900_ai_ci` de
+    `filas.nome`, `unidades.sigla` e `locais.identificador_admin` (case- E
+    accent-insensitive): "COLETA", "Coleta" e "Cóleta" colidem."""
     sem_acento = "".join(c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c))
     return sem_acento.strip().casefold()
 
@@ -39,7 +40,7 @@ def rotulos_filas(empresa_id):
 
     grupos = defaultdict(list)
     for fila_id, rotulo in base.items():
-        grupos[_chave_colisao(rotulo)].append(fila_id)
+        grupos[chave_colisao(rotulo)].append(fila_id)
 
     rotulos = {}
     for ids in grupos.values():

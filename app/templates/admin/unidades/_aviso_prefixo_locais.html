@@ -1,0 +1,13 @@
+{# Aviso passivo (adendo 10.71): Locais desta unidade cujo identificador_admin
+   ainda começa com um prefixo diferente da sigla efetiva atual. Recebe
+   `unidade` e `pendencias` ([(prefixo, [locais])], de
+   app/admin/unidades.py::_locais_com_prefixo_divergente). Nada é alterado
+   daqui - os links só levam à edição de cada local e à prévia. #}
+{% for prefixo, locais in pendencias %}
+  <div class="flash info aviso-prefixo-locais link-admin">
+    {{ locais|length }} {{ 'local ainda usa' if locais|length == 1 else 'locais ainda usam' }} o prefixo [{{ prefixo }}]
+    (sigla atual: [{{ unidade.sigla_exibicao }}]):
+    {% for local in locais %}<a href="{{ url_for('admin.editar_local', local_id=local.id) }}">{{ local.identificador_admin }}</a>{{ ', ' if not loop.last else '' }}{% endfor %}
+    — <a href="{{ url_for('admin.prefixo_locais_unidade', unidade_id=unidade.id, prefixo_antigo=prefixo) }}">revisar e atualizar o prefixo</a>
+  </div>
+{% endfor %}

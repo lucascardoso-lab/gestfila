@@ -8,11 +8,17 @@
   {% include "admin/_breadcrumb.html" %}
   <p class="subtitulo"><a class="botao" href="{{ url_for('admin.nova_unidade', empresa_id=empresa.id) }}">+ Nova unidade</a></p>
   <table>
-    <thead><tr><th>Nome</th><th>Status</th><th>Ações</th></tr></thead>
+    <thead><tr><th>Nome</th><th>Sigla</th><th>Status</th><th>Ações</th></tr></thead>
     <tbody>
       {% for unidade in unidades %}
         <tr>
           <td>{{ unidade.nome }}</td>
+          <td class="sigla-unidade">
+            {{ unidade.sigla_exibicao }}{% if not unidade.sigla %} <span class="subtitulo">(automática)</span>{% endif %}
+            {% if colisoes_sigla[unidade.id] %}
+              <br><span class="badge alerta">igual à de {{ colisoes_sigla[unidade.id]|join(', ') }} - cadastre uma sigla</span>
+            {% endif %}
+          </td>
           <td><span class="badge {{ 'ativo' if unidade.ativo else 'inativo' }}">{{ 'Ativa' if unidade.ativo else 'Inativa' }}</span></td>
           <td class="acoes">
             <a href="{{ url_for('admin.editar_unidade', unidade_id=unidade.id) }}">Editar</a>
@@ -22,8 +28,15 @@
             </form>
           </td>
         </tr>
+        {% if pendencias_prefixo[unidade.id] %}
+          <tr><td colspan="4">
+            {% with pendencias = pendencias_prefixo[unidade.id] %}
+              {% include "admin/unidades/_aviso_prefixo_locais.html" %}
+            {% endwith %}
+          </td></tr>
+        {% endif %}
       {% else %}
-        <tr><td colspan="3">Nenhuma unidade cadastrada.</td></tr>
+        <tr><td colspan="4">Nenhuma unidade cadastrada.</td></tr>
       {% endfor %}
     </tbody>
   </table>

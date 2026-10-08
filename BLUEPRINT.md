@@ -415,6 +415,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.68 | Dois achados independentes na exportação de PDF (adendo 10.67): eventlet trava no Windows local + cache do Chromium por usuário em produção |
 | 10.69 | Fila sem identificação de unidade nos relatórios/dashboards + select de Fila não filtrava pela Unidade escolhida |
 | 10.70 | Rótulo de fila "[SIGLA] Nome" da função única do 10.69 nas telas operacionais e cadastros admin |
+| 10.71 | Campo "Sigla" no cadastro de Unidade + atualização opcional do prefixo dos Locais |
 
 ---
 
@@ -6471,17 +6472,15 @@ fila_unidade.py`. Índice 10.0 completado (faltavam as linhas 10.47-10.68).
 > relatada e aprovada antes de implementar.
 
 > **NOTA DE DEPLOY:** cadastrar `Unidade.sigla` em TODAS as unidades ANTES de
-> publicar este adendo em produção. Sem isso, unidades cujo fallback de 3
-> letras colide (ex.: as duas "Anápolis - ..." -> "[ANÁ]") fazem aparecer
-> " (id)" nas telas operacionais (Iniciar Turno, Redirecionar, tela por
-> Local) - comportamento correto do código (aceito pelo cliente), mas
-> desnecessário se as siglas estiverem cadastradas. **Atenção (achado na
-> revisão antes do commit):** a tela admin de Unidade NÃO tem campo de sigla
-> (`app/admin/unidades.py` grava só nome/endereço/telefone; a coluna
-> `Unidade.sigla` existe desde o 10.22, mas nenhum formulário a lê ou grava).
-> Hoje a sigla só pode ser cadastrada direto no banco, ex.:
-> `UPDATE unidades SET sigla = 'ACM' WHERE id = 5;` (máx. 4 caracteres).
-> Os rótulos refletem a mudança na próxima request, sem reiniciar nada.
+> liberar o uso deste adendo em produção - **pela tela de Unidades** (campo
+> "Sigla", adendo 10.71; a listagem marca as siglas automáticas e as que
+> colidem). Sem isso, unidades cujo fallback de 3 letras colide (ex.: as duas
+> "Anápolis - ..." -> "[ANÁ]") fazem aparecer " (id)" nas telas operacionais
+> (Iniciar Turno, Redirecionar, tela por Local) - comportamento correto do
+> código (aceito pelo cliente), mas desnecessário se as siglas estiverem
+> cadastradas. Os rótulos refletem a mudança na próxima request, sem
+> reiniciar nada. (Antes do 10.71 a tela não tinha o campo e isto só era
+> possível via SQL.)
 
 **Achados da investigação:**
 
@@ -6598,14 +6597,161 @@ listados acima.
 
 ---
 
+## 10.71. ADENDO — Campo "Sigla" no cadastro de Unidade + atualização opcional do prefixo dos Locais
+
+> Pendência achada na revisão do 10.70: `Unidade.sigla` (10.22) alimenta o
+> prefixo "[SIGLA]" de filas (10.69/10.70), Locais, Totens e TVs, mas a tela
+> de Unidade não lia nem gravava o campo - só dava para preencher via SQL.
+> Investigação (FASE 1) relatada e aprovada antes de implementar.
+
+> **NOTA DE DEPLOY - rodar ANTES de `flask db upgrade`** (a migration
+> `c7e2a9d4f1b3` cria a UniqueConstraint `(empresa_id, sigla)` e falharia com
+> duplicatas, por exemplo se alguma sigla foi gravada direto no banco depois
+> do 10.70):
+> ```sql
+> SELECT empresa_id, sigla, COUNT(*) FROM unidades
+> WHERE sigla IS NOT NULL GROUP BY empresa_id, sigla HAVING COUNT(*) > 1;
+> ```
+> Resultado vazio = pode aplicar. Depois do deploy, cadastrar as siglas pela
+> tela de Unidades (a listagem marca as automáticas e as que colidem).
+
+**Achados da investigação:**
+
+1. **Estado anterior:** `unidades.sigla` é `VARCHAR(4) NULL`, collation
+   `utf8mb4_0900_ai_ci`, sem nenhuma constraint (só PK e o índice da FK
+   `empresa_id`). `Unidade.sigla_exibicao` = `(sigla or nome[:3]).upper()` -
+   o fallback pode ter acento ("ANÁ"). As rotas `nova_unidade`/
+   `editar_unidade` e os templates não tinham o campo. RBAC: `before_request`
+   do `admin_bp` (super admin ou perfil `admin`) + `autorizar_objeto` (404
+   para outra empresa) - inalterado.
+2. **Banco local:** nenhuma das 9 unidades tinha sigla; única colisão do
+   fallback: "Anápolis - Centro Médico" e "Anápolis - Laborátorio" -> "ANÁ".
+   Dados permitiam criar a UniqueConstraint (tudo NULL; o MySQL aceita vários
+   NULL num índice único, e a collation já o torna case/accent-insensitive).
+3. **Efeito colateral nos Locais:** os 14 locais locais têm
+   `identificador_admin` começando com o prefixo de fallback da unidade
+   (gravado pela migração do 10.32 ou pela sugestão automática do form de
+   Local), às vezes com o resto editado à mão. Cadastrar uma sigla IGUAL ao
+   fallback (MAT, LAR, BAN...) não muda nada; uma sigla DIFERENTE muda na hora
+   o rótulo das filas, mas os locais continuam com o prefixo antigo gravado.
+4. **Onde a sigla aparece:** rótulo de fila (`app/utils/rotulos.py` - todas as
+   telas do 10.69/10.70), barra de contexto do admin e filtro de Unidade do
+   dashboard, selects de Totem/TV no cadastro de Fila e a sugestão de
+   `identificador_admin` para Local novo. **Não** afeta código da senha,
+   cupom nem painel de TV (o código da senha usa `TotemBotao.sigla`, 10.47).
+
+**Decisões (confirmadas com o cliente) e implementação:**
+
+- **Campo "Sigla" (opcional)** em Nova/Editar unidade, com a ajuda "Usada
+  para identificar filas e locais desta unidade (ex.: [MAT] Coleta). Até 4
+  caracteres." (e, na edição, qual é a sigla automática atual). Validação:
+  2 a 4 caracteres, só A-Z (sem acento) e dígitos, gravada em maiúsculas;
+  vazio continua permitido. O formulário passou a manter o que foi digitado
+  quando volta com erro.
+- **Colisão com a sigla EFETIVA de outra unidade da mesma empresa** - mesma
+  comparação dos rótulos (`chave_colisao`, case/accent-insensitive: "ANA"
+  bate com "ANÁ"):
+  - sigla digitada igual à cadastrada de outra: "A sigla X já é usada pela
+    unidade Y.";
+  - igual à automática de outra: "A sigla X já é usada (automaticamente)
+    pela unidade Y. Cadastre primeiro uma sigla para Y.";
+  - limpar a sigla quando o fallback resultante colidiria: rejeitado ("Não é
+    possível remover a sigla: ...");
+  - unidade NOVA sem sigla cujo fallback colidiria: rejeitada, pedindo uma
+    sigla (não cria colisões novas).
+  - Cadastrar a PRÓPRIA sigla automática ("MAT" na Matriz) é permitido.
+    Editar outro campo de uma unidade que JÁ colide hoje (as duas "ANÁ"),
+    sem mexer na sigla, continua permitido - a colisão já existia e é
+    justamente o que o admin vai resolver cadastrando a sigla.
+- **UniqueConstraint `uq_unidades_empresa_sigla` (empresa_id, sigla)** no
+  modelo + migration `c7e2a9d4f1b3` (a partir de `b3d6f8a1c4e7`) - rede de
+  segurança para corrida entre dois admins (o commit trata `IntegrityError`
+  com mensagem). **Achado ao testar o downgrade no MySQL real:** ao criar o
+  índice único, o MySQL descarta o índice implícito da FK `empresa_id` e
+  passa a apoiar a FK no novo, que aí não pode ser removido sozinho (erro
+  1553). O downgrade recria o índice simples `empresa_id` antes de remover o
+  único (só no MySQL e só se não existir) - ciclo upgrade/downgrade/upgrade
+  validado duas vezes no MySQL local, schema volta exatamente ao anterior.
+- **Listagem de Unidades:** coluna "Sigla" com a sigla efetiva, "(automática)"
+  quando é fallback, e aviso quando duas unidades têm a mesma sigla efetiva
+  ("igual à de Y - cadastre uma sigla").
+- **Locais - fluxo em dois passos (opção b + c da investigação):**
+  - O gatilho é a sigla EFETIVA mudar ao salvar (cadastrar, trocar, limpar -
+    ou renomear uma unidade sem sigla, que muda o fallback). A unidade é
+    salva normalmente; se houver locais da unidade com `identificador_admin`
+    começando EXATAMENTE com "[PREFIXO_ANTIGO] ", o admin vai para uma prévia
+    (`/admin/unidades/<id>/prefixo-locais?prefixo_antigo=X`) com antes ->
+    depois, colisões já sinalizadas, "Atualizar locais" (POST próprio, com
+    CSRF) e "Agora não". **Nada nos locais muda sem esse POST.**
+  - O POST **recalcula** o plano do banco (não confia na prévia) e grava
+    **tudo ou nada**: checa a unicidade de todos contra a empresa inteira
+    (case/accent-insensitive, mesma regra da constraint do banco); se qualquer
+    um colidir, não grava nenhum e lista quais colidiram. A sigla continua
+    salva. O `prefixo_antigo` vem do formulário, mas só seleciona quais
+    identificadores DESTA unidade (já autorizada) começam com ele - o novo
+    prefixo é sempre a sigla efetiva atual, lida do banco.
+  - Só o prefixo muda; o texto depois dele nunca é tocado. O sufixo " (id)"
+    sai só quando o identificador termina exatamente em " (<id do próprio
+    local>)" (padrão da migração do 10.32) E o resultado sem ele continua
+    único; "(sala 2)" ou um "(99)" que não é o id do local ficam.
+  - **Aviso passivo** (listagem e edição de Unidades): "N locais ainda usam o
+    prefixo [X]" com link para cada local e para refazer a prévia - cobre o
+    "Agora não" e siglas trocadas direto no banco. Detecta prefixos de até 4
+    caracteres entre colchetes (tamanho de uma sigla), pra não confundir com
+    um identificador editado à mão como "[Térreo] Guichê 1".
+- `_chave_colisao` (`app/utils/rotulos.py`) virou pública (`chave_colisao`) -
+  passou a ser usada também em `app/admin/unidades.py`.
+  `Unidade.sigla_efetiva(sigla, nome)` (staticmethod, mesma regra da
+  property) valida o formulário antes de gravar.
+- **Tema escuro (10.56):** os templates novos/alterados só usam classes do
+  layout admin baseadas em `--gf-*` - nenhuma cor fixa. Os prints em Chromium
+  (claro e escuro) mostraram que `<a>` no admin não tem regra de cor e fica
+  no azul padrão do navegador, ilegível no escuro; para as telas deste
+  adendo, `.link-admin a`/`a.link-admin` usam `--gf-info` (mesma cor de
+  `button.link`), e as colisões usam `.badge.alerta` (sigla automática
+  repetida) e `.badge.erro` (identificador na prévia), também só com tokens.
+  **Achado anterior a este adendo, não corrigido aqui:** os links "Editar"/
+  "Configurar rodízio" das listagens do admin têm o mesmo problema no tema
+  escuro (registrado na seção 11).
+
+**Testes:** novo `tests/test_regressao_sigla_unidade.py` (22 verificações) -
+formato (1 e 5 caracteres, acento, hífen, espaço rejeitados; " pr9 " gravada
+"PR9"; vazio = NULL); unicidade case-insensitive; rejeição de sigla igual à
+automática de outra unidade, inclusive com acento ("ANA" x "ANÁ"); própria
+sigla automática aceita; edição de unidade que já colide continua permitida;
+unidade nova com fallback colidindo rejeitada; renomear unidade SEM sigla para
+um nome cujo fallback colide ("Matriz Sul" -> MAT) rejeitado; UniqueConstraint no banco (e a
+mesma sigla em outra empresa permitida); listagem com "(automática)" e aviso
+de colisão; rótulo de fila muda na hora ("[ACM] Coleta", e a outra perde o
+" (id)"); salvar leva à prévia sem alterar locais; prévia (GET) não altera
+nada; aviso passivo na listagem e na edição com links; confirmação com uma
+colisão não grava nenhum local e mantém a sigla; confirmação ok troca só o
+prefixo, remove " (id)" só do próprio id e quando o resultado é único,
+preserva "(sala 2)", "(99)" e texto editado à mão, não toca outras unidades;
+POST repetido não altera nada (recalcula); limpar a sigla rejeitado quando o
+fallback colidiria e aceito (com prévia de volta ao automático) quando não;
+RBAC da rota nova (403 sem perfil admin, 404 para outra empresa, GET e POST).
+Testes existentes de Unidade passaram sem ajuste. Suíte completa (71
+arquivos) sem falhas.
+
+**Arquivos alterados:** `app/models/unidade.py` (`__table_args__`,
+`sigla_efetiva`); migration nova `c7e2a9d4f1b3_unique_sigla_unidade.py`;
+`app/admin/unidades.py` (validação, prévia/confirmação, aviso passivo);
+`app/templates/admin/unidades/form.html`, `listar.html`, novos
+`prefixo_locais.html` e `_aviso_prefixo_locais.html`; `app/utils/rotulos.py`
+(`chave_colisao` pública); novo `tests/test_regressao_sigla_unidade.py`.
+Nota de deploy do 10.70 atualizada; pendência da seção 11 removida.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
-- **Cadastro de Unidade sem campo "Sigla"** (achado na revisão do 10.70):
-  `Unidade.sigla` (10.22) alimenta o prefixo "[SIGLA]" de filas (10.69/10.70)
-  e de Locais/Totens/TVs, mas `app/admin/unidades.py` e
-  `admin/unidades/form.html` não leem nem gravam o campo - hoje só dá para
-  preencher via SQL. Sem a sigla, o fallback de 3 letras pode colidir e fazer
-  aparecer " (id)" nos rótulos de fila.
+- **Links `<a>` do painel admin ilegíveis no tema escuro** (achado nos
+  prints do 10.71): `admin/_layout.html` não define cor para `<a>`, então
+  "Editar", "Configurar rodízio" etc. ficam no azul padrão do navegador sobre
+  fundo escuro. Correção provável: uma regra com `--gf-info` (mesma cor de
+  `button.link`) para os links de conteúdo do admin, conferindo que não
+  afete `a.botao`.
 - **Select "Operador" dos relatórios (tempo_atendimento) não filtra pela
   Unidade escolhida** (achado na FASE 1 do 10.69, fora do escopo dele): lista
   todos os usuários visíveis da empresa - inclusive perfis admin/gerencial

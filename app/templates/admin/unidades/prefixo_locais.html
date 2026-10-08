@@ -1,0 +1,35 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}Atualizar prefixo dos locais{% endblock %}
+
+{# Prévia da troca de prefixo (adendo 10.71). Nada muda nos Locais sem o POST
+   de "Atualizar locais" - que recalcula tudo no servidor, sem confiar nesta
+   tela, e grava tudo ou nada. #}
+{% block conteudo %}
+  <h1>Atualizar prefixo dos locais</h1>
+  {% set nome_tela = self.titulo() %}
+  {% include "admin/_breadcrumb.html" %}
+  <p class="subtitulo">
+    Unidade <strong>{{ unidade.nome }}</strong>: a sigla passou de [{{ prefixo_antigo }}] para
+    [{{ unidade.sigla_exibicao }}]. Estes locais ainda usam o prefixo antigo no identificador
+    administrativo. Só o prefixo muda - o resto do texto fica como está.
+  </p>
+  <table class="link-admin">
+    <thead><tr><th>Antes</th><th>Depois</th><th></th></tr></thead>
+    <tbody>
+      {% for item in itens %}
+        <tr>
+          <td><a href="{{ url_for('admin.editar_local', local_id=item.local.id) }}">{{ item.antes }}</a></td>
+          <td>{{ item.depois }}</td>
+          <td>{% if item.conflito %}<span class="badge erro">já usado {{ item.conflito }}</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" style="margin-top:1.5rem;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="prefixo_antigo" value="{{ prefixo_antigo }}">
+    <button class="botao" type="submit">Atualizar locais</button>
+    <a href="{{ url_for('admin.listar_unidades', empresa_id=empresa.id) }}" class="link-admin" style="margin-left:1rem;">Agora não</a>
+  </form>
+{% endblock %}
