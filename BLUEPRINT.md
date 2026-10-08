@@ -6896,7 +6896,7 @@ data/hora sobre colunas UTC no projeto inteiro:**
 | `tempo_espera.html:22`/`volume.html:22` (`linha.data.strftime`) | OK - `data` já é o dia da clínica depois deste adendo |
 
 **Padrões de grep usados na varredura** (Python e templates, projeto
-inteiro): `\.hour|\.minute|\.time\(\)|\.weekday\(|\.isoweekday\(|strftime\(|\.date\(\)|func\.date|datetime\.now\(|date\.today\(|utcnow\(\)\.(date|time|hour)`;
+inteiro): `\.hour\b|\.minute\b|\.time\(\)|\.weekday\(|\.isoweekday\(|strftime\(|\.date\(\)|func\.date|datetime\.now\(|date\.today\(|utcnow\(\)\.(date|time|hour)`;
 filtros Jinja `\|\s*(date|datetime|datetimeformat|strftime)`; `isoformat\(\)`
 (com checagem de cada consumidor JS); `new Date\(|Date\.parse\(`.
 
