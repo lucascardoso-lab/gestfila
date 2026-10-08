@@ -21,7 +21,18 @@ decidir "isso é de hoje" - isso compara o dia CIVIL EM UTC, não o dia civil da
 clínica (a virada de dia UTC cai às 21h de Brasília, 3h antes da meia-noite
 real - mesma classe de bug que a 10.36/10.37 corrigiram em outros dois
 call-sites, só que aqui a comparação já "parecia" consistente por comparar UTC
-com UTC, o que escondia o erro)."""
+com UTC, o que escondia o erro).
+
+`para_horario_clinica()` (10.74) é o ÚNICO ponto de conversão de um valor já
+gravado (UTC naive) para o fuso da clínica - para AGRUPAR por dia civil da
+clínica (`.date()` depois de converter, nunca antes) ou exibir data/hora
+formatada no servidor.
+
+REGRA (10.74): hora/data exibida pelo servidor sempre via
+`para_horario_clinica()` ou o filtro Jinja `hora_clinica`
+(`formatar_hora_clinica`); nunca `strftime`/`.date()` direto sobre uma coluna
+UTC. Datetimes enviados ao JS seguem a convenção já existente: ISO + "Z" (o
+navegador converte)."""
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -67,3 +78,26 @@ def janela_dia_clinica_em_utc(momento_clinica=None):
     inicio_utc = inicio_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
     fim_utc = fim_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
     return inicio_utc, fim_utc
+
+
+def para_horario_clinica(momento):
+    """Converte um instante gravado em UTC "naive" (colunas com
+    default=datetime.utcnow - seção 8) para o fuso da clínica (aware). Use
+    `.date()` no RESULTADO para o dia civil da clínica - `coluna.date()` direto
+    dá o dia civil em UTC, que vira às 21h de Brasília (10.74, mesma classe de
+    bug do 10.37/10.39/10.54). Aceita também um datetime já aware (só muda o
+    fuso). `None` -> `None`."""
+    if momento is None:
+        return None
+    if momento.tzinfo is None:
+        momento = momento.replace(tzinfo=ZoneInfo("UTC"))
+    return momento.astimezone(ZoneInfo(_nome_fuso()))
+
+
+def formatar_hora_clinica(momento, formato="%H:%M"):
+    """Filtro Jinja `hora_clinica` (registrado em create_app, 10.74):
+    `{{ coluna_utc | hora_clinica }}` -> "21:50"; com formato:
+    `{{ coluna_utc | hora_clinica('%d/%m/%Y %H:%M') }}`. `None` -> "" (o
+    template decide o que mostrar no lugar, ex.: "—")."""
+    convertido = para_horario_clinica(momento)
+    return convertido.strftime(formato) if convertido is not None else ""

@@ -7,8 +7,6 @@ Reaproveita, sem alterar, as consultas já existentes em `app/relatorios/queries
 pra não duplicar lógica já correta - só o que é específico desta tela nova (os 4
 KPIs, o gráfico por hora e a lista de filas com status colorido) mora aqui.
 """
-from datetime import datetime, timedelta
-
 from flask import g
 from flask_login import current_user
 
@@ -16,6 +14,7 @@ from app.admin.helpers import resolver_unidade_contexto, unidades_da_empresa
 from app.models import Fila, LogAtendimento, Senha
 from app.relatorios.helpers import Filtros
 from app.relatorios.queries import _segmentos_espera_por_senha
+from app.utils.tempo import janela_dia_clinica_em_utc
 
 # Mesma definição de "chamada" já usada em relatorios/queries.py (EVENTOS_INICIO_
 # ATENDIMENTO) - 'chamada_nome' deliberadamente NÃO é gravado pelo Realocar (seção 7
@@ -47,16 +46,6 @@ def unidades_visiveis_dashboard(empresa):
     return todas & permitidas
 
 
-def _hoje_utc():
-    """Início/fim (exclusivo) do dia UTC atual - mesma convenção já usada em todo o
-    projeto pra 'hoje' (reset diário do sequencial do totem, histórico da TV): compara
-    a data em UTC, não a data local da clínica, pra ficar consistente com o resto do
-    sistema (timestamps sempre gravados como UTC "naive")."""
-    hoje = datetime.utcnow().date()
-    inicio = datetime.combine(hoje, datetime.min.time())
-    return inicio, inicio + timedelta(days=1)
-
-
 def calcular_kpis(empresa, unidades_visiveis):
     """Os 4 KPIs do topo do dashboard (adendo 10.12.2): senhas aguardando agora,
     chamadas de hoje, tempo médio de espera de hoje e quantidade de filas ativas -
@@ -70,7 +59,7 @@ def calcular_kpis(empresa, unidades_visiveis):
         Senha.status == "aguardando",
     ).count()
 
-    inicio_hoje, fim_hoje = _hoje_utc()
+    inicio_hoje, fim_hoje = janela_dia_clinica_em_utc()
 
     chamadas_hoje = LogAtendimento.query.filter(
         LogAtendimento.unidade_id.in_(unidades_visiveis),
@@ -175,9 +164,10 @@ def chamadas_por_hora_hoje(unidades_visiveis):
     é feito em JavaScript (core/dashboard.html), no fuso horário local do navegador
     de quem está vendo o dashboard, não no servidor - mesma convenção já estabelecida
     no projeto pra qualquer exibição de horário (nunca formatar hora no servidor;
-    ver comentários em atendimento/painel_fila.html). 'Hoje', porém, continua sendo o
-    dia UTC (consistente com o resto do projeto - ver `_hoje_utc`)."""
-    inicio_hoje, fim_hoje = _hoje_utc()
+    ver comentários em atendimento/painel_fila.html). 'Hoje' é o dia civil da
+    CLÍNICA (`janela_dia_clinica_em_utc`, adendo 10.74) - antes era o dia UTC, que
+    vira às 21h de Brasília e zerava os KPIs/gráfico 3h antes da meia-noite."""
+    inicio_hoje, fim_hoje = janela_dia_clinica_em_utc()
     if not unidades_visiveis:
         return []
     linhas = (

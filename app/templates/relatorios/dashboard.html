@@ -65,7 +65,7 @@
           <tbody>
             {% for chamada in chamadas %}
               <tr>
-                <td>{{ chamada.timestamp.strftime('%d/%m %H:%M:%S') }}</td>
+                <td>{{ chamada.timestamp | hora_clinica('%d/%m %H:%M:%S') }}</td>
                 <td>{{ chamada.fila }}</td>
                 <td>{{ chamada.nome_paciente if chamada.evento == 'chamada_nome' else chamada.codigo }}</td>
                 <td>{{ chamada.local }}</td>

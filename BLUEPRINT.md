@@ -298,6 +298,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 - **Multi-tenant**: todo o middleware de autenticação deve injetar `empresa_id` no contexto da requisição e **toda query deve filtrar por ele** — nunca confiar em filtro feito só no front.
 - **Senhas de usuário (login)**: hash com `werkzeug.security` (`generate_password_hash`/`bcrypt`), nunca texto puro.
 - **Rate limit no endpoint de geração de senha do totem** (evita "ataque" de toque repetido gerando milhares de senhas).
+- **Data/hora no fuso da clínica (regra explícita desde o adendo 10.74):** colunas de data/hora são gravadas em UTC "naive" (`datetime.utcnow`). Hora/data exibida no servidor **sempre** via `para_horario_clinica()` ou o filtro Jinja `hora_clinica` (`app/utils/tempo.py`); agrupar "por dia" = `para_horario_clinica(coluna).date()`; filtrar "hoje"/um dia = `janela_dia_clinica_em_utc()`; "agora" = `agora_na_clinica()`. **Nunca** `strftime`/`.date()`/`.hour` direto sobre coluna UTC, nem `datetime.now()`/`datetime.utcnow().date()` para decidir o dia. Datetime enviado ao JS: ISO + `"Z"` (o navegador converte).
 - **Acessibilidade**: tela do totem com fontes grandes, alto contraste — já presente no design de referência (botões grandes, cores fortes).
 - **LGPD**: nome do paciente é dado pessoal mesmo sendo "campo livre sem cadastro" — definir política de retenção/expurgo desse campo após X dias.
 
@@ -417,6 +418,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.70 | Rótulo de fila "[SIGLA] Nome" da função única do 10.69 nas telas operacionais e cadastros admin |
 | 10.71 | Campo "Sigla" no cadastro de Unidade + atualização opcional do prefixo dos Locais |
 | 10.72 | Cor dos links de conteúdo nos temas claro e escuro (correção na origem) |
+| 10.74 | Agrupamento "por dia" e "hoje" no dia civil da clínica (não de UTC) nos relatórios e no dashboard |
 
 ---
 
@@ -6835,6 +6837,98 @@ totem sem `<main>`/`.container`, cupom sem `<a>`, PDF sem `gestfila.css`;
 `app/templates/admin/unidades/_aviso_prefixo_locais.html` e
 `prefixo_locais.html` (sem `.link-admin`); novo
 `tests/test_regressao_links_tema.py`.
+
+---
+
+## 10.74. ADENDO — Agrupamento "por dia" e "hoje" no dia civil da clínica (não de UTC) nos relatórios e no dashboard
+
+> Achado na FASE 1 do 10.73 (relatórios por senha): os agregados e o
+> dashboard decidiam "que dia é" pela data em UTC - mesma classe de bug já
+> corrigida em outros call-sites pelos adendos 10.37/10.39/10.54. Feito ANTES
+> do 10.73, a pedido do cliente, para o relatório novo (que mostra a emissão
+> no fuso da clínica) não divergir dos agregados.
+
+**Bugs corrigidos:**
+
+1. `app/relatorios/queries.py::tempo_medio_espera` agrupava por
+   `abertura.timestamp.date()` - dia em UTC.
+2. `app/relatorios/queries.py::volume_senhas` agrupava por
+   `criada_em.date()` - dia em UTC.
+3. `app/core/dashboard_queries.py::_hoje_utc` (usada por `calcular_kpis` e
+   `chamadas_por_hora_hoje`) definia "hoje" com `datetime.utcnow().date()`.
+
+Efeito: a virada do dia UTC cai às 21h de Brasília - uma senha emitida às
+21h50 aparecia com a data do dia SEGUINTE na coluna "Data" de Tempo de espera
+e Volume (embora o FILTRO De/Até já usasse o dia da clínica desde o 10.54), e
+os KPIs "hoje" e o gráfico por hora do dashboard zeravam às 21h. Confirmado
+rodando o teste novo contra o código antigo: a senha das 21h50 de 08/10 saía
+no dia 09/10.
+
+**Correção:**
+
+- `app/utils/tempo.py::para_horario_clinica(momento)` (nova) - ÚNICO ponto de
+  conversão de um valor gravado em UTC naive para o fuso da clínica (aware;
+  aceita também datetime já aware; `None` -> `None`). Agrupar pelo dia da
+  clínica = `para_horario_clinica(coluna).date()`, nunca `coluna.date()`.
+  Também será usada pelo 10.73 para a data/hora de emissão.
+- `tempo_medio_espera` e `volume_senhas` passam a agrupar por
+  `para_horario_clinica(...).date()`.
+- Dashboard: `_hoje_utc` removida; `calcular_kpis` e `chamadas_por_hora_hoje`
+  usam `janela_dia_clinica_em_utc()` (10.39, já existente) - nenhuma lógica
+  de fuso nova.
+
+**Varredura de `.date()`/`func.date`/`utcnow().date()` e formatação de
+data/hora sobre colunas UTC no projeto inteiro:**
+
+| Ponto | Situação |
+|---|---|
+| `relatorios/queries.py:188`, `:214`; `core/dashboard_queries.py` (`_hoje_utc`, usos em `calcular_kpis` e `chamadas_por_hora_hoje`) | **Corrigidos** (acima) |
+| `relatorios/helpers.py:67` (`agora_clinica.date()`) e `:72/:79` (`strptime(...).date()` do filtro) | OK - já no fuso da clínica / datas digitadas pelo usuário |
+| `isoformat()` de `criada_em`/`chamada_em`/`timestamp` em `atendimento/painel_fila.html`, `painel_local.html`, `core/dashboard.html` (incl. `TIMESTAMPS_CHAMADAS_HOJE`) | OK - o JS acrescenta "Z" e converte no navegador (`formatarHoraLocal`, `new Date(iso + "Z")`) |
+| `totem/senha_gerada.html:30` (cupom) | OK - `isoformat() + "Z"`, convertido no navegador |
+| `relatorios/_layout_impressao.html:43` (rodapé do PDF) | OK - `gerado_em` já vem de `agora_na_clinica()` (10.67) |
+| **`relatorios/dashboard.html:68`** ("Últimas chamadas", `chamada.timestamp.strftime('%d/%m %H:%M:%S')`) | **Corrigido** (incluído neste adendo a pedido do cliente) - formatava no servidor a hora UTC, 3h a mais; agora `\| hora_clinica('%d/%m %H:%M:%S')` |
+| **`admin/locais/ocupacao.html:18`** (coluna "Desde", `item.desde.strftime(...)`; `local_desde` gravado com `datetime.utcnow()` em `atendimento/local.py:108` e `turno.py:171`) | **Corrigido** (idem) - agora `\| hora_clinica('%d/%m/%Y %H:%M')` |
+| `models/fila.py:80-81` (`.weekday()`/`.hour`), `middleware/encerramento.py:72` (`.time()`) | OK - sobre `agora_na_clinica()` |
+| `relatorios/helpers.py:176-177` (`strftime`) | OK - datas digitadas no filtro, não colunas UTC |
+| JSON de `atendimento/chamada.py:48/63/76` e `dashboard_queries.chamadas_por_hora_hoje` (`isoformat()` sem "Z") | OK - todos os consumidores JS acrescentam "Z" (`painel_fila.html:178/195`, `painel_local.html:157/174`, `core/dashboard.html:218/239`) |
+| Demais `new Date()` em JS (relógio da TV, aviso das 23h do 10.18, logs de debug) | OK - "agora" no relógio do navegador, não coluna UTC |
+| `tempo_espera.html:22`/`volume.html:22` (`linha.data.strftime`) | OK - `data` já é o dia da clínica depois deste adendo |
+
+**Padrões de grep usados na varredura** (Python e templates, projeto
+inteiro): `\.hour|\.minute|\.time\(\)|\.weekday\(|\.isoweekday\(|strftime\(|\.date\(\)|func\.date|datetime\.now\(|date\.today\(|utcnow\(\)\.(date|time|hour)`;
+filtros Jinja `\|\s*(date|datetime|datetimeformat|strftime)`; `isoformat\(\)`
+(com checagem de cada consumidor JS); `new Date\(|Date\.parse\(`.
+
+**Filtro Jinja `hora_clinica`** (`app/utils/tempo.py::formatar_hora_clinica`,
+registrado em `create_app`): formato padrão `%H:%M`, formato opcional
+(`{{ coluna | hora_clinica('%d/%m/%Y %H:%M') }}`), `None` -> "".
+
+**REGRA (registrada também na seção 8):** hora/data exibida no servidor
+sempre via `para_horario_clinica()` ou o filtro `hora_clinica`; nunca
+`strftime`/`.date()` direto sobre coluna UTC.
+| `totem/impressao.py:53` (`momento.strftime` no cupom ESC/POS) | Código morto - `totem/routes.py:13` registra que não é mais chamado |
+| Comentários/docstrings citando `func.date`/`.date()` (`atendimento/helpers.py:566`, `totem/routes.py:407-411`, `utils/tempo.py`) | Só texto explicativo, sem código |
+
+**Testes:** novo `tests/test_regressao_dia_clinica_relatorios.py` com o relógio simulado em 09/10 01:00 UTC = 08/10 22:00 de
+Brasília (patch de `app.utils.tempo._instante_utc`, mesmo padrão de
+`test_regressao_fuso_horario.py`): `para_horario_clinica` (naive, aware,
+None); Volume e Tempo de espera (via CSV, rota real) com a senha das 21h50 no
+dia 08/10 e a das 23h30 de 07/10 no dia 07/10; KPIs "hoje" às 22h com as
+chamadas do dia da clínica (2, espera média 450 s) e o gráfico por hora com a
+chamada das 21h55; filtro `hora_clinica` (padrão, formato, None); "Últimas
+chamadas" do dashboard de relatórios mostrando 08/10 21:55:00 (não 09/10
+00:55:00) e a coluna "Desde" da ocupação de locais mostrando 08/10/2026 21:40
+(não 00:40). 8 verificações; confirmado que o teste FALHA com o código antigo
+(queries/dashboard e, separadamente, os dois templates). Suíte completa (73
+arquivos) sem falhas.
+
+**Arquivos alterados:** `app/utils/tempo.py` (`para_horario_clinica`,
+`formatar_hora_clinica`); `app/__init__.py` (filtro `hora_clinica`);
+`app/relatorios/queries.py`; `app/core/dashboard_queries.py`;
+`app/templates/relatorios/dashboard.html`;
+`app/templates/admin/locais/ocupacao.html`; seção 8 (regra); novo
+`tests/test_regressao_dia_clinica_relatorios.py`.
 
 ---
 

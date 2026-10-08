@@ -24,6 +24,7 @@ from sqlalchemy import func
 
 from app.extensions import db
 from app.models import Fila, LogAtendimento, Senha, Totem, Tv
+from app.utils.tempo import para_horario_clinica
 
 EVENTOS_INICIO_ATENDIMENTO = ("chamada_senha", "chamada_nome")
 
@@ -182,10 +183,14 @@ def tempo_medio_espera(filtros):
     aberto por 'realocado'/'voltou_aguardar' pode cair em outro dia civil da
     'gerada' original, e é o dia em que ELE começou que importa pro relatório
     "por dia".
+
+    O dia é o dia CIVIL DA CLÍNICA (`para_horario_clinica`, adendo 10.74) - um
+    `timestamp.date()` direto daria o dia em UTC, e uma espera aberta às 22h de
+    Brasília cairia no dia seguinte.
     """
     grupos = defaultdict(list)
     for abertura, fechamento, fila_id, unidade_id in _segmentos_espera_por_senha(filtros):
-        chave = (fila_id, unidade_id, abertura.timestamp.date())
+        chave = (fila_id, unidade_id, para_horario_clinica(abertura.timestamp).date())
         grupos[chave].append((fechamento.timestamp - abertura.timestamp).total_seconds())
 
     resultado = []
@@ -204,14 +209,15 @@ def tempo_medio_espera(filtros):
 
 
 def volume_senhas(filtros):
-    """Relatório 3: volume de senhas por fila/unidade/dia, prioridade vs. normal."""
+    """Relatório 3: volume de senhas por fila/unidade/dia, prioridade vs. normal.
+    Dia civil da clínica, não de UTC (adendo 10.74 - ver tempo_medio_espera)."""
     linhas = _senhas_filtradas(filtros).with_entities(
         Senha.fila_id, Senha.unidade_id, Senha.criada_em, Senha.prioridade
     )
 
     grupos = defaultdict(lambda: {"prioridade": 0, "normal": 0})
     for fila_id, unidade_id, criada_em, prioridade in linhas:
-        grupos[(fila_id, unidade_id, criada_em.date())]["prioridade" if prioridade else "normal"] += 1
+        grupos[(fila_id, unidade_id, para_horario_clinica(criada_em).date())]["prioridade" if prioridade else "normal"] += 1
 
     resultado = []
     for (fila_id, unidade_id, dia), contagem in grupos.items():
