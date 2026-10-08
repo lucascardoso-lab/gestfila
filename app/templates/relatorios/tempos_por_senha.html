@@ -1,0 +1,88 @@
+{% extends layout_relatorio %}
+{% from "relatorios/_macros.html" import form_filtros with context %}
+
+{% block titulo %}Tempos por senha{% endblock %}
+
+{# Relatório por senha (adendo 10.73). Minutos com 1 casa na tela (2 na
+   exportação, como número); sem dado = "—" na tela e célula vazia na
+   exportação, nunca 0. Sem nome do paciente (LGPD, mesmo critério do 10.67). #}
+{% macro minutos(valor) -%}
+  {{ '%.1f'|format(valor) if valor is not none else '—' }}
+{%- endmacro %}
+
+{% block conteudo %}
+  <h1>Tempos por senha</h1>
+  <p class="subtitulo">Espera (da emissão até a chamada) e atendimento (da chamada até a finalização) de cada senha, em minutos.</p>
+  {% if not modo_impressao %}
+    <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
+    {{ form_filtros(filtros, opcoes, 'relatorios.tempos_por_senha_view', querystring, mostrar_operador=True,
+                    exportacoes_extras=[('CSV por etapa', 'csv_etapas')]) }}
+  {% endif %}
+
+  {% if not total_senhas %}
+    <p>Nenhuma senha para os filtros selecionados.</p>
+  {% else %}
+    <div class="resumo-tempos">
+      {% for chave, titulo in [('espera_inicial', 'Espera inicial'), ('espera_total', 'Espera total'), ('atendimento_total', 'Atendimento total')] %}
+        <div class="card-resumo">
+          <strong>{{ titulo }}</strong>
+          <span>Média: {{ minutos(resumo[chave].media) }} min</span>
+          <span>Mediana: {{ minutos(resumo[chave].mediana) }} min</span>
+          <span>{{ resumo[chave].quantidade }} de {{ total_senhas }} senhas</span>
+        </div>
+      {% endfor %}
+    </div>
+    <p class="aviso">
+      Média e mediana POR SENHA: cada senha conta uma vez, somando todas as suas etapas. Senhas sem o
+      dado (coluna Situação) ficam fora da conta. Os relatórios "Tempo médio de espera" e "Tempo de
+      atendimento" fazem a média POR ETAPA - quando há realocação, os números diferem. A aba "Por etapa"
+      do Excel (ou o "CSV por etapa") fecha com eles. Nela, a coluna "Operador (chamada/atendimento)"
+      traz, numa linha de Espera, quem chamou a senha (encerrando a espera) e, numa linha de
+      Atendimento, quem atendeu.
+    </p>
+
+    {% if modo_impressao and pdf_omitido %}
+      <p class="aviso">
+        Lista com {{ total_senhas }} senhas - acima do limite de {{ limite_linhas_pdf }} linhas do PDF.
+        Use a exportação CSV ou Excel para a lista completa.
+      </p>
+    {% else %}
+      <div class="tabela-rolagem">
+      <table class="tabela-larga">
+        <thead>
+          <tr>
+            <th>Senha</th><th>Emissão</th><th>Unidade</th><th>Fila inicial</th><th>Fila final</th>
+            <th>Espera inicial (min)</th><th>Espera total (min)</th><th>Atendimento total (min)</th>
+            <th>Etapas de atendimento</th><th>Operador (finalização)</th><th>Local (finalização)</th><th>Situação</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for linha in linhas_exibidas %}
+            <tr>
+              <td>{{ linha.codigo }}</td>
+              <td>{{ linha.criada_em | hora_clinica('%d/%m/%Y %H:%M') }}</td>
+              <td>{{ linha.unidade }}</td>
+              <td>{{ linha.fila_inicial }}</td>
+              <td>{{ linha.fila_final }}</td>
+              <td>{{ minutos(linha.espera_inicial_min) }}</td>
+              <td>{{ minutos(linha.espera_total_min) }}</td>
+              <td>{{ minutos(linha.atendimento_total_min) }}</td>
+              <td>{{ linha.etapas if linha.etapas is not none else '—' }}</td>
+              <td>{{ linha.operador }}</td>
+              <td>{{ linha.local }}</td>
+              <td><span title="{{ linha.dica_situacao }}">{{ linha.situacao }}</span></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% if not modo_impressao and total_paginas > 1 %}
+        <p class="paginacao">
+          {% if pagina > 1 %}<a href="{{ url_for('relatorios.tempos_por_senha_view', pagina=pagina - 1, **querystring) }}">← Anterior</a>{% endif %}
+          Página {{ pagina }} de {{ total_paginas }} ({{ total_senhas }} senhas)
+          {% if pagina < total_paginas %}<a href="{{ url_for('relatorios.tempos_por_senha_view', pagina=pagina + 1, **querystring) }}">Próxima →</a>{% endif %}
+        </p>
+      {% endif %}
+    {% endif %}
+  {% endif %}
+{% endblock %}

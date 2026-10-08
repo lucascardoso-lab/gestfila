@@ -1,4 +1,6 @@
-{% macro form_filtros(filtros, opcoes, endpoint, querystring, mostrar_operador=False) %}
+{# `exportacoes_extras` (adendo 10.73): [(rótulo, formato)] - links de
+   exportação além de CSV/Excel/PDF (ex.: "CSV por etapa"). #}
+{% macro form_filtros(filtros, opcoes, endpoint, querystring, mostrar_operador=False, exportacoes_extras=()) %}
   <form method="get" action="{{ url_for(endpoint) }}" class="filtros">
     {% if current_user.is_super_admin and querystring.empresa_id %}
       <input type="hidden" name="empresa_id" value="{{ querystring.empresa_id }}">
@@ -56,6 +58,9 @@
     <a href="{{ url_for(endpoint, formato='csv', **querystring) }}">CSV</a>
     <a href="{{ url_for(endpoint, formato='xlsx', **querystring) }}">Excel</a>
     <a href="{{ url_for(endpoint, formato='pdf', **querystring) }}">PDF</a>
+    {% for rotulo, formato in exportacoes_extras %}
+      <a href="{{ url_for(endpoint, formato=formato, **querystring) }}">{{ rotulo }}</a>
+    {% endfor %}
   </p>
   <script>
     (function () {

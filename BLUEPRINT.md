@@ -418,6 +418,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.70 | Rótulo de fila "[SIGLA] Nome" da função única do 10.69 nas telas operacionais e cadastros admin |
 | 10.71 | Campo "Sigla" no cadastro de Unidade + atualização opcional do prefixo dos Locais |
 | 10.72 | Cor dos links de conteúdo nos temas claro e escuro (correção na origem) |
+| 10.73 | Relatório "Tempos por senha" (espera e atendimento de cada senha, para exportar) |
 | 10.74 | Agrupamento "por dia" e "hoje" no dia civil da clínica (não de UTC) nos relatórios e no dashboard |
 
 ---
@@ -6840,6 +6841,136 @@ totem sem `<main>`/`.container`, cupom sem `<a>`, PDF sem `gestfila.css`;
 
 ---
 
+## 10.73. ADENDO — Relatório "Tempos por senha" (espera e atendimento de cada senha, para exportar)
+
+> Pedido da gestão das unidades: tempo de espera (da retirada da senha até a
+> chamada) e tempo de atendimento (do início à finalização), em minutos,
+> INDIVIDUAL por senha, para exportar e calcular as médias das unidades - os
+> relatórios existentes são todos agregados. Investigação (FASE 1) relatada e
+> aprovada antes de implementar. Implementado DEPOIS do 10.74 (dia civil da
+> clínica nos agregados), a pedido do cliente, para os dois não divergirem.
+
+**Achados da investigação:**
+
+1. **Reaproveitamento sem pareamento novo:** `_segmentos_espera_por_senha`
+   (10.66), `_pares_inicio_fim` e `_segmentos_intermediarios_realocacao`
+   (10.62) devolvem os próprios logs (com `senha_id`) - basta agrupá-los por
+   senha. O fallback de dado histórico vem junto, sem cópia.
+2. **"A média por senha bate com o agregado" não vale por definição:** os
+   agregados fazem a média POR SEGMENTO (uma senha Recepção -> Coleta conta 2
+   vezes); a média POR SENHA conta cada senha uma vez. O que fecha
+   exatamente: soma e contagem dos segmentos, e a média da visão por etapa.
+3. **Banco local:** 423 senhas (23/07 a 25/08), no máximo 67 por dia/unidade;
+   417 são dado histórico (logs sem o snapshot do 10.62) e nenhuma senha no
+   formato novo foi realocada. Jornadas: 0-2 segmentos de espera e de
+   atendimento por senha. Exemplo real (AMA003, histórico): espera medida 6,5
+   min (a 2ª espera, 0,9 min, é invisível no fallback) e atendimento
+   0,2 + 975,4 min - finalização 16h depois da chamada (valor extremo:
+   justifica a mediana no resumo; nenhum corte automático).
+4. **Casos sem dado:** nunca chamada (status `aguardando`); cancelada - só o
+   encerramento automático cancela (`middleware/encerramento.py`, 10.18), e
+   só senhas `chamada`/`em_atendimento`; chamada e não finalizada; histórico
+   com realocação (o fallback só enxerga parte da jornada).
+
+**Decisões (confirmadas com o cliente) e implementação:**
+
+- **Uma tela "Tempos por senha"** (`/relatorios/tempos-por-senha`, item no
+  menu de Relatórios), os dois tempos na mesma linha.
+- **Consulta** `app/relatorios/queries.py::tempos_por_senha(filtros)` ->
+  `(linhas_por_senha, linhas_por_etapa)`: chama as três funções acima e só
+  agrupa por senha. Por senha: **espera inicial** (1º segmento quando abre na
+  emissão - o tempo pedido), **espera total** e **atendimento total** (soma
+  dos segmentos; atendimento só com 'fim_atendimento'), **etapas de
+  atendimento** (nº de segmentos de atendimento - cabeçalho "Etapas de
+  atendimento" na tela, CSV, Excel e PDF), fila inicial (snapshot do evento 'gerada'; sem
+  snapshot e sem realocação = fila atual), fila final, operador e local da
+  finalização, **Situação**.
+- **Situação** (constantes `SITUACAO_*` + `DICAS_SITUACAO`, tooltip na tela):
+  "Concluída", "Histórico parcial", "Aguardando (nunca chamada)", "Cancelada
+  (encerramento automático)", "Chamada, não finalizada". Sem dado = VAZIO
+  ("—" na tela, célula vazia na exportação), nunca 0.
+- **Histórico parcial:** senha com log sem snapshot E com realocação/volta a
+  aguardar - espera inicial preenchida (exata também no fallback), totais e
+  etapas vazios. Histórico SEM realocação é exato e fica "Concluída".
+- **Visão por etapa** (senha, nº da etapa, tipo Espera / Atendimento -
+  Conclusão / Repasse, fila e local do snapshot, operador, início, fim,
+  minutos, observação "Histórico parcial"): os MESMOS segmentos dos
+  agregados - inclusive os do fallback histórico -, por isso fecha com eles.
+  Numeração na jornada completa da senha (não pula com o filtro de operador).
+- **Operador:** na tela por senha, as senhas em que o operador atendeu
+  alguma etapa, com os totais da senha inteira; na visão por etapa, só as
+  etapas dele (atendimento por quem chamou, igual a `tempo_atendimento`;
+  espera por quem a encerrou chamando a senha). Cabeçalhos "Operador
+  (finalização)" e "Local (finalização)" na visão por senha; na visão por
+  etapa, coluna única "Operador (chamada/atendimento)" - numa linha de
+  Espera é quem chamou a senha, numa de Atendimento é quem atendeu -,
+  explicada na nota da tela. Mesmos rótulos em todos os formatos.
+- **Resumo no topo:** média, mediana e quantidade POR SENHA de espera
+  inicial, espera total e atendimento total ("N de M senhas" - senhas sem o
+  dado ficam fora), com nota explicando que difere da média por etapa dos
+  outros relatórios quando há realocação.
+- **Tela:** minutos com 1 casa e ponto decimal ("5.0", como os outros
+  relatórios - troca para vírgula registrada na seção 11); tabela de 12
+  colunas compacta (fonte .8rem) para caber sem rolagem, com rolagem
+  horizontal só como reserva em telas estreitas; emissão no fuso da clínica (filtro
+  `hora_clinica`, 10.74); paginação de `LINHAS_POR_PAGINA = 100` (resumo
+  sempre sobre o filtro inteiro). Filtros: unidade, fila (com filtro por
+  unidade do 10.69), operador e período (janela do dia da clínica, 10.54).
+- **Exportação** (mesmo `_exportar_relatorio`, log de auditoria do 10.67,
+  RBAC gerencial/admin do blueprint):
+  - **Excel** com abas "Por senha" e "Por etapa"; minutos como NÚMERO com
+    formato `0.00`; emissão/início/fim como data-hora da clínica.
+  - **CSV por senha** e **CSV por etapa** (link extra no macro de filtros,
+    `exportacoes_extras`), no padrão do Excel em português: separador ";",
+    decimal ",", 2 casas, data dd/mm/aaaa hh:mm, **UTF-8 com BOM** (sem o
+    BOM o Excel em português quebra os acentos de "Recepção") - aberto
+    direto no Excel brasileiro, os minutos chegam como número. Os CSV dos
+    relatórios antigos NÃO mudaram (continuam com ","; pendência na seção 11). O CSV por etapa entra no log como
+    formato "csv", `tipo_relatorio="tempos_por_senha_etapas"` (sem mexer no
+    ENUM do log).
+  - **PDF**: lista completa até `LIMITE_LINHAS_PDF = 500` linhas; acima
+    disso, só o resumo + aviso para usar CSV/Excel. Tabela com fonte menor
+    (`.tabela-larga` no `print.css`) para as 12 colunas caberem no A4.
+  - `export.exportar` ganhou parâmetros opcionais (`abas`, `csv_pt_br`,
+    `colunas_minutos`); `_exportar_relatorio` ganhou `abas_excel`,
+    `csv_pt_br`, `colunas_minutos`, `csvs_extras`, `contexto_pdf` - os 4
+    relatórios antigos não passam nenhum e continuam idênticos.
+- **Sem nome do paciente** (LGPD, mesmo critério do 10.67): nenhuma coluna,
+  nem na tela, nem em CSV/Excel/PDF.
+
+**Limitação registrada (seção 11):** o filtro de Fila usa a fila ATUAL da
+senha, igual aos agregados - uma senha realocada da Recepção para a Coleta
+some do filtro "Recepção".
+
+**Testes:** novo `tests/test_regressao_tempos_por_senha.py` (17
+verificações): senha simples; senha com 2 realocações (valores, ordem das 6
+etapas, filas inicial/final, operador da finalização); cada caso sem dado
+(nunca chamada, cancelada, não finalizada, histórico parcial) e histórico
+sem realocação "Concluída"; coerência com os agregados só com dado no
+formato novo (soma por senha = soma do agregado; contagem e média da visão
+por etapa = agregado, para espera e atendimento); tela com o relógio às 22h
+de Brasília (emissão 21:50 no dia certo), tooltip, resumo "7 de 8 senhas" e
+nota da média; paginação; CSV pt-BR com números; CSV por etapa; Excel com
+duas abas, células numéricas (formato `0.00`) e data-hora da clínica; os
+dois CSV em UTF-8 com BOM e "Recepção" intacto; cabeçalhos "Etapas de
+atendimento" e "Operador (chamada/atendimento)" na tela, CSV, Excel e PDF;
+filtro de operador nas duas visões; PDF real (Chromium) completo e com o
+limite (só resumo + aviso); log de auditoria dos 4 formatos; RBAC (403 para
+atendente) e item no menu; ausência de `nome_paciente` na tela, CSV, CSV por
+etapa, Excel (as duas abas) e PDF. Suíte completa (74 arquivos) sem falhas.
+
+**Arquivos alterados:** `app/relatorios/queries.py` (`tempos_por_senha`,
+constantes de situação/etapa); `app/relatorios/routes.py` (rota,
+`_exportar_relatorio` com parâmetros opcionais, `LIMITE_LINHAS_PDF`,
+`LINHAS_POR_PAGINA`); `app/relatorios/export.py` (abas, CSV pt-BR, formato
+numérico); novo `app/templates/relatorios/tempos_por_senha.html`;
+`app/templates/relatorios/_macros.html` (`exportacoes_extras`);
+`app/templates/relatorios/index.html` (menu); `app/templates/relatorios/
+_layout.html` e `print.css` (estilos); novo
+`tests/test_regressao_tempos_por_senha.py`.
+
+---
+
 ## 10.74. ADENDO — Agrupamento "por dia" e "hoje" no dia civil da clínica (não de UTC) nos relatórios e no dashboard
 
 > Achado na FASE 1 do 10.73 (relatórios por senha): os agregados e o
@@ -6934,6 +7065,18 @@ arquivos) sem falhas.
 
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
+- **Padronizar o formato numérico dos relatórios antigos** (registrado no
+  10.73): (1) CSV de Tempo de espera, Tempo de atendimento, Volume e Ranking
+  para o padrão do Excel em português (";" e "," decimal, UTF-8 com BOM, como
+  o "Tempos por senha") - ANTES, verificar se algum consumidor automatizado
+  (ex.: Power BI) importa os CSV atuais com "," e ".", porque a troca
+  quebraria essa importação; (2) decimal com vírgula na TELA de todos os
+  relatórios (hoje "5.0", com ponto, por consistência).
+- **Filtro de Fila dos relatórios usa a fila ATUAL da senha** (limitação
+  registrada no 10.73, alinhada aos agregados na v1): uma senha realocada da
+  Recepção para a Coleta some do filtro "Recepção" em todos os relatórios
+  (inclusive "Tempos por senha"). Alternativa futura: filtrar pelas filas por
+  onde a senha passou (snapshots de `logs_atendimento`, 10.62).
 - **Foco visível por teclado no `<nav>`** (acessibilidade, fora do 10.72):
   os links do menu principal não têm `:focus-visible` próprio - o contorno
   `--gf-link` do 10.72 é só para a área de conteúdo e teria pouco contraste

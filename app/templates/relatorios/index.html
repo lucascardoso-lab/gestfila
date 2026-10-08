@@ -19,5 +19,8 @@
     <a href="{{ url_for('relatorios.ranking', empresa_id=empresa.id if current_user.is_super_admin else none) }}">
       Ranking de operadores<br><small>por volume e tempo médio</small>
     </a>
+    <a href="{{ url_for('relatorios.tempos_por_senha_view', empresa_id=empresa.id if current_user.is_super_admin else none) }}">
+      Tempos por senha<br><small>espera e atendimento de cada senha, para exportar</small>
+    </a>
   </div>
 {% endblock %}

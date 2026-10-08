@@ -435,6 +435,164 @@ def tempo_atendimento(filtros):
     return resultado
 
 
+# Relatório "Tempos por senha" (adendo 10.73) - situação de cada senha na
+# visão por senha. Constantes centralizadas (mesmo padrão de
+# TIPO_FECHAMENTO_*), usadas pela consulta, pela rota/exportação e pelos testes.
+SITUACAO_CONCLUIDA = "Concluída"
+SITUACAO_HISTORICO_PARCIAL = "Histórico parcial"
+SITUACAO_NUNCA_CHAMADA = "Aguardando (nunca chamada)"
+SITUACAO_CANCELADA = "Cancelada (encerramento automático)"
+SITUACAO_NAO_FINALIZADA = "Chamada, não finalizada"
+DICAS_SITUACAO = {
+    SITUACAO_CONCLUIDA: "Atendimento finalizado, com todas as etapas registradas.",
+    SITUACAO_HISTORICO_PARCIAL: (
+        "Senha registrada antes do adendo 10.62: as etapas depois da realocação não foram "
+        "gravadas com detalhe. Só a espera inicial é exata; os totais ficam em branco."
+    ),
+    SITUACAO_NUNCA_CHAMADA: "A senha nunca foi chamada - não há tempo de espera nem de atendimento.",
+    SITUACAO_CANCELADA: (
+        "Cancelada pelo encerramento automático do fim do dia (adendo 10.18) sem ter sido "
+        "finalizada - não há tempo de atendimento."
+    ),
+    SITUACAO_NAO_FINALIZADA: "Foi chamada, mas o atendimento ainda não foi finalizado.",
+}
+TIPO_ETAPA_ESPERA = "espera"
+ROTULOS_TIPO_ETAPA = {
+    TIPO_ETAPA_ESPERA: "Espera",
+    TIPO_FECHAMENTO_CONCLUSAO: "Atendimento - Conclusão",
+    TIPO_FECHAMENTO_REPASSE: "Atendimento - Repasse",
+}
+EVENTOS_JORNADA = ("gerada", "realocado", "voltou_aguardar", *EVENTOS_INICIO_ATENDIMENTO, "fim_atendimento")
+
+
+def tempos_por_senha(filtros):
+    """Relatório 5 (adendo 10.73): tempos POR SENHA - retorna
+    `(linhas_por_senha, linhas_por_etapa)`, com segundos crus (a rota converte
+    para minutos e nomes).
+
+    **Nenhum pareamento novo:** os segmentos vêm exatamente das mesmas três
+    funções dos agregados - `_segmentos_espera_por_senha` (esperas, 10.66),
+    `_pares_inicio_fim` (atendimento final) e
+    `_segmentos_intermediarios_realocacao` (repasses, 10.62) -, com o mesmo
+    fallback de dado histórico; aqui só são AGRUPADOS por `senha_id` (cada
+    item já traz o log, e o log traz a senha). Por isso a visão por etapa fecha
+    com os agregados: mesmos segmentos, mesma contagem, mesma média.
+
+    Por senha:
+    - `espera_inicial`: o 1º segmento de espera quando ele abre na emissão
+      ('gerada' -> 1ª chamada) - literalmente o tempo pedido.
+    - `espera_total`/`atendimento_total`: soma dos segmentos da senha.
+      `atendimento_total` só com o atendimento FINALIZADO (sem
+      'fim_atendimento' fica vazio, mesmo que haja repasses).
+    - Vazio (None), nunca 0, quando não há o dado (`situacao` explica).
+    - **Histórico parcial:** senha com log sem snapshot de fila (antes do
+      10.62) E com realocação/volta a aguardar - o fallback dos agregados só
+      enxerga parte da jornada, então os totais ficam vazios e só a espera
+      inicial (exata também no fallback) é mostrada. Histórico SEM realocação
+      é exato e fica "Concluída".
+
+    Operador (decisão do cliente): na visão por senha, o filtro mantém as
+    senhas em que o operador atendeu ALGUMA etapa (totais da senha inteira);
+    na visão por etapa, só as etapas dele - atendimento pelo operador que
+    chamou (`inicio.usuario_id`, igual a `tempo_atendimento`), espera pelo
+    operador que a encerrou chamando a senha.
+
+    Filtro de Fila: usa a fila ATUAL da senha (`_senhas_filtradas`), igual aos
+    agregados - limitação registrada no 10.73/seção 11.
+    """
+    senhas = _senhas_filtradas(filtros).order_by(Senha.criada_em, Senha.id).all()
+    if not senhas:
+        return [], []
+
+    esperas = defaultdict(list)
+    for abertura, fechamento, fila_id, _unidade_id in _segmentos_espera_por_senha(filtros):
+        esperas[abertura.senha_id].append((TIPO_ETAPA_ESPERA, abertura, fechamento, fila_id, None))
+    atendimentos = defaultdict(list)
+    for inicio, fim, fila_id, local_id in _pares_inicio_fim(filtros):
+        atendimentos[inicio.senha_id].append((TIPO_FECHAMENTO_CONCLUSAO, inicio, fim, fila_id, local_id))
+    for inicio, realocado, fila_id, local_id, _unidade_id in _segmentos_intermediarios_realocacao(filtros):
+        atendimentos[inicio.senha_id].append((TIPO_FECHAMENTO_REPASSE, inicio, realocado, fila_id, local_id))
+
+    eventos = defaultdict(list)
+    for log in LogAtendimento.query.filter(
+        LogAtendimento.senha_id.in_([s.id for s in senhas]),
+        LogAtendimento.evento.in_(EVENTOS_JORNADA),
+    ).all():
+        eventos[log.senha_id].append(log)
+
+    def segundos(segmento):
+        return (segmento[2].timestamp - segmento[1].timestamp).total_seconds()
+
+    operador = filtros.operador_id
+    linhas, etapas = [], []
+    for senha in senhas:
+        evs = eventos[senha.id]
+        esp = sorted(esperas[senha.id], key=lambda seg: seg[1].timestamp)
+        atd = sorted(atendimentos[senha.id], key=lambda seg: seg[1].timestamp)
+        historico = any(e.fila_id is None for e in evs)
+        parcial = historico and any(e.evento in ("realocado", "voltou_aguardar") for e in evs)
+        foi_chamada = any(e.evento in EVENTOS_INICIO_ATENDIMENTO for e in evs)
+        fim = next((e for e in evs if e.evento == "fim_atendimento"), None)
+        gerada = next((e for e in evs if e.evento == "gerada"), None)
+
+        if not foi_chamada:
+            situacao = SITUACAO_NUNCA_CHAMADA
+        elif senha.status == "cancelada":
+            situacao = SITUACAO_CANCELADA
+        elif fim is None:
+            situacao = SITUACAO_NAO_FINALIZADA
+        elif parcial:
+            situacao = SITUACAO_HISTORICO_PARCIAL
+        else:
+            situacao = SITUACAO_CONCLUIDA
+
+        if gerada is not None and gerada.fila_id is not None:
+            fila_inicial = gerada.fila_id
+        else:
+            fila_inicial = None if parcial else senha.fila_id  # sem realocação, a fila nunca mudou
+
+        if not operador or any(seg[1].usuario_id == operador for seg in atd):
+            linhas.append({
+                "senha_id": senha.id,
+                "codigo": senha.codigo,
+                "criada_em": senha.criada_em,
+                "unidade_id": senha.unidade_id,
+                "fila_inicial_id": fila_inicial,
+                "fila_final_id": senha.fila_id,
+                "espera_inicial_segundos": segundos(esp[0]) if esp and esp[0][1].evento == "gerada" else None,
+                "espera_total_segundos": sum(map(segundos, esp)) if esp and not parcial else None,
+                "atendimento_total_segundos": sum(map(segundos, atd)) if fim is not None and atd and not parcial else None,
+                "etapas": len(atd) if atd and not parcial else None,
+                "operador_id": fim.usuario_id if fim is not None else None,
+                "local_id": senha.local_id if fim is not None else None,
+                "situacao": situacao,
+            })
+
+        # Numeração da etapa na jornada COMPLETA da senha, antes do filtro de
+        # operador (não "pula" números quando o filtro esconde etapas).
+        for numero, seg in enumerate(sorted(esp + atd, key=lambda seg: seg[1].timestamp), start=1):
+            tipo, abertura, fechamento, fila_id, local_id = seg
+            operador_etapa = fechamento.usuario_id if tipo == TIPO_ETAPA_ESPERA else abertura.usuario_id
+            if operador and operador_etapa != operador:
+                continue
+            etapas.append({
+                "senha_id": senha.id,
+                "codigo": senha.codigo,
+                "criada_em": senha.criada_em,
+                "unidade_id": senha.unidade_id,
+                "numero": numero,
+                "tipo": tipo,
+                "fila_id": fila_id,
+                "local_id": local_id,
+                "operador_id": operador_etapa,
+                "inicio": abertura.timestamp,
+                "fim": fechamento.timestamp,
+                "segundos": segundos(seg),
+                "historico_parcial": parcial,
+            })
+    return linhas, etapas
+
+
 def ranking_operadores(filtros):
     """Relatório 4: ranking de operadores por volume (chamada_senha + chamada_nome) e
     tempo médio de atendimento (None enquanto não houver fim_atendimento gravado)."""
