@@ -416,6 +416,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.69 | Fila sem identificação de unidade nos relatórios/dashboards + select de Fila não filtrava pela Unidade escolhida |
 | 10.70 | Rótulo de fila "[SIGLA] Nome" da função única do 10.69 nas telas operacionais e cadastros admin |
 | 10.71 | Campo "Sigla" no cadastro de Unidade + atualização opcional do prefixo dos Locais |
+| 10.72 | Cor dos links de conteúdo nos temas claro e escuro (correção na origem) |
 
 ---
 
@@ -6712,7 +6713,8 @@ listados acima.
   repetida) e `.badge.erro` (identificador na prévia), também só com tokens.
   **Achado anterior a este adendo, não corrigido aqui:** os links "Editar"/
   "Configurar rodízio" das listagens do admin têm o mesmo problema no tema
-  escuro (registrado na seção 11).
+  escuro. **Nota cruzada (10.72):** corrigido na origem por `--gf-link` em
+  `gestfila.css`; `.link-admin` foi removida.
 
 **Testes:** novo `tests/test_regressao_sigla_unidade.py` (22 verificações) -
 formato (1 e 5 caracteres, acento, hífen, espaço rejeitados; " pr9 " gravada
@@ -6744,14 +6746,105 @@ Nota de deploy do 10.70 atualizada; pendência da seção 11 removida.
 
 ---
 
+## 10.72. ADENDO — Cor dos links de conteúdo nos temas claro e escuro (correção na origem)
+
+> Achado dos prints do 10.71: nenhum layout definia cor para `<a>`, então os
+> links de conteúdo ficavam no azul (e, visitados, no roxo) padrão do
+> navegador - ilegíveis no tema escuro (10.56). O 10.71 corrigiu só as telas
+> dele (`.link-admin`); este adendo corrige na origem. Investigação (FASE 1)
+> relatada e aprovada antes de implementar.
+
+**Achados da investigação:**
+
+1. **Nenhuma regra de cor para `a`/`:visited`/`:hover`/`:focus-visible`** em
+   `gestfila.css` nem nos 7 layouts-raiz - só `nav a` (`--gf-nav-texto`) e
+   regras pontuais com classe (`.exportar a`, `.menu-relatorios a`,
+   `.top-bar a`, `.link-trocar-local`, `.botao`, classes do totem).
+   `.acoes a` (admin/atendimento) só define margem/fonte, sem cor.
+2. **Links que dependiam do navegador:** ações das listagens do admin
+   ("Editar", "Configurar rodízio", "Unidades"/"Usuários" em empresas - 10
+   telas), URL pública de Totem/TV (listagem `a.link-publico` e formulários),
+   ações de `atendimento/listar_filas.html`, links de `core/index.html` e das
+   páginas 403/404 (`base.html`). Relatórios (exportação, menu) e dashboards
+   já tinham cor própria ou não têm links de conteúdo; breadcrumbs não têm
+   `<a>`; flashes são texto escapado.
+3. **Contraste medido (não presumido):** azul padrão do navegador no tema
+   escuro: 1,49-1,89:1; roxo de visitado: 1,27-1,61:1. E `--gf-info`
+   (#2980B9), candidato inicial da proposta, ficava ABAIXO de 4,5:1 no tema
+   claro (4,3 sobre branco, 3,97 sobre o fundo da página).
+4. **Painel de TV:** nenhum `<a>`, mas `painel/tv.html` TEM `<main>` - cairia
+   no escopo "main" se um link fosse adicionado lá. Totem: só `<a>` com classe
+   e cor própria, sem `<main>`/`.container`. Cupom: sem `<a>`; o `@media
+   print` só mostra `.cupom`. PDF dos relatórios: tem `<main>`, mas não
+   carrega `gestfila.css` (print.css inline, 10.67).
+5. **Armadilha de especificidade:** um `a:visited` comum tem (0,1,1) - maior
+   que `.botao` (0,1,0) -, então um botão "+ Nova ..." já visitado pegaria a
+   cor de link.
+6. **Escopo confirmado no DOM real** (Chromium, 20 páginas: listagens e
+   formulários do admin, prévia do 10.71, atendimento, core/index, dashboard,
+   relatórios, 403, 404, login): nenhum `<a>` fora do `<nav>` fica fora de
+   `main`/`.container`. A barra de contexto do admin está fora do `<main>`,
+   mas não tem `<a>`.
+
+**Decisões (confirmadas com o cliente) e implementação:**
+
+- **Token `--gf-link`** em `gestfila.css`: `#1D6A9C` no claro, `#5DADE2` no
+  escuro (`[data-theme="dark"]`). Contraste: claro 5,16-5,84:1 sobre
+  superfície, fundo da página e fundos de aviso info/alerta/sucesso (4,50:1
+  sobre o fundo de flash de erro, onde hoje não há link); escuro 5,38-7,23:1
+  sobre todos esses fundos.
+- **Regras** (cor, hover sublinhado, `:focus-visible` com contorno
+  `--gf-link`), com o seletor INTEIRO dentro de `:where()` - especificidade
+  zero, então qualquer regra com classe continua vencendo, inclusive em link
+  visitado:
+  `:where(main a, .container a):not(:where(.area-painel-tv a))`.
+  Escopo: `<main>` (admin, atendimento, relatórios, dashboard) e `.container`
+  (`base.html`). Fora: `<nav>`, totem, cupom e o painel de TV - excluído
+  explicitamente pela classe `area-painel-tv` no `<body>` de
+  `painel/_layout.html` (achado 4). Sem regra própria de `:visited`: uma cor
+  de autor em `a` vale para o estado visitado por especificação.
+- **`.link-admin` (10.71) removida** - a regra global cobre o mesmo caso; uma
+  fonte de verdade só. `.badge.alerta`/`.badge.erro` do 10.71 continuam.
+- **Foco visível do `<nav>`:** fora deste adendo (registrado na seção 11).
+
+**Validação no navegador real** (Chromium, temas claro e escuro, via
+`getComputedStyle`): "Editar" = `--gf-link`; botão "+ Novo local" (`a.botao`)
+continua branco; links do `<nav>` continuam `--gf-nav-texto`; exportação dos
+relatórios continua `--gf-primaria`; foco por teclado em "Editar" mostra o
+contorno sólido em `--gf-link`; um `<a>` injetado no `<main>` do painel de TV
+fica com a cor do navegador, não `--gf-link` (exclusão funcionando). Prints
+claro/escuro: Locais, Filas, relatório com exportação, dashboard, botão
+"+ Novo local" e foco por teclado. **`:visited` não foi provado por print:**
+o Chromium headless do Playwright (inclusive no modo novo) não aplicou o
+estado visitado nem SEM a correção, então um print não provaria nada; a
+garantia fica no teste estrutural (cor de autor em `a`, sem regra
+`:visited` solta).
+
+**Testes:** novo `tests/test_regressao_links_tema.py` (5 verificações,
+estrutural, lê os valores reais do `gestfila.css`): `--gf-link` nos dois
+temas com contraste >= 4,5:1 calculado sobre superfície, fundo e fundos de
+aviso; seletores de link 100% dentro de `:where()`, com `main a` e
+`.container a`, sem `nav` e com a exclusão do painel; nenhuma regra `a`/
+`a:visited` global solta; painel marcado com `.area-painel-tv` e sem `<a>`,
+totem sem `<main>`/`.container`, cupom sem `<a>`, PDF sem `gestfila.css`;
+`.link-admin` ausente dos templates. Suíte completa (72 arquivos) sem falhas.
+
+**Arquivos alterados:** `app/static/css/gestfila.css` (token + regras);
+`app/templates/painel/_layout.html` (`<body class="area-painel-tv">`);
+`app/templates/admin/_layout.html` (sai `.link-admin`);
+`app/templates/admin/unidades/_aviso_prefixo_locais.html` e
+`prefixo_locais.html` (sem `.link-admin`); novo
+`tests/test_regressao_links_tema.py`.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
-- **Links `<a>` do painel admin ilegíveis no tema escuro** (achado nos
-  prints do 10.71): `admin/_layout.html` não define cor para `<a>`, então
-  "Editar", "Configurar rodízio" etc. ficam no azul padrão do navegador sobre
-  fundo escuro. Correção provável: uma regra com `--gf-info` (mesma cor de
-  `button.link`) para os links de conteúdo do admin, conferindo que não
-  afete `a.botao`.
+- **Foco visível por teclado no `<nav>`** (acessibilidade, fora do 10.72):
+  os links do menu principal não têm `:focus-visible` próprio - o contorno
+  `--gf-link` do 10.72 é só para a área de conteúdo e teria pouco contraste
+  sobre o fundo escuro fixo do `<nav>` (`--gf-escuro-fixo`). Definir um foco
+  próprio para o `<nav>` (ex.: contorno em `--gf-branco`).
 - **Select "Operador" dos relatórios (tempo_atendimento) não filtra pela
   Unidade escolhida** (achado na FASE 1 do 10.69, fora do escopo dele): lista
   todos os usuários visíveis da empresa - inclusive perfis admin/gerencial

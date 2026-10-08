@@ -14,7 +14,7 @@
     [{{ unidade.sigla_exibicao }}]. Estes locais ainda usam o prefixo antigo no identificador
     administrativo. Só o prefixo muda - o resto do texto fica como está.
   </p>
-  <table class="link-admin">
+  <table>
     <thead><tr><th>Antes</th><th>Depois</th><th></th></tr></thead>
     <tbody>
       {% for item in itens %}
@@ -30,6 +30,6 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="prefixo_antigo" value="{{ prefixo_antigo }}">
     <button class="botao" type="submit">Atualizar locais</button>
-    <a href="{{ url_for('admin.listar_unidades', empresa_id=empresa.id) }}" class="link-admin" style="margin-left:1rem;">Agora não</a>
+    <a href="{{ url_for('admin.listar_unidades', empresa_id=empresa.id) }}" style="margin-left:1rem;">Agora não</a>
   </form>
 {% endblock %}

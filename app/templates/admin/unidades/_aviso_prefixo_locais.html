@@ -4,7 +4,7 @@
    app/admin/unidades.py::_locais_com_prefixo_divergente). Nada é alterado
    daqui - os links só levam à edição de cada local e à prévia. #}
 {% for prefixo, locais in pendencias %}
-  <div class="flash info aviso-prefixo-locais link-admin">
+  <div class="flash info aviso-prefixo-locais">
     {{ locais|length }} {{ 'local ainda usa' if locais|length == 1 else 'locais ainda usam' }} o prefixo [{{ prefixo }}]
     (sigla atual: [{{ unidade.sigla_exibicao }}]):
     {% for local in locais %}<a href="{{ url_for('admin.editar_local', local_id=local.id) }}">{{ local.identificador_admin }}</a>{{ ', ' if not loop.last else '' }}{% endfor %}

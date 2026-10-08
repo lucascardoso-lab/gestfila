@@ -264,7 +264,10 @@
     .gf-watermark { bottom: 3.5rem; }
   </style>
 </head>
-<body>
+{# .area-painel-tv: exclui o painel de TV da regra de links de conteúdo
+   (gestfila.css, adendo 10.72) - a TV tem <main> próprio e esquema de cores
+   próprio. #}
+<body class="area-painel-tv">
   {% block conteudo %}{% endblock %}
   {# Watermark discreto de marca (seção "Painel de TV") - nunca compete com a
      informação real da tela (senha/local chamados), só um lembrete de marca

@@ -15,6 +15,11 @@
   --gf-sucesso: #27AE60;
   --gf-alerta: #E67E22;
   --gf-info: #2980B9;
+  /* Cor de link de conteúdo (adendo 10.72) - mais escura que --gf-info
+     (#2980B9 dava só 4,3:1 sobre branco e 3,97:1 sobre --gf-cinza-claro);
+     #1D6A9C fica >= 4,5:1 sobre superfície, fundo da página e os fundos de
+     aviso (info/alerta/sucesso/erro). */
+  --gf-link: #1D6A9C;
 
   /* Consolidação pré-dark-mode (etapa 1 de 2, ver BLUEPRINT.md) - as 141
      ocorrências de hex soltos pelo projeto (fora de variável) se resumiam a
@@ -99,6 +104,7 @@
   --gf-sucesso: #4FCE7D;
   --gf-alerta: #F0A24E;
   --gf-info: #5DADE2;
+  --gf-link: #5DADE2; /* >= 5,38:1 sobre superfície, fundo e fundos de aviso escuros (10.72) */
   --gf-superficie: #24272D;
   --gf-texto-secundario: #A7AFB8;
   --gf-borda: #34383F;
@@ -118,6 +124,34 @@
 input, select, textarea {
   background: var(--gf-superficie);
   color: var(--gf-cinza-escuro);
+}
+
+/* Links de conteúdo (adendo 10.72) - nenhum layout definia cor para <a>, e o
+   azul/roxo padrão do navegador ficava ilegível no tema escuro.
+   - Escopo: só a área de conteúdo dos 5 layouts com conteúdo (<main> em
+     admin/atendimento/relatórios/dashboard, .container em base.html). Fica
+     de fora o <nav> (fundo escuro fixo, já tem --gf-nav-texto), o totem
+     (sem <main>/.container), o cupom e o painel de TV - que TEM <main>
+     (painel/tv.html), por isso a exclusão explícita de .area-painel-tv
+     (<body> de painel/_layout.html). O PDF dos relatórios também tem <main>,
+     mas não carrega gestfila.css (print.css inline, adendo 10.67).
+   - Seletor INTEIRO dentro de :where() (e o :not() só com :where() dentro)
+     = especificidade zero: qualquer regra
+     com classe (.botao, .botao-voltar, .exportar a, .top-bar a,
+     .link-trocar-local...) continua vencendo, inclusive num link já
+     visitado - um `a:visited` comum (0,1,1) passaria por cima de `.botao`.
+   - Sem regra própria de :visited: uma cor de autor em `a` já vale para o
+     estado visitado (a cor de "visitado" é só a do navegador). */
+:where(main a, .container a):not(:where(.area-painel-tv a)) {
+  color: var(--gf-link);
+}
+:where(main a:hover, .container a:hover):not(:where(.area-painel-tv a)) {
+  text-decoration: underline;
+}
+:where(main a:focus-visible, .container a:focus-visible):not(:where(.area-painel-tv a)) {
+  outline: 2px solid var(--gf-link);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 /* Botão de alternar tema (_alternador_tema.html) - dois contextos:
