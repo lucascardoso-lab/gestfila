@@ -40,7 +40,7 @@
         {% for unidade_nome, itens_unidade in filas|groupby('unidade.nome') %}
           <optgroup label="{{ unidade_nome|upper }}" data-unidade-id="{{ itens_unidade[0].unidade_id }}">
             {% for fila in itens_unidade %}
-              <option value="{{ fila.id }}" data-unidade-id="{{ fila.unidade_id }}" {{ 'selected' if fila.id == fila_sel else '' }}>[{{ fila.unidade.sigla_exibicao }}] {{ fila.nome }}</option>
+              <option value="{{ fila.id }}" data-unidade-id="{{ fila.unidade_id }}" {{ 'selected' if fila.id == fila_sel else '' }}>{{ rotulo_fila(fila) }}</option>
             {% endfor %}
           </optgroup>
         {% endfor %}

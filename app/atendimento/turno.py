@@ -6,6 +6,7 @@ from flask_login import current_user
 from app.extensions import db
 from app.models import TurnoAtivo, Usuario
 from app.utils.decorators import roles_required
+from app.utils.rotulos import rotulo_fila
 
 from . import atendimento_bp
 from .filas import PERFIS_OPERACIONAIS
@@ -43,15 +44,16 @@ def _contexto_formulario(filas_selecionadas_iniciais=None, local_selecionado_id=
     filas = filas_acessiveis()
     locais = locais_acessiveis()
     return {
-        # `unidade`/`unidade_sigla` alimentam o <optgroup>/prefixo "[SIGLA] Nome" do
-        # select de FILAS (UX de contexto multi-unidade) - filas_acessiveis()
+        # `rotulo` ("[SIGLA] Nome", app/utils/rotulos.py, adendo 10.70) é o que
+        # a busca de FILAS e a tabela "Filas do turno" exibem - filas_acessiveis()
         # já pode abranger mais de uma unidade quando o operador tem acesso a
-        # várias. O select de LOCAIS usa identificador_admin diretamente (já
-        # vem com o prefixo "[SIGLA] nome" embutido - BLUEPRINT.md, seção
+        # várias. A BUSCA continua por `nome` puro (digitar "coleta" acha todas
+        # as Coletas). O select de LOCAIS usa identificador_admin diretamente
+        # (já vem com o prefixo "[SIGLA] nome" embutido - BLUEPRINT.md, seção
         # 10.32), sem precisar remontar o prefixo aqui.
         "filas_json": [
             {
-                "id": f.id, "nome": f.nome, "unidade": f.unidade.nome, "unidade_sigla": f.unidade.sigla_exibicao,
+                "id": f.id, "nome": f.nome, "rotulo": rotulo_fila(f),
                 # `aberta` (Fila.aberta_em(), seção 10.1/10.5) alimenta o mesmo marcador
                 # "Atendendo agora"/"Fora do horário" do widget de busca da seção 10.10 -
                 # reaproveitado aqui, adendo da busca com autocomplete em "Iniciar turno".

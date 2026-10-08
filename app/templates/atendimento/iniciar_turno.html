@@ -273,7 +273,7 @@
           const fila = FILAS_POR_ID[item.fila_id];
           return `<tr>
             <td>${indice + 1}</td>
-            <td>[${escapeHtml(fila.unidade_sigla)}] ${escapeHtml(fila.nome)} <span class="subtitulo" style="margin:0;">(${escapeHtml(fila.unidade)})</span></td>
+            <td>${escapeHtml(fila.rotulo)}</td>
             <td>${item.chamadas_seguidas}</td>
             <td><button type="button" class="botao-remover" data-indice="${indice}" title="Remover">&times;</button></td>
           </tr>`;
@@ -306,7 +306,7 @@
         selecionadoId: "selecionado-fila", selecionadoNomeId: "selecionado-fila-nome", limparId: "limpar-fila",
         itens: FILAS_DISPONIVEIS,
         buscarEm: (f) => f.nome,
-        exibir: (f) => `[${f.unidade_sigla}] ${f.nome}`,
+        exibir: (f) => f.rotulo,
         aberta: (f) => f.aberta,
         mensagemVazia: "Nenhuma fila encontrada.",
       });

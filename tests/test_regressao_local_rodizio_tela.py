@@ -203,7 +203,9 @@ assert resp.status_code == 200
 dados = resp.get_json()
 assert dados["senha_atual"]["codigo"] == "FY001"
 codigos_fila = {item["codigo"]: item["fila"] for item in dados["espera"]}
-assert codigos_fila == {"FX001": "Fila X"}  # FY001 já foi chamada, não aparece mais em espera
+# "[UNI]" = rótulo "[SIGLA] Nome" da fila (adendo 10.70; Unidade A1 sem sigla
+# cadastrada cai no fallback de 3 letras do 10.22).
+assert codigos_fila == {"FX001": "[UNI] Fila X"}  # FY001 já foi chamada, não aparece mais em espera
 ok("GET /local/<id>/dados: JSON inclui 'fila' por item em 'espera'/'senha_atual' corretamente")
 
 # ---------------------------------------------------------------------------

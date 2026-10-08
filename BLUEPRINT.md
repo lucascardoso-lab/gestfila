@@ -414,6 +414,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.67 | Exportação de relatórios em PDF (complementar ao CSV/Excel existente) |
 | 10.68 | Dois achados independentes na exportação de PDF (adendo 10.67): eventlet trava no Windows local + cache do Chromium por usuário em produção |
 | 10.69 | Fila sem identificação de unidade nos relatórios/dashboards + select de Fila não filtrava pela Unidade escolhida |
+| 10.70 | Rótulo de fila "[SIGLA] Nome" da função única do 10.69 nas telas operacionais e cadastros admin |
 
 ---
 
@@ -6310,6 +6311,11 @@ regressão deste projeto); Achado 2 validado em produção real (ver acima).
 > Unidade "Matriz" escolhida, o select continuava listando filas de TODAS as
 > unidades. Investigação (FASE 1) relatada e aprovada antes de implementar.
 
+> **Nota cruzada (10.70):** `rotulos_filas()` foi movida para
+> `app/utils/rotulos.py` (recebe `empresa_id`) e passou a alimentar também as
+> telas operacionais e os cadastros admin; as referências a
+> `app/relatorios/helpers.py` abaixo descrevem o estado deste adendo.
+
 **Achados da investigação:**
 
 1. **Select "Fila"** (`relatorios/_macros.html::form_filtros`, compartilhado
@@ -6457,8 +6463,149 @@ fila_unidade.py`. Índice 10.0 completado (faltavam as linhas 10.47-10.68).
 
 ---
 
+## 10.70. ADENDO — Rótulo de fila "[SIGLA] Nome" da função única do 10.69 nas telas operacionais e cadastros admin
+
+> Continuação do 10.69: os pontos FORA dos relatórios que montavam "[SIGLA]
+> Nome" de fila por conta própria (no template ou no JS) passam a usar a
+> mesma função, com o mesmo desempate " (id)". Investigação (FASE 1)
+> relatada e aprovada antes de implementar.
+
+> **NOTA DE DEPLOY:** cadastrar `Unidade.sigla` em TODAS as unidades ANTES de
+> publicar este adendo em produção. Sem isso, unidades cujo fallback de 3
+> letras colide (ex.: as duas "Anápolis - ..." -> "[ANÁ]") fazem aparecer
+> " (id)" nas telas operacionais (Iniciar Turno, Redirecionar, tela por
+> Local) - comportamento correto do código (aceito pelo cliente), mas
+> desnecessário se as siglas estiverem cadastradas. **Atenção (achado na
+> revisão antes do commit):** a tela admin de Unidade NÃO tem campo de sigla
+> (`app/admin/unidades.py` grava só nome/endereço/telefone; a coluna
+> `Unidade.sigla` existe desde o 10.22, mas nenhum formulário a lê ou grava).
+> Hoje a sigla só pode ser cadastrada direto no banco, ex.:
+> `UPDATE unidades SET sigla = 'ACM' WHERE id = 5;` (máx. 4 caracteres).
+> Os rótulos refletem a mudança na próxima request, sem reiniciar nada.
+
+**Achados da investigação:**
+
+1. **Pontos que montavam o rótulo de fila (escopo):**
+   - A1 - Iniciar Turno: `atendimento/turno.py` mandava `unidade`/
+     `unidade_sigla` no JSON embutido e o JS de `iniciar_turno.html`
+     concatenava em dois lugares (tabela "Filas do turno", com "[SIG] nome
+     (Unidade)", e o `exibir` do autocomplete).
+   - A2 - Redirecionar: `atendimento/_redirecionar_busca.html` concatenava
+     `nome_exibicao` no Jinja (renderizado por `painel_fila` e
+     `painel_local`).
+   - A3 - Cadastro de Botão do totem: `<option>` do select "Fila"
+     concatenado no template.
+2. **"[SIGLA]" que NÃO é de fila** (fora de escopo, sem alteração): selects
+   de Totem/TV do cadastro de Fila (`admin/filas/form.html` - o formulário de
+   Fila não lista filas), selects de Unidade (`admin/_layout.html`,
+   `core/dashboard.html`) e a sugestão de `identificador_admin` do Local.
+3. **Nome de fila sem prefixo em telas que misturam unidades**: entraram no
+   escopo os checklists "Nome (Unidade)" de `admin/locais/form.html` e
+   `admin/tvs/form.html` e a tela por Local do operador (`painel_local.html`
+   + `_serializar_*_local`). Ficaram de fora (decisão do cliente) as
+   listagens que já têm coluna Unidade separada (`admin/filas/listar.html`,
+   `atendimento/listar_filas.html`) e os flashes "realocada para 'X'". Telas
+   de paciente (cupom do totem, painel de TV) e telas de uma fila/unidade só
+   (`painel_fila`, `alocar_fila`, `locais/rodizio.html`) nunca entram.
+4. **Tela por Local - confirmado antes de mexer que o rótulo só chega a
+   telas de OPERADOR:** `_serializar_espera_local`/`_serializar_atendida_
+   local`/`_serializar_senha_atual_local` (`atendimento/chamada.py`) só são
+   chamados por `dados_local` (rota `/<setor>/local/<id>/dados`, protegida por
+   `exigir_acesso_setor`). O WebSocket NÃO carrega nome de fila nenhum:
+   `fila_atualizada` leva só `{fila_id}` (`atendimento/helpers.py::
+   emitir_atualizacao_fila`) e a tela refaz o GET em `/dados`; o evento
+   `chamada` que alimenta a TV usa `_payload_chamada` (`tipo`/`local`/
+   `senha` ou `nome_paciente`/`local_audio_slug`/`cor`), sem fila - não
+   mudou. O cupom do totem (`totem/senha_gerada.html`, `fila.nome`) também
+   não mudou.
+
+**Decisões e implementação:**
+
+- **`rotulos_filas()` mudou de casa:** `app/relatorios/helpers.py` ->
+  `app/utils/rotulos.py` (junto com `_chave_colisao`), sem re-export no
+  módulo antigo - atendimento/admin não dependem mais do pacote de
+  relatórios. Assinatura passou a receber `empresa_id` (os call-sites de
+  atendimento não têm o objeto `Empresa` à mão). Regra inalterada: empresa
+  inteira, inclusive inativas, " (id)" em todos os membros do grupo
+  colidente.
+- **`rotulo_fila(fila)`** (mesmo módulo): atalho para UMA fila, registrado
+  como global Jinja em `create_app` e usado também pelos serializadores
+  Python. Memoiza `rotulos_filas()` por request em `g` (uma consulta por
+  empresa por request, não uma por fila; uma fila criada depois do cache
+  montado força recálculo). Evita repassar um mapa por cada um dos ~15
+  `render_template` envolvidos (formulários de botão/local/TV em
+  novo/editar/erro, `painel_fila`, `painel_local`, turno). Os relatórios
+  continuam usando o mapa `rotulos_filas()` direto (já o tinham em
+  `opcoes`/`mapas_nomes`).
+- **Escopo do cache de `rotulo_fila()` (confirmado na revisão antes do
+  commit):** o cache só existe DENTRO de uma request
+  (`has_request_context()`). Fora de request (flask shell, scripts, seeds)
+  não há cache: `g` pertence ao app context, não à request, e num shell/script
+  o app context pode durar a sessão inteira - um cache ali devolveria rótulo
+  velho depois de renomear uma fila ou cadastrar uma sigla (achado desta
+  revisão, corrigido; antes funcionava sem erro, mas com esse risco).
+  Handlers de Socket.IO rodam com request context próprio por evento
+  (Flask-SocketIO), então o cache vale só para aquele evento. **Por que o
+  cache por request é seguro hoje:** nenhuma rota altera uma fila (ou a sigla
+  de uma unidade) e renderiza um rótulo na MESMA request - criar, editar,
+  ativar/desativar e excluir fila (`app/admin/filas.py`) terminam em
+  `redirect`; o re-render com erro de validação acontece ANTES de qualquer
+  alteração e `admin/filas/form.html` nem usa `rotulo_fila`; o cadastro de
+  Unidade também redireciona após salvar e não exibe rótulo de fila. Se uma
+  rota futura alterar fila/sigla e renderizar rótulos na mesma request, ela
+  precisa limpar `g._rotulos_filas_por_empresa` depois do commit.
+- **A1:** o JSON do Iniciar Turno troca `unidade`/`unidade_sigla` por
+  `rotulo`; a tabela "Filas do turno" mostra só o rótulo (sem o "(Unidade)"
+  ao lado) e o autocomplete exibe `f.rotulo`. **A busca continua pelo nome
+  puro** (`buscarEm: f.nome`): digitar "coleta" acha todas as Coletas.
+- **A2:** `nome_exibicao` do JSON do Redirecionar vem de `rotulo_fila()`;
+  `nome` puro continua para a busca.
+- **A3 + checklists:** `{{ rotulo_fila(fila) }}` no select de Fila do Botão
+  do totem e nos checklists de Local e TV ("Nome (Unidade)" -> "[SIGLA]
+  Nome").
+- **Tela por Local:** senha chamada, "Senhas em espera" e "Senhas atendidas"
+  (HTML) e o campo `fila` dos três `_serializar_*_local` (JSON de `/dados`).
+
+**Testes:** novo `tests/test_regressao_rotulos_filas_operacional.py` (12
+verificações) - duas unidades "Anápolis - ..." sem sigla com uma "Coleta"
+cada, mais a Matriz: o mesmo rótulo com " (id)" (idêntico ao dos relatórios)
+no JSON do Iniciar Turno, no JSON do Redirecionar, no HTML e no `/dados` da
+tela por Local, no select do Botão do totem e nos checklists de Local/TV;
+busca pelo nome puro executando o JS REAL da página num Chromium (Playwright)
+- "coleta" acha as Coletas no Iniciar Turno e no Redirecionar, exibidas com
+rótulo, e "[ANÁ]" não acha nada (a busca não é pelo rótulo); payload
+`chamada` da TV com exatamente as mesmas chaves de antes, sem rótulo nem nome
+de fila, e `fila_atualizada` só com o id; `rotulo_fila()` dentro de
+`app_context()` sem request funciona e reflete na hora uma sigla cadastrada
+e uma fila renomeada no mesmo app context (sem cache). Ajustados (sem perder cobertura):
+`test_regressao_contexto_multi_unidade.py` (lia `unidade_sigla` do JSON do
+Iniciar Turno; passa a conferir `rotulo` + `nome` puro) e
+`test_regressao_local_rodizio_tela.py` (`fila` do `/dados` passa a ser
+"[UNI] Fila X"); `test_regressao_relatorios_fila_unidade.py` só trocou o
+import. Suíte completa (70 arquivos) sem falhas.
+
+**Arquivos alterados:** `app/utils/rotulos.py` (novo); `app/__init__.py`
+(global Jinja); `app/relatorios/helpers.py` (sai `rotulos_filas`/
+`_chave_colisao`, passa a importar de `app/utils/rotulos.py`);
+`app/core/routes.py` (import); `app/atendimento/turno.py`;
+`app/atendimento/chamada.py`; `app/templates/atendimento/iniciar_turno.html`;
+`app/templates/atendimento/_redirecionar_busca.html`;
+`app/templates/atendimento/painel_local.html`;
+`app/templates/admin/totem_botoes/form.html`;
+`app/templates/admin/locais/form.html`; `app/templates/admin/tvs/form.html`;
+novo `tests/test_regressao_rotulos_filas_operacional.py`; testes ajustados
+listados acima.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
+- **Cadastro de Unidade sem campo "Sigla"** (achado na revisão do 10.70):
+  `Unidade.sigla` (10.22) alimenta o prefixo "[SIGLA]" de filas (10.69/10.70)
+  e de Locais/Totens/TVs, mas `app/admin/unidades.py` e
+  `admin/unidades/form.html` não leem nem gravam o campo - hoje só dá para
+  preencher via SQL. Sem a sigla, o fallback de 3 letras pode colidir e fazer
+  aparecer " (id)" nos rótulos de fila.
 - **Select "Operador" dos relatórios (tempo_atendimento) não filtra pela
   Unidade escolhida** (achado na FASE 1 do 10.69, fora do escopo dele): lista
   todos os usuários visíveis da empresa - inclusive perfis admin/gerencial

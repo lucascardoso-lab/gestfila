@@ -3,6 +3,7 @@ from flask_login import current_user
 
 from app.extensions import db
 from app.models import Senha
+from app.utils.rotulos import rotulo_fila
 
 from . import atendimento_bp
 from .helpers import (
@@ -85,16 +86,20 @@ def _serializar_espera_local(senha):
     que usa uma constante JS única - todas as linhas são da MESMA fila lá) - o
     destaque de tempo de espera (escala de 3 níveis) precisa do limite da fila
     ESPECÍFICA de cada senha, já que o rodízio agrega candidatas de várias filas
-    com limites potencialmente diferentes."""
+    com limites potencialmente diferentes.
+
+    `fila` é o rótulo "[SIGLA] Nome" (adendo 10.70) - este serializador e os
+    dois abaixo só alimentam `dados_local` (JSON da tela do OPERADOR); o painel
+    de TV recebe `_payload_chamada` (atendimento/helpers.py), sem fila nenhuma."""
     dados = _serializar_espera(senha)
-    dados["fila"] = senha.fila.nome
+    dados["fila"] = rotulo_fila(senha.fila)
     dados["tempo_espera_maximo_min"] = senha.fila.tempo_espera_maximo_min
     return dados
 
 
 def _serializar_atendida_local(senha):
     dados = _serializar_atendida(senha)
-    dados["fila"] = senha.fila.nome
+    dados["fila"] = rotulo_fila(senha.fila)
     return dados
 
 
@@ -105,7 +110,7 @@ def _serializar_senha_atual_local(senha):
     cada refresh via WebSocket (Fase 10.8-E)."""
     dados = _serializar_senha_atual(senha)
     if dados is not None:
-        dados["fila"] = senha.fila.nome
+        dados["fila"] = rotulo_fila(senha.fila)
     return dados
 
 

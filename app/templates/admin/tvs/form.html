@@ -59,7 +59,7 @@
         {% for fila in filas %}
           <label>
             <input type="checkbox" name="filas" value="{{ fila.id }}" {{ 'checked' if fila.id in filas_selecionadas else '' }}>
-            {{ fila.nome }} ({{ fila.unidade.nome }})
+            {{ rotulo_fila(fila) }}
           </label>
         {% else %}
           <span class="subtitulo">Nenhuma fila cadastrada nesta empresa ainda.</span>

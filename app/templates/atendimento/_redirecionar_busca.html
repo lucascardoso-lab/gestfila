@@ -38,7 +38,7 @@
   </div>
 </div>
 <script type="application/json" id="dados-filas-destino">
-  [{% for destino in filas_destino %}{"id": {{ destino.id }}, "nome": {{ destino.nome | tojson }}, "nome_exibicao": {{ ("[" + destino.unidade.sigla_exibicao + "] " + destino.nome) | tojson }}, "aberta": {{ destino.aberta_em() | tojson }}}{% if not loop.last %},{% endif %}{% endfor %}]
+  [{% for destino in filas_destino %}{"id": {{ destino.id }}, "nome": {{ destino.nome | tojson }}, "nome_exibicao": {{ rotulo_fila(destino) | tojson }}, "aberta": {{ destino.aberta_em() | tojson }}}{% if not loop.last %},{% endif %}{% endfor %}]
 </script>
 
 <style>

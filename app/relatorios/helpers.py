@@ -1,16 +1,14 @@
-import unicodedata
-from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from typing import NamedTuple, Optional
 
 from flask import g, request
 from flask_login import current_user
-from sqlalchemy.orm import joinedload
 
 from app.admin.helpers import filas_da_empresa, unidades_da_empresa
 from app.extensions import db
 from app.models import Fila, LogExportacaoRelatorio, Unidade, Usuario
+from app.utils.rotulos import rotulos_filas
 from app.utils.tempo import agora_na_clinica, janela_dia_clinica_em_utc
 
 
@@ -133,7 +131,7 @@ def opcoes_filtro(empresa):
     return {
         "unidades": [u for u in unidades_da_empresa(empresa) if u.id in unidades_ids_validas],
         "filas": [f for f in filas_da_empresa(empresa) if f.unidade_id in unidades_ids_validas],
-        "rotulos_filas": rotulos_filas(empresa),
+        "rotulos_filas": rotulos_filas(empresa.id),
         "operadores": _operadores_visiveis(empresa),
     }
 
@@ -209,44 +207,8 @@ def registrar_exportacao(tipo_relatorio, formato, empresa, filtros):
     db.session.commit()
 
 
-def _chave_colisao(texto):
-    """Mesma noção de "igual" da collation `utf8mb4_0900_ai_ci` de `filas.nome`
-    (case- E accent-insensitive): "COLETA", "Coleta" e "Cóleta" colidem."""
-    sem_acento = "".join(c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c))
-    return sem_acento.strip().casefold()
-
-
-def rotulos_filas(empresa):
-    """{fila_id: rótulo de exibição} - fonte ÚNICA do nome da fila mostrado em
-    relatórios, PDF e dashboards (adendo 10.69). Nenhum template concatena
-    sigla + nome por conta própria.
-
-    Formato "[SIGLA] Nome" (Unidade.sigla_exibicao, adendo 10.22). Se, mesmo
-    com o prefixo, sobrar colisão (nome repetido na MESMA unidade, ou duas
-    unidades sem sigla cadastrada cujo fallback de 3 letras coincide - ex.:
-    "Anápolis - Centro Médico"/"Anápolis - Laboratório" -> "[ANÁ]"), " (id)" é
-    anexado a TODOS os membros do grupo colidente, nunca só aos "duplicados" -
-    mesma regra do 10.32 item 3 para Local.identificador_admin.
-
-    Calculado sobre as filas da EMPRESA INTEIRA (inclusive inativas e de
-    unidades que o usuário não vê), nunca sobre o subconjunto da página - o
-    mesmo id gera sempre o mesmo rótulo em qualquer tela/perfil."""
-    filas = Fila.query.filter_by(empresa_id=empresa.id).options(joinedload(Fila.unidade)).all()
-    base = {f.id: f"[{f.unidade.sigla_exibicao}] {f.nome}" for f in filas}
-
-    grupos = defaultdict(list)
-    for fila_id, rotulo in base.items():
-        grupos[_chave_colisao(rotulo)].append(fila_id)
-
-    rotulos = {}
-    for ids in grupos.values():
-        for fila_id in ids:
-            rotulos[fila_id] = base[fila_id] if len(ids) == 1 else f"{base[fila_id]} ({fila_id})"
-    return rotulos
-
-
 class MapasNomes(NamedTuple):
-    filas: dict  # fila_id -> rótulo "[SIGLA] Nome" (rotulos_filas) - telas/PDF
+    filas: dict  # fila_id -> rótulo "[SIGLA] Nome" (app/utils/rotulos.py) - telas/PDF
     filas_nome: dict  # fila_id -> Fila.nome puro - CSV/Excel, ao lado da coluna "unidade"
     filas_unidade: dict  # fila_id -> unidade_id
     unidades: dict
@@ -272,7 +234,7 @@ def mapas_nomes(empresa):
     # "Separação nome de exibição/identificador administrativo", BLUEPRINT.md).
     locais = {l.id: l.identificador_admin for l in Local.query.filter_by(empresa_id=empresa.id).all()}
     return MapasNomes(
-        filas=rotulos_filas(empresa),
+        filas=rotulos_filas(empresa.id),
         filas_nome={f.id: f.nome for f in filas},
         filas_unidade={f.id: f.unidade_id for f in filas},
         unidades=unidades,

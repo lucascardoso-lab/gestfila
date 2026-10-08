@@ -25,7 +25,7 @@
           <div id="senha-chamada-display" class="senha-chamada{{ ' em-atendimento' if senha_atual else '' }}">
             {% if senha_atual %}
               <span><strong>{{ senha_atual.codigo }}</strong>{% if senha_atual.nome_paciente %} — {{ senha_atual.nome_paciente }}{% endif %}</span>
-              <span id="senha-chamada-fila" class="subtitulo" style="margin:0;">{{ senha_atual.fila.nome }}</span>
+              <span id="senha-chamada-fila" class="subtitulo" style="margin:0;">{{ rotulo_fila(senha_atual.fila) }}</span>
               <span class="badge em-atendimento">Em atendimento</span>
             {% else %}
               <span class="vazio">—</span>
@@ -78,7 +78,7 @@
         {% for s in espera %}
           <tr data-senha-id="{{ s.id }}" data-tempo-maximo-min="{{ s.fila.tempo_espera_maximo_min if s.fila.tempo_espera_maximo_min is not none else '' }}">
             <td>{{ s.codigo }}{% if s.prioridade %} <span class="badge prioridade">P</span>{% endif %}</td>
-            <td>{{ s.fila.nome }}</td>
+            <td>{{ rotulo_fila(s.fila) }}</td>
             <td>
               <span class="t-espera" data-criada-em="{{ s.criada_em.isoformat() }}">00:00:00</span>
               <span class="hora-relogio" data-hora-de="{{ s.criada_em.isoformat() }}" title="Horário em que a senha foi gerada"></span>
@@ -108,7 +108,7 @@
         {% for s in atendidas %}
           <tr data-senha-id="{{ s.id }}">
             <td>{{ s.codigo }}</td>
-            <td>{{ s.fila.nome }}</td>
+            <td>{{ rotulo_fila(s.fila) }}</td>
             <td>
               {{ "%02d:%02d:%02d"|format(((s.chamada_em - s.criada_em).total_seconds())//3600, (((s.chamada_em - s.criada_em).total_seconds())%3600)//60, ((s.chamada_em - s.criada_em).total_seconds())%60) }}
               <span class="hora-relogio" data-hora-de="{{ s.chamada_em.isoformat() }}" title="Horário em que a senha foi chamada"></span>

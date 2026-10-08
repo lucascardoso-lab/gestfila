@@ -300,8 +300,9 @@ ok("Sem unidade escolhida, o breadcrumb mostra 'Todas as unidades'")
 # H.1) Tela "Iniciar Turno" (seção 10.19) - fila e local. Widget de busca com
 # autocomplete (seção 10.10) - sem <optgroup> (mudança deliberada e confirmada
 # com o cliente ao trocar o <select> pelo widget novo); o prefixo [SIGLA]
-# continua presente nos dados embutidos (unidade_sigla na Fila,
-# identificador_admin já formatado no Local), só sem agrupamento visual.
+# continua presente nos dados embutidos (`rotulo` na Fila, vindo de
+# app/utils/rotulos.py desde o 10.70; identificador_admin já formatado no
+# Local), só sem agrupamento visual.
 c_usuario_matriz = login_como("usuario_matriz_ctx")
 # este usuário só tem acesso à Matriz - login já redireciona pra 'Iniciar Turno'
 # (perfil recepcao puro) - troca de usuário com acesso às DUAS unidades pra ver
@@ -319,9 +320,9 @@ texto = resp.data.decode("utf-8")
 inicio = texto.index("FILAS_DISPONIVEIS = ") + len("FILAS_DISPONIVEIS = ")
 fim = texto.index(";", inicio)
 filas_json = json.loads(texto[inicio:fim])
-siglas_e_nomes = {(f["unidade_sigla"], f["nome"]) for f in filas_json}
-assert ("MAT", "Recepção Geral") in siglas_e_nomes
-assert ("ANE", "Recepção Geral") in siglas_e_nomes
+rotulos_e_nomes = {(f["rotulo"], f["nome"]) for f in filas_json}
+assert ("[MAT] Recepção Geral", "Recepção Geral") in rotulos_e_nomes
+assert ("[ANE] Recepção Geral", "Recepção Geral") in rotulos_e_nomes
 
 inicio = texto.index("LOCAIS_DISPONIVEIS = ") + len("LOCAIS_DISPONIVEIS = ")
 fim = texto.index(";", inicio)

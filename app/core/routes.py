@@ -63,9 +63,9 @@ def dashboard():
 
     chamadas = _ultimos_atendimentos_enriquecidos(empresa, unidades_visiveis)
 
-    from app.relatorios.helpers import rotulos_filas
+    from app.utils.rotulos import rotulos_filas
 
-    rotulos = rotulos_filas(empresa)
+    rotulos = rotulos_filas(empresa.id)
     filas_status = filas_com_status(empresa, unidades_visiveis)
     for item in filas_status:
         item["rotulo"] = rotulos[item["fila"].id]

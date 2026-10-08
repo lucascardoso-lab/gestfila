@@ -66,6 +66,12 @@ def create_app(config_name=None):
     app.register_blueprint(totem_bp)
     app.register_blueprint(painel_bp)
 
+    # Rótulo "[SIGLA] Nome" de fila (adendos 10.69/10.70) disponível em todo
+    # template - nenhum template concatena sigla e nome por conta própria.
+    from .utils.rotulos import rotulo_fila
+
+    app.jinja_env.globals["rotulo_fila"] = rotulo_fila
+
     from .middleware.tenant import register_tenant_middleware
 
     register_tenant_middleware(app)

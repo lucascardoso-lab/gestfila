@@ -40,7 +40,7 @@ from pypdf import PdfReader
 from app import create_app
 from app.extensions import db
 from app.models import Empresa, Fila, LogAtendimento, Perfil, Senha, Unidade, Usuario
-from app.relatorios.helpers import rotulos_filas
+from app.utils.rotulos import rotulos_filas
 
 app = create_app("testing")
 
@@ -147,7 +147,7 @@ with app.app_context():
     # =======================================================================
     # 1) rotulos_filas: prefixo + desempate por id em todos os membros.
     # =======================================================================
-    rotulos = rotulos_filas(empresa)
+    rotulos = rotulos_filas(empresa.id)
     assert rotulos[ids["coleta_mat"]] == "[MAT] Coleta", rotulos
     assert rotulos[ids["coleta_lar"]] == "[LAR] Coleta", rotulos
     assert rotulos[ids["coleta_ana_cm"]] == f"[ANÁ] Coleta ({ids['coleta_ana_cm']})", rotulos
@@ -164,14 +164,14 @@ with app.app_context():
     assert rotulos[deve_material_inativa.id] == rotulo_dm_inativa, rotulos
     deve_material_inativa.ativo = True
     db.session.commit()
-    assert rotulos_filas(empresa)[deve_material_ativa.id] == rotulo_dm_ativa
+    assert rotulos_filas(empresa.id)[deve_material_ativa.id] == rotulo_dm_ativa
     deve_material_inativa.ativo = False
     db.session.commit()
-    assert rotulos_filas(empresa)[deve_material_ativa.id] == rotulo_dm_ativa
+    assert rotulos_filas(empresa.id)[deve_material_ativa.id] == rotulo_dm_ativa
     ok("Fila INATIVA entra no desempate: rótulo da ativa é estável ao ativar/desativar a outra")
 
     assert ids["coleta_b"] not in rotulos
-    assert rotulos_filas(empresa_b) == {ids["coleta_b"]: "[OUT] Coleta"}
+    assert rotulos_filas(empresa_b.id) == {ids["coleta_b"]: "[OUT] Coleta"}
     ok("rotulos_filas é por empresa: fila de outra empresa nunca entra nem influencia o desempate")
 
 ROTULO_MAT = "[MAT] Coleta"
