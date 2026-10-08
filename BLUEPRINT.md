@@ -7077,6 +7077,23 @@ arquivos) sem falhas.
   Recepção para a Coleta some do filtro "Recepção" em todos os relatórios
   (inclusive "Tempos por senha"). Alternativa futura: filtrar pelas filas por
   onde a senha passou (snapshots de `logs_atendimento`, 10.62).
+- **Instrumentação TEMPORÁRIA `?debug_voz=1` no painel de TV** (commits
+  `89db967` e `f0c7e47`, 25/08/2026 - registrada aqui na preparação do deploy
+  da leva 10.69-10.74, sem mudança de código): overlay na própria tela da TV
+  com `speechSynthesis.getVoices()`, eventos do TTS e os "testes isolados A/B"
+  (voz explícita x `AudioContext` prévio), para investigar "TV sem áudio no
+  TTS" numa Samsung Internet/Tizen específica. Não é o `?debug_voz=1` do
+  adendo 10.33 (aquele já foi removido). Fica em `app/templates/painel/
+  tv.html` (constante `DEBUG_VOZ`, `criarOverlayDebugVoz`,
+  `logarOverlayDebugVoz`, `logarVozesDebugVoz`, os pontos de log no fluxo de
+  fala e o bloco `if (DEBUG_VOZ)` dos testes A/B). **Inerte em produção:** só
+  liga com `?debug_voz=1` na URL da TV; sem o parâmetro, nada é desenhado nem
+  executado. **Critério de remoção:** remover tudo assim que o diagnóstico
+  for fechado - causa identificada e corrigida, ou decisão registrada de não
+  corrigir -, depois de rodar os testes A/B na TV afetada e registrar o
+  resultado no adendo da correção; na remoção, revalidar o render do painel
+  sem erro de JS e rodar a suíte (mesmo procedimento do 10.33). Não deve
+  sobreviver indefinidamente em produção.
 - **Foco visível por teclado no `<nav>`** (acessibilidade, fora do 10.72):
   os links do menu principal não têm `:focus-visible` próprio - o contorno
   `--gf-link` do 10.72 é só para a área de conteúdo e teria pouco contraste
