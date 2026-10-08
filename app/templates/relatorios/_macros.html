@@ -14,10 +14,17 @@
     </div>
     <div>
       <label for="fila_id">Fila</label>
+      {# <optgroup> por unidade + rótulo de rotulos_filas (adendo 10.69) - o
+         rótulo "[SIGLA] Nome" (com desempate "(id)" quando ainda colide) vem
+         pronto do servidor, nunca montado aqui. #}
       <select id="fila_id" name="fila_id">
         <option value="">Todas</option>
-        {% for f in opcoes.filas %}
-          <option value="{{ f.id }}" {{ 'selected' if filtros.fila_id == f.id else '' }}>{{ f.nome }}</option>
+        {% for unidade_nome, filas_unidade in opcoes.filas|groupby('unidade.nome') %}
+          <optgroup label="{{ unidade_nome }}" data-unidade-id="{{ filas_unidade[0].unidade_id }}">
+            {% for f in filas_unidade %}
+              <option value="{{ f.id }}" data-unidade-id="{{ f.unidade_id }}" {{ 'selected' if filtros.fila_id == f.id else '' }}>{{ opcoes.rotulos_filas[f.id] }}</option>
+            {% endfor %}
+          </optgroup>
         {% endfor %}
       </select>
     </div>
@@ -50,4 +57,41 @@
     <a href="{{ url_for(endpoint, formato='xlsx', **querystring) }}">Excel</a>
     <a href="{{ url_for(endpoint, formato='pdf', **querystring) }}">PDF</a>
   </p>
+  <script>
+    (function () {
+      // Filas da Unidade escolhida, em tempo real (adendo 10.69 - mesma classe
+      // de bug do 10.53/10.64): trocar "Unidade" sem recarregar esconde
+      // (hidden, nunca remove do DOM) as filas de outras unidades. "Todas"
+      // mostra tudo. Só UX - resolver_filtros (helpers.py) também descarta no
+      // servidor um fila_id de outra unidade. <option>/<optgroup> não têm
+      // nenhum display: de autor (relatorios/_layout.html, gestfila.css), então
+      // o hidden nativo vale aqui sem regra CSS própria.
+      const elUnidade = document.getElementById("unidade_id");
+      const elFila = document.getElementById("fila_id");
+
+      function filtrarFilasPorUnidade() {
+        const unidadeSelecionada = elUnidade.value;
+        let selecionadaSaiuDeVista = false;
+
+        Array.from(elFila.options).forEach((opcao) => {
+          if (!opcao.dataset.unidadeId) return; // "Todas" - sempre visível
+          const visivel = !unidadeSelecionada || opcao.dataset.unidadeId === unidadeSelecionada;
+          opcao.hidden = !visivel;
+          if (!visivel && opcao.selected) selecionadaSaiuDeVista = true;
+        });
+
+        // Optgroup some quando não sobrou nenhuma opção visível dentro dele -
+        // decidido pelas opções (não só pelo data-unidade-id do grupo), então
+        // continua certo mesmo se duas unidades homônimas caírem no mesmo grupo.
+        elFila.querySelectorAll("optgroup").forEach((grupo) => {
+          grupo.hidden = !Array.from(grupo.children).some((opcao) => !opcao.hidden);
+        });
+
+        if (selecionadaSaiuDeVista) elFila.value = "";
+      }
+
+      elUnidade.addEventListener("change", filtrarFilasPorUnidade);
+      filtrarFilasPorUnidade();
+    })();
+  </script>
 {% endmacro %}

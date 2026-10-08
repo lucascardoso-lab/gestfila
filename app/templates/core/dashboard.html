@@ -69,7 +69,6 @@
     .linha-fila { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .5rem .1rem; border-bottom: 1px solid var(--gf-borda); font-size: .9rem; }
     .linha-fila:last-child { border-bottom: none; }
     .linha-fila .nome-fila { font-weight: 600; }
-    .linha-fila .unidade-fila { color: var(--gf-texto-secundario); font-size: .8rem; font-weight: 400; }
     .linha-fila .aguardando-fila { color: var(--gf-texto-secundario); font-size: .82rem; white-space: nowrap; }
     .badge { display: inline-block; padding: .15rem .55rem; border-radius: 999px; font-size: .75rem; white-space: nowrap; }
     .badge.ativa { background: var(--gf-sucesso-fundo); color: var(--gf-sucesso); }
@@ -169,10 +168,7 @@
           <div class="lista-filas">
             {% for item in filas_status %}
               <div class="linha-fila">
-                <span>
-                  <span class="nome-fila">{{ item.fila.nome }}</span>
-                  <span class="unidade-fila">({{ item.fila.unidade.nome }})</span>
-                </span>
+                <span class="nome-fila">{{ item.rotulo }}</span>
                 <span class="aguardando-fila">{{ item.aguardando }} aguardando</span>
                 <span class="badge {{ item.status }}">
                   {{ {'ativa': 'Ativa', 'fora_horario': 'Fora do horário', 'inativa': 'Inativa'}[item.status] }}

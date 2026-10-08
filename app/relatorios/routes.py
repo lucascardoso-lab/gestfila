@@ -131,20 +131,19 @@ def dashboard():
     chamadas = ultimas_chamadas(empresa, unidades_visiveis)
     alertas = coletar_alertas(recursos["filas"], recursos["totens"], recursos["tvs"])
 
+    mapas = mapas_nomes(empresa)
     filas_com_espera = [
-        {"fila": fila, "aguardando": aguardando_por_fila.get(fila.id, 0)}
+        {"fila": fila, "rotulo": mapas.filas[fila.id], "aguardando": aguardando_por_fila.get(fila.id, 0)}
         for fila in recursos["filas"]
         if fila.ativo
     ]
 
-    filas_nomes = {fila.id: fila.nome for fila in recursos["filas"]}
-    _, _, _, locais = mapas_nomes(empresa)
     for chamada in chamadas:
-        chamada["fila"] = filas_nomes.get(chamada["fila_id"], "—")
+        chamada["fila"] = mapas.filas.get(chamada["fila_id"], "—")
         # Só identificador_admin - mesmo motivo do dashboard operacional
         # (core/routes.py), BLUEPRINT.md seção 10.32: a coluna "Fila" já existe
         # ao lado, formato combinado descartado após conferência visual real.
-        chamada["local"] = locais.get(chamada["local_id"], "—") if chamada["local_id"] else "—"
+        chamada["local"] = mapas.locais.get(chamada["local_id"], "—") if chamada["local_id"] else "—"
 
     return render_template(
         "relatorios/dashboard.html",
@@ -165,14 +164,15 @@ def tempo_espera():
 
     filtros = resolver_filtros(empresa)
     linhas = tempo_medio_espera(filtros)
-    filas, unidades, _, _ = mapas_nomes(empresa)
+    mapas = mapas_nomes(empresa)
     for linha in linhas:
-        linha["fila"] = filas.get(linha["fila_id"], "—")
-        linha["unidade"] = unidades.get(linha["unidade_id"], "—")
+        linha["fila"] = mapas.filas.get(linha["fila_id"], "—")
+        linha["fila_nome"] = mapas.filas_nome.get(linha["fila_id"], "—")
+        linha["unidade"] = mapas.unidades.get(linha["unidade_id"], "—")
 
     opcoes = opcoes_filtro(empresa)
     colunas = [
-        {"data": l["data"], "unidade": l["unidade"], "fila": l["fila"],
+        {"data": l["data"], "unidade": l["unidade"], "fila": l["fila_nome"],
          "quantidade": l["quantidade"], "tempo_medio_segundos": l["tempo_medio_segundos"]}
         for l in linhas
     ]
@@ -197,14 +197,21 @@ def tempo_atendimento_view():
 
     filtros = resolver_filtros(empresa)
     linhas = tempo_atendimento(filtros)
-    filas, _, operadores, locais = mapas_nomes(empresa)
+    mapas = mapas_nomes(empresa)
     for linha in linhas:
-        linha["fila"] = filas.get(linha["fila_id"], "—")
-        linha["operador"] = operadores.get(linha["operador_id"], "—") if linha["operador_id"] else "—"
+        linha["fila"] = mapas.filas.get(linha["fila_id"], "—")
+        linha["fila_nome"] = mapas.filas_nome.get(linha["fila_id"], "—")
+        # Coluna "unidade" só no CSV/Excel (adendo 10.69) - a tela já mostra a
+        # unidade no prefixo "[SIGLA]" da fila. Linha com fila conhecida usa a
+        # unidade da fila; segmento de Repasse histórico sem snapshot de fila
+        # (fila_id None, adendo 10.62) usa a unidade da senha.
+        unidade_id = mapas.filas_unidade.get(linha["fila_id"]) or linha["unidade_id"]
+        linha["unidade"] = mapas.unidades.get(unidade_id, "—")
+        linha["operador"] = mapas.operadores.get(linha["operador_id"], "—") if linha["operador_id"] else "—"
         # Só identificador_admin - mesmo motivo do dashboard operacional
         # (core/routes.py), BLUEPRINT.md seção 10.32: a coluna "Fila" já existe
         # ao lado, formato combinado descartado após conferência visual real.
-        linha["local"] = locais.get(linha["local_id"], "—") if linha["local_id"] else "—"
+        linha["local"] = mapas.locais.get(linha["local_id"], "—") if linha["local_id"] else "—"
         # Rótulo pro humano (Conclusão/Repasse, adendo 10.63) - a linha já
         # carrega o valor bruto ("conclusao"/"repasse") em tipo_fechamento,
         # este campo novo é só a versão exibível (HTML + export).
@@ -212,7 +219,8 @@ def tempo_atendimento_view():
 
     opcoes = opcoes_filtro(empresa)
     colunas = [
-        {"operador": l["operador"], "setor": l["setor"], "fila": l["fila"], "local": l["local"],
+        {"operador": l["operador"], "setor": l["setor"], "unidade": l["unidade"], "fila": l["fila_nome"],
+         "local": l["local"],
          "tipo": l["tipo_fechamento_rotulo"],
          "quantidade": l["quantidade"], "tempo_medio_segundos": l["tempo_medio_segundos"]}
         for l in linhas
@@ -238,14 +246,15 @@ def volume():
 
     filtros = resolver_filtros(empresa)
     linhas = volume_senhas(filtros)
-    filas, unidades, _, _ = mapas_nomes(empresa)
+    mapas = mapas_nomes(empresa)
     for linha in linhas:
-        linha["fila"] = filas.get(linha["fila_id"], "—")
-        linha["unidade"] = unidades.get(linha["unidade_id"], "—")
+        linha["fila"] = mapas.filas.get(linha["fila_id"], "—")
+        linha["fila_nome"] = mapas.filas_nome.get(linha["fila_id"], "—")
+        linha["unidade"] = mapas.unidades.get(linha["unidade_id"], "—")
 
     opcoes = opcoes_filtro(empresa)
     colunas = [
-        {"data": l["data"], "unidade": l["unidade"], "fila": l["fila"],
+        {"data": l["data"], "unidade": l["unidade"], "fila": l["fila_nome"],
          "prioridade": l["prioridade"], "normal": l["normal"], "total": l["total"]}
         for l in linhas
     ]
@@ -270,7 +279,7 @@ def ranking():
 
     filtros = resolver_filtros(empresa)
     linhas = ranking_operadores(filtros)
-    _, _, operadores, _ = mapas_nomes(empresa)
+    operadores = mapas_nomes(empresa).operadores
     for linha in linhas:
         linha["operador"] = operadores.get(linha["operador_id"], "—")
 

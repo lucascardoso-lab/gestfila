@@ -416,6 +416,10 @@ def tempo_atendimento(filtros):
                 "setor": setor,
                 "fila_id": fila_id,
                 "local_id": local_id,
+                # Só preenchido no Repasse histórico sem snapshot de fila (chave
+                # acima) - exposto pra coluna "unidade" do CSV/Excel (adendo
+                # 10.69), não entra em nenhum cálculo.
+                "unidade_id": _unidade_id,
                 "tipo_fechamento": tipo_fechamento,
                 "tempo_medio_segundos": round(sum(tempos) / len(tempos), 1),
                 "quantidade": len(tempos),

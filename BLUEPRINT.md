@@ -391,6 +391,29 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.44 | `@page` volta pra altura "auto" - premissa da 10.40 estava errada (rolo contínuo, não etiqueta fixa) |
 | 10.45 | Campos opcionais nulos apareciam como a string "None" (cupom mostrando "None"/"None") |
 | 10.46 | Impressão silenciosa (kiosk) saía sem CSS: `<script>` (window.print síncrono) vinha antes do `<style>` do cupom no HTML |
+| 10.47 | Sigla passa de `Fila` para `TotemBotao` (realinha com a seção 2 original) |
+| 10.48 | Corte de início da fala no painel de TV em hardware fraco (Celeron + 4GB) |
+| 10.49 | Corte de início da fala no painel de TV: causa DIFERENTE da 10.48 (atraso de warm-up do motor de TTS, não CPU) |
+| 10.50 | EXPERIMENTAL: heartbeat periódico do motor de speechSynthesis (corte de início após ociosidade, causa diferente da 10.48/10.49) |
+| 10.51 | EXPERIMENTAL: "despertar" o hardware de saída de áudio via Web Audio API (quarta tentativa, causa diferente das anteriores) |
+| 10.52 | Destaque visual por tempo de espera (escala de 3 níveis) na tabela "Senhas em espera" |
+| 10.53 | Dois bugs independentes na tela "Editar local": checklist de filas fora de escopo + barra de contexto sem efeito em telas de editar |
+| 10.54 | Filtro De/Até dos relatórios: calendário nativo + padrão "hoje" em vez de 30 dias |
+| 10.55 | Consolidação pré-dark-mode: variáveis semânticas novas + `<nav>` unificado (etapa 1 de 2) |
+| 10.56 | Dark mode em si: tema claro/escuro/automático em todo o projeto (etapa 2 de 2) |
+| 10.57 | Persistência de filas do turno entre logout/login (reversão PARCIAL e DELIBERADA da seção 10.23) |
+| 10.58 | Fila real de chamadas de voz no painel de TV (chamadas nunca se cortam) |
+| 10.59 | 3 achados de uma instalação real em produção (Ubuntu 24 LTS, seguindo o README do zero) |
+| 10.60 | Criação de super admin global via UI segue o mesmo padrão de senha do seed (temporária + troca obrigatória) |
+| 10.61 | Painel de TV preso em "Reconectando..." em produção: faltava `X-Forwarded-Proto` no vhost do README (mesmo padrão da 10.59/10.60) |
+| 10.62 | Tempo de atendimento mede TODOS os segmentos de uma senha realocada (não só o 1º e o último) |
+| 10.63 | "Conclusão" vs. "Repasse": tempo_atendimento() misturava dois tipos de segmento na mesma linha (achado em revisão do 10.62) |
+| 10.64 | "Botão pai" e "Fila" na tela de Botões do totem não filtravam por Unidade (mesma classe de bug do 10.53) |
+| 10.65 | Totem esconde botões de fila fora do horário de funcionamento, atualizando sozinho sem F5 |
+| 10.66 | "Tempo médio de espera" media só o 1º intervalo da jornada, não cada estágio (mesma classe de bug do 10.62/10.63, agora no relatório irmão) |
+| 10.67 | Exportação de relatórios em PDF (complementar ao CSV/Excel existente) |
+| 10.68 | Dois achados independentes na exportação de PDF (adendo 10.67): eventlet trava no Windows local + cache do Chromium por usuário em produção |
+| 10.69 | Fila sem identificação de unidade nos relatórios/dashboards + select de Fila não filtrava pela Unidade escolhida |
 
 ---
 
@@ -6279,8 +6302,169 @@ regressão deste projeto); Achado 2 validado em produção real (ver acima).
 
 ---
 
+## 10.69. ADENDO — Fila sem identificação de unidade nos relatórios/dashboards + select de Fila não filtrava pela Unidade escolhida
+
+> Bug real relatado em produção, com print: em `/relatorios/ranking-
+> operadores`, o select "Fila" listava várias opções com o MESMO texto
+> ("Coleta" 5x, "Deve Material" 8x+), sem indicar a unidade de cada uma. Com a
+> Unidade "Matriz" escolhida, o select continuava listando filas de TODAS as
+> unidades. Investigação (FASE 1) relatada e aprovada antes de implementar.
+
+**Achados da investigação:**
+
+1. **Select "Fila"** (`relatorios/_macros.html::form_filtros`, compartilhado
+   pelas 4 telas: tempo_espera, tempo_atendimento, volume, ranking): lista
+   plana de `Fila.nome`, sem `<optgroup>`, prefixo nem `data-unidade-id`.
+   Alimentado por `opcoes_filtro()` (`app/relatorios/helpers.py`), que só
+   restringe às unidades VISÍVEIS ao usuário, não à Unidade escolhida no
+   filtro.
+2. **Nenhum filtro por unidade, nem no cliente nem no servidor** (mesma
+   classe de bug do 10.53/10.64): não havia JS nas telas de relatório, e
+   `resolver_filtros()` validava `fila_id` só contra empresa + unidades
+   visíveis, não contra `unidade_id`. Fila da Laranjeiras + Unidade Matriz
+   aplicava os dois `WHERE` juntos e o relatório saía **vazio, sem aviso**.
+   O isolamento multi-tenant já estava correto (fila de outra empresa já
+   virava `None`).
+3. **Banco:** o MySQL local (22 filas, collation `utf8mb4_0900_ai_ci`) tinha
+   só casos do grupo (a) - nome repetido entre unidades diferentes ("Coleta"
+   em 3 unidades, "Deve Material"/"Entrega de Resultado" em 2) - e nenhum do
+   grupo (b) - nome repetido DENTRO da mesma unidade. O banco local não
+   representa produção (o print mostra mais repetições); a consulta em
+   produção ficou com o cliente, que vai tratar os casos reais do grupo (b)
+   como DADO (renomear/desativar filas), não como código. **Achado extra:**
+   nenhuma unidade tinha `Unidade.sigla` cadastrada, e o fallback de 3 letras
+   do 10.22 colide - "Anápolis - Centro Médico" e "Anápolis - Laborátorio"
+   viram ambas "[ANÁ]". O cliente vai cadastrar a sigla de todas as
+   unidades, mas o código não depende disso (desempate abaixo).
+4. **Pontos de exibição afetados:** select (4 telas); coluna Fila da tabela e
+   do CSV/Excel de tempo_atendimento (sem coluna Unidade - a coluna Local às
+   vezes ajudava via `identificador_admin`, mas sai "—" em Repasse
+   histórico); cabeçalho do PDF (`filtros_legiveis`, "Fila: Coleta", nas 4
+   telas); `relatorios/dashboard.html` ("Senhas aguardando por fila" e
+   "Últimas chamadas"); `core/dashboard.html` ("Últimos atendimentos"; a
+   lista de filas já mostrava "Coleta (Matriz)", só num formato diferente).
+   Tabela e CSV/Excel de tempo_espera/volume já tinham coluna Unidade;
+   ranking não tem coluna Fila.
+5. **Selects de Unidade e Operador:** Unidade escolhe uma única unidade e os
+   nomes são distintos (fora do item 6 do 10.22, sem problema). Operador
+   também não filtra pela unidade - registrado como pendência na seção 11,
+   fora do escopo deste adendo.
+
+**Decisões (confirmadas com o cliente):**
+
+- **Fonte ÚNICA do rótulo:** `rotulos_filas(empresa)` (`app/relatorios/
+  helpers.py`) devolve `{fila_id: "[SIGLA] Nome"}` (`Unidade.sigla_exibicao`,
+  10.22). É usada por `mapas_nomes()` (que deixou de ser uma tupla de 4 e
+  virou o `NamedTuple` `MapasNomes`: `filas` = rótulo, `filas_nome` = nome
+  puro, `filas_unidade` = unidade da fila), pelo select (`opcoes_filtro()`),
+  por `filtros_legiveis()` e pelos dois dashboards. O `filas_nomes` local que
+  `relatorios/routes.py::dashboard` montava à parte foi eliminado. Nenhum
+  template concatena sigla e nome.
+- **Desempate residual = regra do 10.32 item 3:** se, mesmo com o prefixo,
+  sobrar colisão case-insensitive E accent-insensitive (mesma noção de
+  "igual" da collation `utf8mb4_0900_ai_ci`, via `_chave_colisao`), " (id)" é
+  anexado a TODOS os membros do grupo, nunca só aos "duplicados" - ex.:
+  "[ANÁ] Coleta (14)" e "[ANÁ] Coleta (15)". Cobre os dois cenários: fallback
+  de sigla colidindo e nome repetido na mesma unidade. **Se esse sufixo
+  aparecer em produção, é o comportamento esperado, não um bug** - some
+  sozinho quando a sigla for cadastrada ou a fila renomeada. Siglas de
+  botões-folha (10.47) foram descartadas como diferenciador.
+- **Desempate calculado sobre a EMPRESA INTEIRA** (inclusive filas inativas e
+  de unidades que o usuário não vê), nunca sobre o subconjunto da página: o
+  mesmo id gera sempre o mesmo rótulo em qualquer tela/perfil (um gerencial
+  restrito a uma das unidades "ANÁ" vê o mesmo "(id)" que o admin).
+  **Filas inativas entram no desempate de propósito** (decisão confirmada com
+  o cliente na revisão; a consulta de `rotulos_filas` nunca filtrou por
+  `ativo`): o rótulo de uma fila fica estável - não ganha nem perde o
+  "(id)" quando outra fila do grupo é ativada/desativada - e relatórios de
+  períodos antigos, onde a fila hoje inativa ainda aparece, continuam
+  distinguíveis.
+- **Select de Fila:** `<optgroup label="<nome completo da unidade>">` (via
+  `groupby('unidade.nome')` do Jinja, mesmo padrão de `admin/filas/form.html`
+  e `admin/totem_botoes/form.html`) + option com o rótulo + `data-unidade-id`
+  (no option e no optgroup). Um script no próprio macro
+  (`filtrarFilasPorUnidade`) esconde (`hidden`, nunca remove do DOM) as filas
+  de outras unidades no load e a cada `change` da Unidade; "Todas" mostra
+  tudo; uma seleção que sai de vista volta para "Todas". O optgroup some
+  quando não sobra nenhuma opção visível dentro dele - decidido pelas
+  opções, não pelo `data-unidade-id` do grupo, para continuar certo mesmo se
+  duas unidades homônimas caírem no mesmo grupo do `groupby`. **`hidden`
+  confirmado antes de aplicar:** nenhum `display:` de autor em
+  `option`/`optgroup` (`relatorios/_layout.html` só estiliza `.filtros
+  select`; `gestfila.css` só define background/color) - mesmo caso do 10.64.
+  Validado também num Chromium headless (Playwright) com a página
+  renderizada, não só por inspeção do HTML.
+- **Servidor:** `resolver_filtros()` descarta (vira `None`) um `fila_id` de
+  outra unidade que a escolhida - mesmo padrão silencioso dos demais filtros.
+  O relatório passa a sair com a unidade inteira, em vez de vazio.
+- **CSV/Excel:** coluna Fila com o nome PURO + coluna "unidade" separada (mais
+  fácil de filtrar numa planilha do que um prefixo dentro da célula).
+  tempo_espera/volume já eram assim; tempo_atendimento ganhou a coluna
+  "unidade" (unidade da fila; no Repasse histórico sem snapshot de fila,
+  10.62, a unidade da senha - `tempo_atendimento()` passou a expor esse
+  `unidade_id`, que já fazia parte da chave interna, sem mudar nenhum
+  cálculo).
+- **Telas e PDF:** "[SIGLA] Nome" na coluna Fila das tabelas que a têm
+  (inclusive tempo_espera/volume, para o mesmo id ter o mesmo rótulo em toda
+  tela), nos dois dashboards (a lista de filas do `core/dashboard` trocou
+  "Coleta (Matriz)" por "[MAT] Coleta") e no cabeçalho do PDF ("Fila: [MAT]
+  Coleta").
+- **Fora de escopo, sem alteração:** nenhuma regra de cálculo dos relatórios;
+  telas operacionais/admin que já usavam "[SIGLA] Nome" montado no próprio
+  template (Iniciar Turno, Redirecionar, cadastros de Fila/Botão do totem,
+  10.22) continuam como estavam - não usam o desempate por id.
+
+**Limitação conhecida - `hidden` em `<option>`/`<optgroup>` não funciona no
+Safari (macOS/iOS):** o WebKit ignora o atributo nessas tags, então lá todas
+as filas continuam visíveis no select mesmo com uma Unidade escolhida. Vale
+igualmente para o 10.64 ("Botão pai"/"Fila" em `admin/totem_botoes/form.html`,
+mesma técnica). **Não** vale para o 10.53: lá o filtro esconde `<label>`s de
+um checklist de checkboxes (`admin/locais/form.html`), e `hidden` em
+`<label>` funciona normalmente no Safari. **Mitigação:** o filtro no cliente
+é só UX - o servidor nunca confia nele (`resolver_filtros` descarta um
+`fila_id` de outra unidade aqui; `_validar_totem_botao` rejeita no 10.64),
+então o pior caso no Safari é ver opções a mais, nunca um resultado errado
+ou dado de outra unidade/tenant. Não tratado
+agora (os relatórios são usados em desktop/Chrome); se virar problema, a
+alternativa é remover/reinserir as `<option>` no DOM em vez de escondê-las.
+
+**Testes:** novo `tests/test_regressao_relatorios_fila_unidade.py` (16
+verificações). Cenário: quatro unidades com uma "Coleta" cada, duas delas sem
+sigla com fallback colidindo ("Anápolis - X"/"Anápolis - Y"), mais duas filas
+na mesma unidade diferindo só em caixa/acento, e um par "Deve Material" na
+mesma unidade com uma das filas INATIVA. Verifica: rótulos e " (id)" em
+todos os membros; a fila inativa entra no desempate e o rótulo da ativa não
+muda ao ativar/desativar a outra; `<optgroup>`/rótulo/`data-unidade-id`/script nas 4 telas;
+`fila_id` de outra unidade descartado (relatório não sai vazio) e de outra
+empresa ignorado, sem vazar dado; o mesmo rótulo no select, nas tabelas de
+volume e tempo_atendimento, nos dois dashboards e no PDF gerado de ponta a
+ponta (tabela + "Fila: ..." de `filtros_legiveis`); gerencial restrito a uma
+unidade recebe o mesmo rótulo do admin; CSV de tempo_atendimento e Excel de
+volume com nome puro + coluna "unidade". Nenhum teste existente precisou de
+ajuste (os que conferiam o nome da fila em CSV/Excel continuam valendo,
+porque o CSV manteve o nome puro; os de PDF/tela usam substring). Suíte
+completa (69 arquivos) sem falhas.
+
+**Arquivos alterados:** `app/relatorios/helpers.py` (`rotulos_filas`,
+`_chave_colisao`, `MapasNomes`/`mapas_nomes`, `opcoes_filtro`,
+`resolver_filtros`, `filtros_legiveis`); `app/relatorios/routes.py` (as 4
+rotas + dashboard, sem o `filas_nomes` local); `app/relatorios/queries.py`
+(`tempo_atendimento` expõe `unidade_id`); `app/core/routes.py` (dashboard e
+`_ultimos_atendimentos_enriquecidos`); `app/templates/relatorios/
+_macros.html` (optgroup + script); `app/templates/relatorios/dashboard.html`;
+`app/templates/core/dashboard.html`; novo `tests/test_regressao_relatorios_
+fila_unidade.py`. Índice 10.0 completado (faltavam as linhas 10.47-10.68).
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
+- **Select "Operador" dos relatórios (tempo_atendimento) não filtra pela
+  Unidade escolhida** (achado na FASE 1 do 10.69, fora do escopo dele): lista
+  todos os usuários visíveis da empresa - inclusive perfis admin/gerencial
+  (que não atendem) e usuários sem nenhuma unidade vinculada. Corrigir exige
+  `data-unidade-id` com uma LISTA de unidades (`Usuario.unidades` é M:N), não
+  um id só como no select de Fila.
 - ~~**Fuso horário do servidor de produção**~~ **RESOLVIDO (10.37):** o fuso da
   clínica agora é resolvido no código (`app/utils/tempo.py`, config
   `FUSO_HORARIO`, default Brasília), não depende mais do fuso do SO. Só ajuste

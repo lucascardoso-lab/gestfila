@@ -63,13 +63,20 @@ def dashboard():
 
     chamadas = _ultimos_atendimentos_enriquecidos(empresa, unidades_visiveis)
 
+    from app.relatorios.helpers import rotulos_filas
+
+    rotulos = rotulos_filas(empresa)
+    filas_status = filas_com_status(empresa, unidades_visiveis)
+    for item in filas_status:
+        item["rotulo"] = rotulos[item["fila"].id]
+
     return render_template(
         "core/dashboard.html",
         empresa=empresa,
         unidade=unidade_escolhida,
         pode_filtrar_unidade=pode_filtrar_unidade,
         kpis=calcular_kpis(empresa, unidades_visiveis),
-        filas_status=filas_com_status(empresa, unidades_visiveis),
+        filas_status=filas_status,
         chamadas=chamadas,
         timestamps_chamadas_hoje=chamadas_por_hora_hoje(unidades_visiveis),
     )
@@ -97,14 +104,14 @@ def _ultimos_atendimentos_enriquecidos(empresa, unidades_visiveis, limite=15):
     from app.relatorios.queries import ultimas_chamadas
 
     chamadas = ultimas_chamadas(empresa, unidades_visiveis, limite=limite)
-    filas_nomes, _, _, locais_nomes = mapas_nomes(empresa)
+    mapas = mapas_nomes(empresa)
     for chamada in chamadas:
-        chamada["fila"] = filas_nomes.get(chamada["fila_id"], "—")
+        chamada["fila"] = mapas.filas.get(chamada["fila_id"], "—")
         # Só identificador_admin - a coluna "Fila" já existe ao lado (BLUEPRINT.md
         # seção 10.32); um formato combinado "[fila] · [identificador_admin]" foi
         # tentado e descartado depois de conferência visual real: repetia o nome
         # da fila (já mostrado na coluna vizinha) e quebrava em 2 linhas na
         # maioria das linhas da tabela.
-        chamada["local"] = locais_nomes.get(chamada["local_id"], "—") if chamada["local_id"] else "—"
+        chamada["local"] = mapas.locais.get(chamada["local_id"], "—") if chamada["local_id"] else "—"
         chamada["nome_paciente"] = primeiro_nome(chamada["nome_paciente"])
     return chamadas
