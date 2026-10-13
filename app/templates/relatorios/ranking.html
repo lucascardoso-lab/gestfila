@@ -22,14 +22,14 @@
     <p>Nenhum dado para os filtros selecionados.</p>
   {% else %}
     <table>
-      <thead><tr><th>#</th><th>Operador</th><th>Volume</th><th>Tempo médio</th></tr></thead>
+      <thead><tr><th>#</th><th>Operador</th><th>Volume</th><th>Tempo médio (mm:ss)</th></tr></thead>
       <tbody>
         {% for linha in linhas %}
           <tr>
             <td>{{ loop.index }}</td>
             <td>{{ linha.operador }}</td>
             <td>{{ linha.volume }}</td>
-            <td>{{ (linha.tempo_medio_segundos / 60) | round(1) ~ ' min' if linha.tempo_medio_segundos is not none else '—' }}</td>
+            <td>{{ linha.tempo_medio_segundos | duracao or '—' }}</td>
           </tr>
         {% endfor %}
       </tbody>

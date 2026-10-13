@@ -3,16 +3,13 @@
 
 {% block titulo %}Tempos por senha{% endblock %}
 
-{# Relatório por senha (adendo 10.73). Minutos com 1 casa na tela (2 na
-   exportação, como número); sem dado = "—" na tela e célula vazia na
-   exportação, nunca 0. Sem nome do paciente (LGPD, mesmo critério do 10.67). #}
-{% macro minutos(valor) -%}
-  {{ '%.1f'|format(valor) if valor is not none else '—' }}
-{%- endmacro %}
+{# Relatório por senha (adendo 10.73). Tempos em mm:ss / h:mm:ss pelo filtro
+   `duracao` (adendo 10.75); sem dado = "—" na tela e célula vazia na
+   exportação, nunca 00:00. Sem nome do paciente (LGPD, mesmo critério do 10.67). #}
 
 {% block conteudo %}
   <h1>Tempos por senha</h1>
-  <p class="subtitulo">Espera (da emissão até a chamada) e atendimento (da chamada até a finalização) de cada senha, em minutos.</p>
+  <p class="subtitulo">Espera (da emissão até a chamada) e atendimento (da chamada até a finalização) de cada senha, em minutos e segundos (mm:ss; a partir de 1 hora, h:mm:ss).</p>
   {% if not modo_impressao %}
     <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
     {{ form_filtros(filtros, opcoes, 'relatorios.tempos_por_senha_view', querystring, mostrar_operador=True,
@@ -26,8 +23,8 @@
       {% for chave, titulo in [('espera_inicial', 'Espera inicial'), ('espera_total', 'Espera total'), ('atendimento_total', 'Atendimento total')] %}
         <div class="card-resumo">
           <strong>{{ titulo }}</strong>
-          <span>Média: {{ minutos(resumo[chave].media) }} min</span>
-          <span>Mediana: {{ minutos(resumo[chave].mediana) }} min</span>
+          <span>Média: {{ resumo[chave].media | duracao or '—' }}</span>
+          <span>Mediana: {{ resumo[chave].mediana | duracao or '—' }}</span>
           <span>{{ resumo[chave].quantidade }} de {{ total_senhas }} senhas</span>
         </div>
       {% endfor %}
@@ -38,7 +35,8 @@
       atendimento" fazem a média POR ETAPA - quando há realocação, os números diferem. A aba "Por etapa"
       do Excel (ou o "CSV por etapa") fecha com eles. Nela, a coluna "Operador (chamada/atendimento)"
       traz, numa linha de Espera, quem chamou a senha (encerrando a espera) e, numa linha de
-      Atendimento, quem atendeu.
+      Atendimento, quem atendeu. No Excel, os tempos são durações (h:mm:ss): dá para somar ou tirar
+      a média direto na planilha.
     </p>
 
     {% if modo_impressao and pdf_omitido %}
@@ -52,7 +50,7 @@
         <thead>
           <tr>
             <th>Senha</th><th>Emissão</th><th>Unidade</th><th>Fila inicial</th><th>Fila final</th>
-            <th>Espera inicial (min)</th><th>Espera total (min)</th><th>Atendimento total (min)</th>
+            <th>Espera inicial (mm:ss)</th><th>Espera total (mm:ss)</th><th>Atendimento total (mm:ss)</th>
             <th>Etapas de atendimento</th><th>Operador (finalização)</th><th>Local (finalização)</th><th>Situação</th>
           </tr>
         </thead>
@@ -64,9 +62,9 @@
               <td>{{ linha.unidade }}</td>
               <td>{{ linha.fila_inicial }}</td>
               <td>{{ linha.fila_final }}</td>
-              <td>{{ minutos(linha.espera_inicial_min) }}</td>
-              <td>{{ minutos(linha.espera_total_min) }}</td>
-              <td>{{ minutos(linha.atendimento_total_min) }}</td>
+              <td>{{ linha.espera_inicial_segundos | duracao or '—' }}</td>
+              <td>{{ linha.espera_total_segundos | duracao or '—' }}</td>
+              <td>{{ linha.atendimento_total_segundos | duracao or '—' }}</td>
               <td>{{ linha.etapas if linha.etapas is not none else '—' }}</td>
               <td>{{ linha.operador }}</td>
               <td>{{ linha.local }}</td>

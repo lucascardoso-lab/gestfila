@@ -420,6 +420,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.72 | Cor dos links de conteúdo nos temas claro e escuro (correção na origem) |
 | 10.73 | Relatório "Tempos por senha" (espera e atendimento de cada senha, para exportar) |
 | 10.74 | Agrupamento "por dia" e "hoje" no dia civil da clínica (não de UTC) nos relatórios e no dashboard |
+| 10.75 | Tempos exibidos em minutos e segundos (mm:ss / h:mm:ss), não em minuto decimal |
 
 ---
 
@@ -7063,6 +7064,109 @@ arquivos) sem falhas.
 
 ---
 
+## 10.75. ADENDO — Tempos exibidos em minutos e segundos (mm:ss / h:mm:ss), não em minuto decimal
+
+> Relato de produção (relatório "Tempos por senha", 10.73): a tela mostrava
+> "21.8" quando o esperado era "21 min 48 s" / "21:48". O valor estava certo
+> (0,8 min = 48 s); o problema era o formato. Investigação (FASE 1) relatada
+> e aprovada antes de implementar.
+
+**Achados da investigação - quatro formatos de duração coexistiam:**
+
+1. Minuto decimal na tela e no PDF dos relatórios: "Tempos por senha" (linhas
+   e cartões de média/mediana, macro `minutos()`), Tempo de espera, Tempo de
+   atendimento e Ranking (`(segundos / 60) | round(1)` -> "21.8 min").
+2. "21m 48s" no KPI "Tempo médio de espera" do dashboard (JS `formatarTempo`).
+3. "00:21:47" (sempre com hora, TRUNCADO) nas telas de atendimento: coluna de
+   espera das senhas atendidas (Jinja) e o contador ao vivo "T. Espera" (JS
+   `formatarHHMMSS`).
+4. Exportação: "Tempos por senha" em minutos com 2 casas (Excel `0.00`, CSV
+   "21,80"); Tempo de espera/atendimento/Ranking em SEGUNDOS
+   (`tempo_medio_segundos`).
+5. Achado extra: a média/mediana do resumo do "Tempos por senha" era
+   calculada sobre o minuto JÁ arredondado a 2 casas (`*_min`), não sobre os
+   segundos exatos.
+
+**Decisões (confirmadas com o cliente) e implementação:**
+
+- **Função única** `app/utils/tempo.py::formatar_duracao(segundos)`,
+  registrada como filtro Jinja `duracao`: "mm:ss" abaixo de 1 hora (21:48,
+  02:05), "h:mm:ss" a partir de 1 hora (16:15:24); segundos arredondados
+  "meio para cima" (`segundos_arredondados` - o `round()` do Python
+  arredondaria empates para o par) a partir dos segundos EXATOS, nunca de um
+  minuto já arredondado (59:59,6 -> 1:00:00); sem dado -> "" (o template
+  mostra "—"; nunca "00:00" no lugar de dado ausente, regra do 10.73);
+  **duração negativa** (relógio fora de ordem num log) exibida com sinal
+  ("-00:05"), sem esconder e sem mudar o cálculo.
+- **Tela e PDF:** "Tempos por senha" (linhas e cartões) e Tempo de espera,
+  Tempo de atendimento e Ranking com o filtro `duracao`; cabeçalhos "(mm:ss)"
+  (a nota/subtítulo explica o h:mm:ss a partir de 1 hora).
+- **Correção de CÁLCULO do resumo (não só apresentação):** `_resumo_tempos`
+  passa a calcular média e mediana sobre os SEGUNDOS exatos, formatando só na
+  exibição. Diferença < 1 s em relação ao cálculo anterior (sobre minutos
+  arredondados a 2 casas). Os tempos por senha e a coerência dos 10.73/10.74
+  não mudaram (testes deles sem alteração de valores).
+- **Excel do "Tempos por senha"** (abas "Por senha" e "Por etapa"): DURAÇÃO
+  nativa - valor = `segundos_arredondados / 86400` (fração de dia), formato
+  `[h]:mm:ss` (`[h]` não volta a zero depois de 24 h) -, exibida como
+  0:21:48 e somável/média direto na planilha; segundos arredondados para a
+  célula mostrar exatamente o que a tela mostra. Colunas "Espera inicial /
+  Espera total / Atendimento total (h:mm:ss)" e "Duração (h:mm:ss)".
+- **CSV do "Tempos por senha"** (por senha e por etapa): mantém a coluna em
+  minutos decimais (número com vírgula, padrão do 10.73) e ganha ao lado a
+  mesma duração em texto - "Espera inicial (min)" + "Espera inicial (mm:ss)",
+  ..., "Duração (min)" + "Duração (mm:ss)" (a coluna "Minutos" da visão por
+  etapa virou "Duração (min)").
+- **Achado e corrigido no caminho:** no CSV do 10.73, "Etapas de atendimento"
+  saía "3,00" (o pandas tornava decimal uma contagem com vazios, e o
+  `float_format` de 2 casas se aplicava). `export.exportar` ganhou
+  `colunas_inteiras` (tipo inteiro que aceita vazio) - agora "3".
+- **Nota da tela:** "No Excel, os tempos são durações (h:mm:ss): dá para
+  somar ou tirar a média direto na planilha."
+- **Dashboard:** `/api/dashboard/kpis` ganhou o campo
+  `tempo_medio_espera_texto` (mesma função Python; `None` sem dado), mantendo
+  `tempo_medio_espera_segundos` intacto (contrato preservado). O JS só exibe
+  o texto - `formatarTempo` removido (não tinha outro uso). "21m 48s" ->
+  "21:48".
+- **Exportações dos relatórios antigos NÃO mudam** (continuam em segundos),
+  pela mesma pendência do Power BI da seção 11 (observação acrescentada lá).
+- **Telas de atendimento: fora deste adendo, sem mudança** (inclusive o
+  truncamento): são cronômetros do operador, e a coluna estática de espera
+  das senhas atendidas precisa bater, segundo a segundo, com o contador ao
+  vivo "T. Espera" (JS, truncado). A contagem regressiva do encerramento das
+  23h (10.18) também fica como está - é contagem até um horário, não uma
+  duração medida.
+
+**Testes:** novo `tests/test_regressao_duracao.py` (8 verificações):
+formatação (21,8 min -> 21:48; 59:59,6 -> 1:00:00; 975,4 min -> 16:15:24;
+02:05; meio para cima em 20,5 s e 21,5 s; 0 s -> 00:00; None -> vazio;
+-5 s -> -00:05) e o filtro registrado; resumo sobre segundos exatos (10,667 s,
+não 10,6 s); tela do "Tempos por senha" (linhas, cartões, cabeçalhos, nota,
+negativo) e dos três agregados; PDF real (Chromium) do "Tempos por senha" e
+do Tempo de espera; Excel lido no XML cru - célula NUMÉRICA (`t="n"`), valor
+= segundos/86400, formato `[h]:mm:ss`, nas duas abas; CSV por senha e por
+etapa com as duas colunas; valor gravado no Excel = segundos ARREDONDADOS /
+86400 (1307,6 s -> 1308 s; 1307,4 s -> 1307 s; mesmo segundo da tela); dashboard com o campo numérico intacto e o texto
+novo (e `None` sem dado). `tests/test_regressao_tempos_por_senha.py`
+ajustado só no formato (mesmos valores, mesma coerência). Suíte completa (75
+arquivos) sem falhas.
+
+**Nota de deploy:** `git pull` + restart do `gestfila` (sem migration, sem
+mudança em `requirements.txt`).
+
+**Arquivos alterados:** `app/utils/tempo.py` (`formatar_duracao`,
+`segundos_arredondados`); `app/__init__.py` (filtro `duracao`);
+`app/relatorios/routes.py` (`_resumo_tempos` sobre segundos, colunas por
+formato, `_duracao_excel`, `colunas_duracao`/`colunas_inteiras`);
+`app/relatorios/export.py` (`FORMATO_DURACAO_EXCEL`, `colunas_duracao`,
+`colunas_inteiras`); `app/core/dashboard_queries.py`
+(`tempo_medio_espera_texto`); templates `relatorios/tempos_por_senha.html`,
+`tempo_espera.html`, `tempo_atendimento.html`, `ranking.html`,
+`core/dashboard.html`; novo `tests/test_regressao_duracao.py`;
+`tests/test_regressao_tempos_por_senha.py` ajustado.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - **Padronizar o formato numérico dos relatórios antigos** (registrado no
@@ -7071,7 +7175,12 @@ arquivos) sem falhas.
   o "Tempos por senha") - ANTES, verificar se algum consumidor automatizado
   (ex.: Power BI) importa os CSV atuais com "," e ".", porque a troca
   quebraria essa importação; (2) decimal com vírgula na TELA de todos os
-  relatórios (hoje "5.0", com ponto, por consistência).
+  relatórios (hoje "5.0", com ponto, por consistência). **Observação (10.75):**
+  na tela/PDF os tempos já viraram "mm:ss" em todos os relatórios, mas as
+  EXPORTAÇÕES de Tempo de espera, Tempo de atendimento e Ranking continuam
+  com `tempo_medio_segundos` em segundos - qualquer mudança nelas (duração
+  nativa no Excel, como no "Tempos por senha") entra nesta mesma pendência,
+  depois da verificação do Power BI.
 - **Filtro de Fila dos relatórios usa a fila ATUAL da senha** (limitação
   registrada no 10.73, alinhada aos agregados na v1): uma senha realocada da
   Recepção para a Coleta some do filtro "Recepção" em todos os relatórios

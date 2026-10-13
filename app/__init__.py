@@ -74,9 +74,12 @@ def create_app(config_name=None):
 
     # Hora/data de coluna UTC exibida pelo servidor (adendo 10.74) - nunca
     # strftime direto num template.
-    from .utils.tempo import formatar_hora_clinica
+    from .utils.tempo import formatar_duracao, formatar_hora_clinica
 
     app.jinja_env.filters["hora_clinica"] = formatar_hora_clinica
+    # Duração "mm:ss"/"h:mm:ss" a partir de segundos (adendo 10.75) - a mesma
+    # função de toda tela/PDF que mostra um tempo; nunca minuto decimal.
+    app.jinja_env.filters["duracao"] = formatar_duracao
 
     from .middleware.tenant import register_tenant_middleware
 

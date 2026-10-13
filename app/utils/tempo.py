@@ -33,6 +33,7 @@ REGRA (10.74): hora/data exibida pelo servidor sempre via
 (`formatar_hora_clinica`); nunca `strftime`/`.date()` direto sobre uma coluna
 UTC. Datetimes enviados ao JS seguem a convenção já existente: ISO + "Z" (o
 navegador converte)."""
+import math
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -101,3 +102,32 @@ def formatar_hora_clinica(momento, formato="%H:%M"):
     template decide o que mostrar no lugar, ex.: "—")."""
     convertido = para_horario_clinica(momento)
     return convertido.strftime(formato) if convertido is not None else ""
+
+
+def segundos_arredondados(segundos):
+    """Segundos inteiros, arredondados "meio para cima" (21,5 s -> 22 s; o
+    `round()` do Python arredondaria empates para o par). Base ÚNICA da tela,
+    do PDF e do Excel (adendo 10.75) - o mesmo valor exibido em todos eles.
+    Duração negativa (relógio fora de ordem num log) mantém o sinal."""
+    if segundos is None:
+        return None
+    inteiros = math.floor(abs(segundos) + 0.5)
+    return -inteiros if segundos < 0 else inteiros
+
+
+def formatar_duracao(segundos):
+    """Duração para exibição (adendo 10.75; filtro Jinja `duracao`): "mm:ss"
+    abaixo de 1 hora (21:48, 02:05), "h:mm:ss" a partir de 1 hora (16:15:24),
+    calculada a partir dos segundos EXATOS (nunca de um minuto já
+    arredondado). Sem dado (`None`) -> "" - nunca "00:00" no lugar de dado
+    ausente (regra do 10.73); o template decide o que mostrar (ex.: "—").
+    Negativa: com sinal ("-00:05"), sem esconder."""
+    total = segundos_arredondados(segundos)
+    if total is None:
+        return ""
+    sinal = "-" if total < 0 else ""
+    horas, resto = divmod(abs(total), 3600)
+    minutos, segs = divmod(resto, 60)
+    if horas:
+        return f"{sinal}{horas}:{minutos:02d}:{segs:02d}"
+    return f"{sinal}{minutos:02d}:{segs:02d}"

@@ -221,15 +221,10 @@
         el.textContent = formatarHoraLocal(el.dataset.horaDe);
       });
 
-      function formatarTempo(segundos) {
-        if (segundos === null || segundos === undefined) return "—";
-        const min = Math.floor(segundos / 60);
-        const seg = Math.round(segundos % 60);
-        return `${min}m ${String(seg).padStart(2, "0")}s`;
-      }
-
+      // Tempo médio de espera já formatado pelo servidor ("mm:ss", adendo
+      // 10.75 - mesma função Python dos relatórios); o JS só exibe.
       const elTempoEspera = document.getElementById("kpi-tempo-espera");
-      elTempoEspera.textContent = formatarTempo({{ kpis.tempo_medio_espera_segundos | tojson }});
+      elTempoEspera.textContent = {{ kpis.tempo_medio_espera_texto | tojson }} || "—";
 
       // Gráfico de barras (Chart.js) - "chamadas por hora" agrupado no fuso LOCAL do
       // navegador de quem está vendo o dashboard (getHours(), não getUTCHours()) -
@@ -276,7 +271,7 @@
             if (!dados) return;
             document.getElementById("kpi-aguardando").textContent = dados.aguardando;
             document.getElementById("kpi-chamadas-hoje").textContent = dados.chamadas_hoje;
-            document.getElementById("kpi-tempo-espera").textContent = formatarTempo(dados.tempo_medio_espera_segundos);
+            document.getElementById("kpi-tempo-espera").textContent = dados.tempo_medio_espera_texto || "—";
             document.getElementById("kpi-filas-ativas").textContent = dados.filas_ativas;
           })
           .catch(() => {}); // rede instável não deve quebrar a tela - só tenta de novo no próximo ciclo

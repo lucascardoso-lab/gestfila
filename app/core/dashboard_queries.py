@@ -14,7 +14,7 @@ from app.admin.helpers import resolver_unidade_contexto, unidades_da_empresa
 from app.models import Fila, LogAtendimento, Senha
 from app.relatorios.helpers import Filtros
 from app.relatorios.queries import _segmentos_espera_por_senha
-from app.utils.tempo import janela_dia_clinica_em_utc
+from app.utils.tempo import formatar_duracao, janela_dia_clinica_em_utc
 
 # Mesma definição de "chamada" já usada em relatorios/queries.py (EVENTOS_INICIO_
 # ATENDIMENTO) - 'chamada_nome' deliberadamente NÃO é gravado pelo Realocar (seção 7
@@ -51,7 +51,8 @@ def calcular_kpis(empresa, unidades_visiveis):
     chamadas de hoje, tempo médio de espera de hoje e quantidade de filas ativas -
     todos já escopados pelas unidades visíveis ao perfil logado."""
     if not unidades_visiveis:
-        return {"aguardando": 0, "chamadas_hoje": 0, "tempo_medio_espera_segundos": None, "filas_ativas": 0}
+        return {"aguardando": 0, "chamadas_hoje": 0, "tempo_medio_espera_segundos": None,
+                "tempo_medio_espera_texto": None, "filas_ativas": 0}
 
     aguardando = Senha.query.filter(
         Senha.empresa_id == empresa.id,
@@ -74,10 +75,15 @@ def calcular_kpis(empresa, unidades_visiveis):
         Fila.ativo.is_(True),
     ).count()
 
+    tempo_medio = _tempo_medio_espera_hoje(empresa, unidades_visiveis, inicio_hoje, fim_hoje)
     return {
         "aguardando": aguardando,
         "chamadas_hoje": chamadas_hoje,
-        "tempo_medio_espera_segundos": _tempo_medio_espera_hoje(empresa, unidades_visiveis, inicio_hoje, fim_hoje),
+        # Numérico mantido intacto (contrato de /api/dashboard/kpis); o texto
+        # "mm:ss" vem da MESMA função de formatação dos relatórios (adendo
+        # 10.75) - o JS só exibe, não formata. None (sem dado) -> o JS mostra "—".
+        "tempo_medio_espera_segundos": tempo_medio,
+        "tempo_medio_espera_texto": formatar_duracao(tempo_medio) or None,
         "filas_ativas": filas_ativas,
     }
 

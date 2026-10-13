@@ -278,7 +278,8 @@ assert NOME not in bruto and ";" in bruto.splitlines()[0]
 df = pd.read_csv(io.StringIO(bruto), sep=";", decimal=",")
 assert df["Espera inicial (min)"].dtype == float and df["Atendimento total (min)"].dtype == float
 linha_s2 = bruto.splitlines()[[l.split(";")[0] for l in bruto.splitlines()].index("S2")]
-assert ";3,00;15,00;14,00;" in linha_s2, linha_s2
+# Minutos decimais + o mesmo tempo em texto (adendo 10.75); etapas como inteiro ("3", não "3,00").
+assert ";3,00;03:00;15,00;15:00;14,00;14:00;3;" in linha_s2, linha_s2
 assert df.set_index("Senha").loc["S3"].isna()["Espera inicial (min)"]
 assert "Etapas de atendimento" in df.columns
 ok("CSV por senha: UTF-8 com BOM, padrão pt-BR (';' e ','), minutos com 2 casas como número; sem dado = vazio; sem nome")
@@ -287,7 +288,7 @@ bytes_etapas = baixar("csv_etapas", f"&unidade_id={ids['nova']}")
 assert bytes_etapas.startswith(BOM_UTF8)
 bruto_etapas = bytes_etapas.decode("utf-8-sig")
 df_e = pd.read_csv(io.StringIO(bruto_etapas), sep=";", decimal=",")
-assert len(df_e) == 12 and df_e["Minutos"].dtype == float and NOME not in bruto_etapas
+assert len(df_e) == 12 and df_e["Duração (min)"].dtype == float and NOME not in bruto_etapas
 assert "Operador (chamada/atendimento)" in df_e.columns and "Operador" not in df_e.columns
 ok("CSV por etapa: 12 etapas da unidade Nova (7 esperas + 5 atendimentos), minutos numéricos, sem nome")
 
@@ -299,25 +300,26 @@ aba = livro["Por senha"]
 cab = [c.value for c in aba[1]]
 col = {nome: i for i, nome in enumerate(cab)}
 linhas_xlsx = {r[0].value: r for r in aba.iter_rows(min_row=2)}
-celula = linhas_xlsx["S2"][col["Espera total (min)"]]
-# Número (openpyxl devolve int quando o valor é inteiro, ex. 15.0 -> 15), nunca texto.
-assert isinstance(celula.value, (int, float)) and not isinstance(celula.value, bool)
-assert celula.value == 15 and celula.number_format == "0.00"
-assert isinstance(linhas_xlsx["S1"][col["Espera inicial (min)"]].value, (int, float))
+# Duração nativa (adendo 10.75): o openpyxl lê uma célula numérica com formato de
+# tempo como timedelta; o valor numérico cru (segundos/86400) é conferido no XML
+# em tests/test_regressao_duracao.py.
+celula = linhas_xlsx["S2"][col["Espera total (h:mm:ss)"]]
+assert celula.value == timedelta(minutes=15) and celula.number_format == "[h]:mm:ss", (celula.value, celula.number_format)
+assert linhas_xlsx["S1"][col["Espera inicial (h:mm:ss)"]].value == timedelta(minutes=5)
 emissao = linhas_xlsx["S8"][col["Emissão"]]
 assert emissao.value == datetime(2026, 10, 8, 21, 50) and emissao.number_format == "dd/mm/yyyy hh:mm"
-assert linhas_xlsx["S3"][col["Espera inicial (min)"]].value is None
+assert linhas_xlsx["S3"][col["Espera inicial (h:mm:ss)"]].value is None
 for nome_aba in livro.sheetnames:
     for linha in livro[nome_aba].iter_rows(values_only=True):
         assert NOME not in [str(v) for v in linha], nome_aba
-ok("Excel: abas 'Por senha'/'Por etapa', minutos como número (formato 0.00), emissão como data/hora da clínica, sem nome")
+ok("Excel: abas 'Por senha'/'Por etapa', tempos como duração [h]:mm:ss, emissão como data/hora da clínica, sem nome")
 
 # Filtro de operador: (i) por senha mantém a senha inteira, (ii) por etapa só as do operador.
 with relogio():
     tela_op = html.unescape(c.get(f"{URL}&operador_id={ids['op_t']}").get_data(as_text=True))
-assert tela_op.count("<td>S") == 1 and "<td>S2</td>" in tela_op and "<td>14.0</td>" in tela_op
+assert tela_op.count("<td>S") == 1 and "<td>S2</td>" in tela_op and "<td>14:00</td>" in tela_op
 df_op = pd.read_csv(io.StringIO(baixar("csv_etapas", f"&operador_id={ids['op_t']}").decode("utf-8-sig")), sep=";", decimal=",")
-assert list(zip(df_op["Etapa"], df_op["Tipo"], df_op["Minutos"])) == [(3, "Espera", 6.0), (4, "Atendimento - Repasse", 4.0)], df_op
+assert list(zip(df_op["Etapa"], df_op["Tipo"], df_op["Duração (min)"])) == [(3, "Espera", 6.0), (4, "Atendimento - Repasse", 4.0)], df_op
 ok("Operador: por senha mantém S2 com o total inteiro (14 min); por etapa só as 2 etapas do operador (numeração preservada)")
 
 # ===========================================================================
