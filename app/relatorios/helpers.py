@@ -7,8 +7,8 @@ from flask_login import current_user
 
 from app.admin.helpers import filas_da_empresa, unidades_da_empresa
 from app.extensions import db
-from app.models import Fila, LogExportacaoRelatorio, Unidade, Usuario
-from app.utils.rotulos import rotulos_filas
+from app.models import AreaFila, Fila, LogExportacaoRelatorio, Unidade, Usuario
+from app.utils.rotulos import rotulos_areas, rotulos_filas
 from app.utils.tempo import agora_na_clinica, janela_dia_clinica_em_utc
 
 
@@ -23,6 +23,10 @@ class Filtros:
     data_fim_exclusivo: datetime
     data_inicio_str: str
     data_fim_str: str
+    # Adendo 10.76 - com default (no fim) para não quebrar quem monta Filtros à
+    # mão (dashboard e testes): filtro de Área e o "Agrupar por: Área".
+    area_fila_id: Optional[int] = None
+    agrupar_por_area: bool = False
 
 
 def _unidades_ids_visiveis(empresa):
@@ -95,9 +99,20 @@ def resolver_filtros(empresa):
     if unidade_id is not None and unidade_id not in unidades_ids_validas:
         unidade_id = None
 
-    unidade_da_fila_valida = {
-        f.id: f.unidade_id for f in filas_da_empresa(empresa) if f.unidade_id in unidades_ids_validas
+    # Área (adendo 10.76): da empresa e de uma unidade visível; área de OUTRA
+    # unidade que a escolhida é descartada (mesmo padrão silencioso da fila).
+    unidade_da_area_valida = {
+        a.id: a.unidade_id for a in AreaFila.query.filter_by(empresa_id=empresa.id).all()
+        if a.unidade_id in unidades_ids_validas
     }
+    area_fila_id = request.args.get("area_fila_id", type=int)
+    if area_fila_id is not None and area_fila_id not in unidade_da_area_valida:
+        area_fila_id = None
+    if area_fila_id is not None and unidade_id is not None and unidade_da_area_valida[area_fila_id] != unidade_id:
+        area_fila_id = None
+
+    filas_validas = {f.id: f for f in filas_da_empresa(empresa) if f.unidade_id in unidades_ids_validas}
+    unidade_da_fila_valida = {fila_id: f.unidade_id for fila_id, f in filas_validas.items()}
     fila_id = request.args.get("fila_id", type=int)
     if fila_id is not None and fila_id not in unidade_da_fila_valida:
         fila_id = None
@@ -106,6 +121,10 @@ def resolver_filtros(empresa):
     # aviso. Descartada (vira "todas as filas da unidade"), mesmo padrão
     # silencioso dos demais filtros fora de escopo acima.
     if fila_id is not None and unidade_id is not None and unidade_da_fila_valida[fila_id] != unidade_id:
+        fila_id = None
+    # Fila fora da Área escolhida (10.76): descartada também - o resultado seria
+    # vazio sem aviso, como no caso da unidade acima.
+    if fila_id is not None and area_fila_id is not None and filas_validas[fila_id].area_fila_id != area_fila_id:
         fila_id = None
 
     operadores_ids_validos = {u.id for u in _operadores_visiveis(empresa)}
@@ -123,15 +142,28 @@ def resolver_filtros(empresa):
         data_fim_exclusivo=data_fim_exclusivo,
         data_inicio_str=data_inicio_str,
         data_fim_str=data_fim_str,
+        area_fila_id=area_fila_id,
+        agrupar_por_area=request.args.get("agrupar") == "area",
     )
 
 
 def opcoes_filtro(empresa):
     unidades_ids_validas = _unidades_ids_visiveis(empresa)
+    filas = [f for f in filas_da_empresa(empresa) if f.unidade_id in unidades_ids_validas]
     return {
         "unidades": [u for u in unidades_da_empresa(empresa) if u.id in unidades_ids_validas],
-        "filas": [f for f in filas_da_empresa(empresa) if f.unidade_id in unidades_ids_validas],
+        "filas": filas,
+        # {fila_id: área_id} (strings; "" = sem área) para o JS do filtro de
+        # Área (adendo 10.76) esconder as filas que não são da área escolhida.
+        "area_da_fila": {str(f.id): str(f.area_fila_id) if f.area_fila_id else "" for f in filas},
         "rotulos_filas": rotulos_filas(empresa.id),
+        # Áreas das unidades visíveis, inclusive INATIVAS (o template as marca
+        # "(inativa)": continuam consultáveis nos relatórios - adendo 10.76).
+        "areas": sorted(
+            (a for a in AreaFila.query.filter_by(empresa_id=empresa.id).all() if a.unidade_id in unidades_ids_validas),
+            key=lambda a: (a.unidade.nome, a.nome),
+        ),
+        "rotulos_areas": rotulos_areas(empresa.id),
         "operadores": _operadores_visiveis(empresa),
     }
 
@@ -146,6 +178,10 @@ def filtros_para_querystring(filtros, empresa):
         qs["fila_id"] = filtros.fila_id
     if filtros.operador_id:
         qs["operador_id"] = filtros.operador_id
+    if filtros.area_fila_id:
+        qs["area_fila_id"] = filtros.area_fila_id
+    if filtros.agrupar_por_area:
+        qs["agrupar"] = "area"
     if g.is_super_admin:
         qs["empresa_id"] = empresa.id
     return qs
@@ -164,6 +200,10 @@ def filtros_legiveis(filtros, opcoes):
         nome = next((u.nome for u in opcoes["unidades"] if u.id == filtros.unidade_id), None)
         if nome:
             partes.append(f"Unidade: {nome}")
+    if filtros.area_fila_id:
+        rotulo = opcoes["rotulos_areas"].get(filtros.area_fila_id)
+        if rotulo:
+            partes.append(f"Área: {rotulo}")
     if filtros.fila_id:
         rotulo = opcoes["rotulos_filas"].get(filtros.fila_id)
         if rotulo:
@@ -172,6 +212,9 @@ def filtros_legiveis(filtros, opcoes):
         nome = next((o.nome for o in opcoes["operadores"] if o.id == filtros.operador_id), None)
         if nome:
             partes.append(f"Operador: {nome}")
+
+    if filtros.agrupar_por_area:
+        partes.append("Agrupado por: Área")
 
     data_inicio = datetime.strptime(filtros.data_inicio_str, "%Y-%m-%d").strftime("%d/%m/%Y")
     data_fim = datetime.strptime(filtros.data_fim_str, "%Y-%m-%d").strftime("%d/%m/%Y")
@@ -200,6 +243,7 @@ def registrar_exportacao(tipo_relatorio, formato, empresa, filtros):
             unidade_id=filtros.unidade_id,
             fila_id=filtros.fila_id,
             operador_id=filtros.operador_id,
+            area_fila_id=filtros.area_fila_id,
             data_inicio=filtros.data_inicio_str,
             data_fim=filtros.data_fim_str,
         )
@@ -214,6 +258,12 @@ class MapasNomes(NamedTuple):
     unidades: dict
     operadores: dict
     locais: dict
+    # Adendo 10.76: área_id -> rótulo "[SIGLA] Nome" (tela/PDF) e nome puro
+    # (CSV/Excel); fila_id -> área ATUAL da fila (None = "Sem área").
+    areas: dict
+    areas_nome: dict
+    areas_unidade: dict
+    fila_area: dict
 
 
 def mapas_nomes(empresa):
@@ -233,6 +283,7 @@ def mapas_nomes(empresa):
     # quando o formato "[fila] · [identificador_admin]" for aplicável (adendo
     # "Separação nome de exibição/identificador administrativo", BLUEPRINT.md).
     locais = {l.id: l.identificador_admin for l in Local.query.filter_by(empresa_id=empresa.id).all()}
+    areas = AreaFila.query.filter_by(empresa_id=empresa.id).all()
     return MapasNomes(
         filas=rotulos_filas(empresa.id),
         filas_nome={f.id: f.nome for f in filas},
@@ -240,4 +291,20 @@ def mapas_nomes(empresa):
         unidades=unidades,
         operadores=operadores,
         locais=locais,
+        areas=rotulos_areas(empresa.id),
+        areas_nome={a.id: a.nome for a in areas},
+        areas_unidade={a.id: a.unidade_id for a in areas},
+        fila_area={f.id: f.area_fila_id for f in filas},
     )
+
+
+SEM_AREA = "Sem área"
+
+
+def rotulo_area(mapas, area_id, nome_puro=False):
+    """Nome da área para exibição (tela/PDF: rótulo "[SIGLA] Nome") ou
+    exportação (CSV/Excel: nome puro, a unidade vem em coluna própria). Fila
+    sem área -> "Sem área" (adendo 10.76: nunca some dos agrupamentos)."""
+    if area_id is None:
+        return SEM_AREA
+    return (mapas.areas_nome if nome_puro else mapas.areas).get(area_id, SEM_AREA)

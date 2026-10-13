@@ -8,6 +8,7 @@ from .tv import Tv
 from .totem import Totem
 from .totem_botao import TotemBotao
 from .tipo_senha import TipoSenha
+from .area_fila import AreaFila
 from .fila import Fila
 from .local import Local
 from .local_rodizio_fila import LocalRodizioFila
@@ -31,6 +32,7 @@ __all__ = [
     "Totem",
     "TotemBotao",
     "TipoSenha",
+    "AreaFila",
     "Fila",
     "Local",
     "LocalRodizioFila",

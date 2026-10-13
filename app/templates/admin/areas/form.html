@@ -1,0 +1,90 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}{{ 'Editar área' if area else 'Nova área' }}{% endblock %}
+
+{% block conteudo %}
+  <h1>{{ 'Editar área' if area else 'Nova área' }}</h1>
+  {% set nome_tela = self.titulo() %}
+  {% include "admin/_breadcrumb.html" %}
+  {% set unidade_sel = valores.unidade_id if valores else (area.unidade_id if area else none) %}
+  {% set ativo_sel = valores.ativo if valores else (area.ativo if area else true) %}
+  <div class="card">
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <label for="nome">Nome</label>
+      <input type="text" id="nome" name="nome" maxlength="100" required autofocus
+             value="{{ (valores.nome if valores else (area.nome if area else '')) or '' }}" placeholder="Ex.: 2º Andar">
+
+      <label for="unidade_id">Unidade</label>
+      <select id="unidade_id" name="unidade_id" required>
+        <option value="">Selecione...</option>
+        {% for u in unidades %}
+          <option value="{{ u.id }}" {{ 'selected' if u.id == unidade_sel else '' }}>{{ u.nome }}</option>
+        {% endfor %}
+      </select>
+
+      <label><input type="checkbox" name="ativo" {{ 'checked' if ativo_sel else '' }}> Ativa</label>
+
+      <label for="busca-filas">Filas desta área</label>
+      <p class="subtitulo" style="margin:.35rem 0 .5rem;">
+        Só aparecem as filas da unidade escolhida acima (uma área agrupa filas de uma unidade só).
+        Uma fila marcada que hoje está em outra área é MOVIDA para esta ao salvar.
+      </p>
+      <input type="text" id="busca-filas" placeholder="Buscar fila..." style="max-width:20rem;">
+      <p id="aviso-movidas" class="flash info" hidden></p>
+      {# Filtro por unidade/busca no cliente (padrão 10.53): cada <label> leva
+         data-unidade-id; a regra "mesma unidade" é validada de verdade no
+         servidor (app/admin/areas.py::_validar). #}
+      <div class="checkboxes" id="checkboxes-filas">
+        {% for fila in filas %}
+          {% set em_outra = fila.area_fila is not none and (not area or fila.area_fila_id != area.id) %}
+          <label data-unidade-id="{{ fila.unidade_id }}" data-busca="{{ fila.nome|lower }}" data-rotulo="{{ rotulo_fila(fila) }}"
+                 {% if em_outra %}data-outra-area="{{ fila.area_fila.nome }}"{% endif %}>
+            <input type="checkbox" name="filas" value="{{ fila.id }}" {{ 'checked' if fila.id in filas_marcadas else '' }}>
+            {{ rotulo_fila(fila) }}{% if not fila.ativo %} (inativa){% endif %}
+            {% if em_outra %}<span class="subtitulo" style="margin:0;">(hoje em {{ fila.area_fila.nome }})</span>{% endif %}
+          </label>
+        {% else %}
+          <span class="subtitulo">Nenhuma fila cadastrada nesta empresa ainda.</span>
+        {% endfor %}
+      </div>
+
+      <p><button class="botao" type="submit" style="margin-top:1.5rem;">Salvar</button></p>
+    </form>
+  </div>
+
+  <script>
+    (function () {
+      const elUnidade = document.getElementById("unidade_id");
+      const elBusca = document.getElementById("busca-filas");
+      const elAviso = document.getElementById("aviso-movidas");
+      const itens = Array.from(document.querySelectorAll("#checkboxes-filas label[data-unidade-id]"));
+
+      function atualizar() {
+        const unidade = elUnidade.value;
+        const termo = elBusca.value.trim().toLowerCase();
+        itens.forEach((item) => {
+          const daUnidade = item.dataset.unidadeId === unidade;
+          const caixa = item.querySelector("input");
+          // Fila de outra unidade: escondida E desmarcada (não fica "escondida
+          // mas marcada" até o submit - mesmo princípio do 10.53/10.64).
+          if (!daUnidade) caixa.checked = false;
+          item.hidden = !daUnidade || (termo !== "" && !item.dataset.busca.includes(termo) && !caixa.checked);
+        });
+        // Aviso ANTES de salvar (10.76): filas marcadas que hoje estão em outra área.
+        const movidas = itens.filter((item) => item.dataset.outraArea && item.querySelector("input").checked);
+        elAviso.hidden = movidas.length === 0;
+        elAviso.textContent = movidas.length
+          ? `${movidas.length} fila(s) serão movidas de outra área ao salvar: ` +
+            movidas.map((item) => `${item.dataset.rotulo} (hoje em ${item.dataset.outraArea})`).join("; ")
+          : "";
+      }
+
+      elUnidade.addEventListener("change", atualizar);
+      elBusca.addEventListener("input", atualizar);
+      itens.forEach((item) => item.querySelector("input").addEventListener("change", atualizar));
+      atualizar();
+    })();
+  </script>
+{% endblock %}

@@ -57,6 +57,7 @@ tr:last-child td { border-bottom: none; }
 .resumo-tempos { display: flex; gap: .75rem; margin-bottom: .75rem; }
 .card-resumo { border: 1px solid #999; border-radius: 6px; padding: .35rem .6rem; display: flex; flex-direction: column; font-size: 9pt; }
 .aviso { border: 1px solid #999; border-radius: 6px; padding: .4rem .6rem; font-size: 9pt; color: #333; }
+.tabela-por-fila { margin-bottom: 1rem; } /* quadro "Por fila" (10.76) */
 .tabela-larga th, .tabela-larga td { font-size: 8pt; padding: .3rem .35rem; }
 
 .rodape-impressao {

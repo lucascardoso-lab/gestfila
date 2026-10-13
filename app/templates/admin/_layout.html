@@ -124,6 +124,7 @@
       <a href="{{ url_for('admin.listar_unidades') }}{% if current_user.is_super_admin and empresa %}?empresa_id={{ empresa.id }}{% endif %}">🏥 Unidades</a>
       <a href="{{ url_for('admin.listar_usuarios') }}{% if current_user.is_super_admin and empresa %}?empresa_id={{ empresa.id }}{% endif %}">👨‍💼 Usuários</a>
       <a href="{{ url_for('admin.listar_filas') }}{% if current_user.is_super_admin and empresa %}?empresa_id={{ empresa.id }}{% endif %}">🎫 Filas</a>
+      <a href="{{ url_for('admin.listar_areas') }}{% if current_user.is_super_admin and empresa %}?empresa_id={{ empresa.id }}{% endif %}">🗂 Áreas</a>
       <a href="{{ url_for('admin.listar_tipos_senha') }}{% if current_user.is_super_admin and empresa %}?empresa_id={{ empresa.id }}{% endif %}">🎫 Tipos de senha</a>
       <a href="{{ url_for('admin.listar_totem_botoes') }}{% if current_user.is_super_admin and empresa %}?empresa_id={{ empresa.id }}{% endif %}">🎯 Botões do totem</a>
       <a href="{{ url_for('admin.listar_totens') }}{% if current_user.is_super_admin and empresa %}?empresa_id={{ empresa.id }}{% endif %}">🎯 Totens</a>

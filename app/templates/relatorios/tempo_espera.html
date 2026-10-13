@@ -8,20 +8,20 @@
   <p class="subtitulo">Tempo entre a geração da senha e a chamada, por fila/unidade/dia.</p>
   {% if not modo_impressao %}
     <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
-    {{ form_filtros(filtros, opcoes, 'relatorios.tempo_espera', querystring) }}
+    {{ form_filtros(filtros, opcoes, 'relatorios.tempo_espera', querystring, mostrar_agrupar=True) }}
   {% endif %}
 
   {% if not linhas %}
     <p>Nenhum dado para os filtros selecionados.</p>
   {% else %}
     <table>
-      <thead><tr><th>Data</th><th>Unidade</th><th>Fila</th><th>Quantidade</th><th>Tempo médio (mm:ss)</th></tr></thead>
+      <thead><tr><th>Data</th><th>Unidade</th><th>{{ 'Área' if filtros.agrupar_por_area else 'Fila' }}</th><th>Quantidade</th><th>Tempo médio (mm:ss)</th></tr></thead>
       <tbody>
         {% for linha in linhas %}
           <tr>
             <td>{{ linha.data.strftime('%d/%m/%Y') }}</td>
             <td>{{ linha.unidade }}</td>
-            <td>{{ linha.fila }}</td>
+            <td>{{ linha.area if filtros.agrupar_por_area else linha.fila }}</td>
             <td>{{ linha.quantidade }}</td>
             <td>{{ linha.tempo_medio_segundos | duracao }}</td>
           </tr>

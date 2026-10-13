@@ -1,6 +1,8 @@
 {# `exportacoes_extras` (adendo 10.73): [(rótulo, formato)] - links de
    exportação além de CSV/Excel/PDF (ex.: "CSV por etapa"). #}
-{% macro form_filtros(filtros, opcoes, endpoint, querystring, mostrar_operador=False, exportacoes_extras=()) %}
+{# `mostrar_agrupar` (adendo 10.76): select "Agrupar por: Fila | Área" (só nos
+   agregados que agrupam por fila: tempo de espera, volume, tempo de atendimento). #}
+{% macro form_filtros(filtros, opcoes, endpoint, querystring, mostrar_operador=False, exportacoes_extras=(), mostrar_agrupar=False) %}
   <form method="get" action="{{ url_for(endpoint) }}" class="filtros">
     {% if current_user.is_super_admin and querystring.empresa_id %}
       <input type="hidden" name="empresa_id" value="{{ querystring.empresa_id }}">
@@ -11,6 +13,17 @@
         <option value="">Todas</option>
         {% for u in opcoes.unidades %}
           <option value="{{ u.id }}" {{ 'selected' if filtros.unidade_id == u.id else '' }}>{{ u.nome }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="area_fila_id">Área</label>
+      {# Áreas das unidades visíveis (adendo 10.76); inativas continuam
+         consultáveis, marcadas "(inativa)". #}
+      <select id="area_fila_id" name="area_fila_id">
+        <option value="">Todas</option>
+        {% for a in opcoes.areas %}
+          <option value="{{ a.id }}" data-unidade-id="{{ a.unidade_id }}" {{ 'selected' if filtros.area_fila_id == a.id else '' }}>{{ opcoes.rotulos_areas[a.id] }}{% if not a.ativo %} (inativa){% endif %}</option>
         {% endfor %}
       </select>
     </div>
@@ -38,6 +51,15 @@
           {% for o in opcoes.operadores %}
             <option value="{{ o.id }}" {{ 'selected' if filtros.operador_id == o.id else '' }}>{{ o.nome }}</option>
           {% endfor %}
+        </select>
+      </div>
+    {% endif %}
+    {% if mostrar_agrupar %}
+      <div>
+        <label for="agrupar">Agrupar por</label>
+        <select id="agrupar" name="agrupar">
+          <option value="">Fila</option>
+          <option value="area" {{ 'selected' if filtros.agrupar_por_area else '' }}>Área</option>
         </select>
       </div>
     {% endif %}
@@ -71,16 +93,34 @@
       // servidor um fila_id de outra unidade. <option>/<optgroup> não têm
       // nenhum display: de autor (relatorios/_layout.html, gestfila.css), então
       // o hidden nativo vale aqui sem regra CSS própria.
+      //
+      // Área (adendo 10.76): a Unidade também filtra as áreas, e a Área filtra as
+      // filas (só as filas DELA). A área de cada fila vem neste mapa (e não num
+      // atributo do <option>, mantendo o markup do 10.69 intacto); o servidor
+      // também descarta área/fila incompatíveis (resolver_filtros).
       const elUnidade = document.getElementById("unidade_id");
+      const elArea = document.getElementById("area_fila_id");
       const elFila = document.getElementById("fila_id");
+      const areaDaFila = {{ opcoes.area_da_fila | tojson }};
+
+      function filtrarAreasPorUnidade() {
+        const unidadeSelecionada = elUnidade.value;
+        Array.from(elArea.options).forEach((opcao) => {
+          if (!opcao.dataset.unidadeId) return; // "Todas"
+          opcao.hidden = !!unidadeSelecionada && opcao.dataset.unidadeId !== unidadeSelecionada;
+          if (opcao.hidden && opcao.selected) elArea.value = "";
+        });
+      }
 
       function filtrarFilasPorUnidade() {
         const unidadeSelecionada = elUnidade.value;
+        const areaSelecionada = elArea.value;
         let selecionadaSaiuDeVista = false;
 
         Array.from(elFila.options).forEach((opcao) => {
           if (!opcao.dataset.unidadeId) return; // "Todas" - sempre visível
-          const visivel = !unidadeSelecionada || opcao.dataset.unidadeId === unidadeSelecionada;
+          const visivel = (!unidadeSelecionada || opcao.dataset.unidadeId === unidadeSelecionada)
+            && (!areaSelecionada || areaDaFila[opcao.value] === areaSelecionada);
           opcao.hidden = !visivel;
           if (!visivel && opcao.selected) selecionadaSaiuDeVista = true;
         });
@@ -95,8 +135,14 @@
         if (selecionadaSaiuDeVista) elFila.value = "";
       }
 
-      elUnidade.addEventListener("change", filtrarFilasPorUnidade);
-      filtrarFilasPorUnidade();
+      function atualizarFiltros() {
+        filtrarAreasPorUnidade();
+        filtrarFilasPorUnidade();
+      }
+
+      elUnidade.addEventListener("change", atualizarFiltros);
+      elArea.addEventListener("change", filtrarFilasPorUnidade);
+      atualizarFiltros();
     })();
   </script>
 {% endmacro %}

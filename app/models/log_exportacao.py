@@ -29,6 +29,10 @@ class LogExportacaoRelatorio(db.Model):
     unidade_id = db.Column(db.Integer, db.ForeignKey("unidades.id"), nullable=True)
     fila_id = db.Column(db.Integer, db.ForeignKey("filas.id"), nullable=True)
     operador_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
+    # Filtro de Área (adendo 10.76) - FK e índice com nome explícito.
+    area_fila_id = db.Column(
+        db.Integer, db.ForeignKey("areas_fila.id", name="fk_logs_exportacao_area_fila"), nullable=True, index=False,
+    )
     # AAAA-MM-DD (mesmo formato de Filtros.data_inicio_str/data_fim_str,
     # app/relatorios/helpers.py) - período sempre preenchido (nunca opcional,
     # resolver_filtros já aplica o default "hoje").
@@ -42,6 +46,9 @@ class LogExportacaoRelatorio(db.Model):
     unidade = db.relationship("Unidade")
     fila = db.relationship("Fila")
     operador = db.relationship("Usuario", foreign_keys=[operador_id])
+    area_fila = db.relationship("AreaFila")
+
+    __table_args__ = (db.Index("ix_logs_exportacao_relatorio_area_fila_id", "area_fila_id"),)
 
     def __repr__(self):
         return f"<LogExportacaoRelatorio {self.id} {self.tipo_relatorio} {self.formato}>"

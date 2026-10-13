@@ -8,21 +8,21 @@
   <p class="subtitulo">Tempo entre a chamada (senha/nome) e o fim do atendimento (Conclusão) ou uma realocação para outra fila (Repasse), por operador/setor/fila.</p>
   {% if not modo_impressao %}
     <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
-    {{ form_filtros(filtros, opcoes, 'relatorios.tempo_atendimento_view', querystring, mostrar_operador=True) }}
+    {{ form_filtros(filtros, opcoes, 'relatorios.tempo_atendimento_view', querystring, mostrar_operador=True, mostrar_agrupar=True) }}
   {% endif %}
 
   {% if not linhas %}
     <p>Nenhum dado para os filtros selecionados.</p>
   {% else %}
     <table>
-      <thead><tr><th>Operador</th><th>Setor</th><th>Fila</th><th>Local</th><th>Tipo</th><th>Quantidade</th><th>Tempo médio (mm:ss)</th></tr></thead>
+      <thead><tr><th>Operador</th><th>Setor</th><th>{{ 'Área' if filtros.agrupar_por_area else 'Fila' }}</th>{% if not filtros.agrupar_por_area %}<th>Local</th>{% endif %}<th>Tipo</th><th>Quantidade</th><th>Tempo médio (mm:ss)</th></tr></thead>
       <tbody>
         {% for linha in linhas %}
           <tr>
             <td>{{ linha.operador }}</td>
             <td>{{ linha.setor or '—' }}</td>
-            <td>{{ linha.fila }}</td>
-            <td>{{ linha.local }}</td>
+            <td>{{ linha.area if filtros.agrupar_por_area else linha.fila }}</td>
+            {% if not filtros.agrupar_por_area %}<td>{{ linha.local }}</td>{% endif %}
             <td><span class="badge {{ linha.tipo_fechamento }}">{{ linha.tipo_fechamento_rotulo }}</span></td>
             <td>{{ linha.quantidade }}</td>
             <td>{{ linha.tempo_medio_segundos | duracao }}</td>

@@ -38,6 +38,30 @@
       Atendimento, quem atendeu. No Excel, os tempos são durações (h:mm:ss): dá para somar ou tirar
       a média direto na planilha.
     </p>
+    {% if filtros.area_fila_id %}
+      {# Semântica do filtro de Área (adendo 10.76) - igual à do filtro de Fila. #}
+      <p class="aviso">
+        Filtro de Área: entram as senhas cuja fila ATUAL (a final) está na área, com a jornada inteira.
+        Ex.: uma senha Recepção -> Coleta, filtrando a área da Coleta, entra com a espera na Recepção
+        também. A área é a atual da fila - mudar uma fila de área muda também os períodos passados.
+      </p>
+      <h2>Por fila</h2>
+      <table class="tabela-por-fila">
+        <thead><tr><th>Fila</th><th>Senhas</th><th>Espera total - média</th><th>Espera total - mediana</th><th>Atendimento total - média</th><th>Atendimento total - mediana</th></tr></thead>
+        <tbody>
+          {% for q in por_fila %}
+            <tr>
+              <td>{{ q.fila }}</td>
+              <td>{{ q.senhas }}</td>
+              <td>{{ q.espera_total.media | duracao or '—' }}</td>
+              <td>{{ q.espera_total.mediana | duracao or '—' }}</td>
+              <td>{{ q.atendimento_total.media | duracao or '—' }}</td>
+              <td>{{ q.atendimento_total.mediana | duracao or '—' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
 
     {% if modo_impressao and pdf_omitido %}
       <p class="aviso">
@@ -49,7 +73,7 @@
       <table class="tabela-larga">
         <thead>
           <tr>
-            <th>Senha</th><th>Emissão</th><th>Unidade</th><th>Fila inicial</th><th>Fila final</th>
+            <th>Senha</th><th>Emissão</th><th>Unidade</th><th>Fila inicial</th><th>Fila final</th><th>Área</th>
             <th>Espera inicial (mm:ss)</th><th>Espera total (mm:ss)</th><th>Atendimento total (mm:ss)</th>
             <th>Etapas de atendimento</th><th>Operador (finalização)</th><th>Local (finalização)</th><th>Situação</th>
           </tr>
@@ -62,6 +86,7 @@
               <td>{{ linha.unidade }}</td>
               <td>{{ linha.fila_inicial }}</td>
               <td>{{ linha.fila_final }}</td>
+              <td>{{ linha.area }}</td>
               <td>{{ linha.espera_inicial_segundos | duracao or '—' }}</td>
               <td>{{ linha.espera_total_segundos | duracao or '—' }}</td>
               <td>{{ linha.atendimento_total_segundos | duracao or '—' }}</td>

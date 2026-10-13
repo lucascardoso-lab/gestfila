@@ -36,16 +36,33 @@ def rotulos_filas(empresa_id):
     from app.models import Fila
 
     filas = Fila.query.filter_by(empresa_id=empresa_id).options(joinedload(Fila.unidade)).all()
-    base = {f.id: f"[{f.unidade.sigla_exibicao}] {f.nome}" for f in filas}
+    return _com_desempate({f.id: f"[{f.unidade.sigla_exibicao}] {f.nome}" for f in filas})
 
+
+def rotulos_areas(empresa_id):
+    """{area_fila_id: "[SIGLA] Nome"} das áreas da empresa (adendo 10.76) -
+    mesma regra e mesmo desempate " (id)" dos rótulos de fila, sobre a empresa
+    inteira (inclusive áreas inativas). Na prática o desempate só aparece
+    quando duas unidades sem sigla têm o mesmo fallback (a área já é única por
+    unidade)."""
+    from app.models import AreaFila
+
+    areas = AreaFila.query.filter_by(empresa_id=empresa_id).options(joinedload(AreaFila.unidade)).all()
+    return _com_desempate({a.id: f"[{a.unidade.sigla_exibicao}] {a.nome}" for a in areas})
+
+
+def _com_desempate(base):
+    """{id: rótulo base} -> {id: rótulo final}: se sobrar colisão (mesma regra
+    da collation, `chave_colisao`), " (id)" em TODOS os membros do grupo (10.32
+    item 3 / 10.69)."""
     grupos = defaultdict(list)
-    for fila_id, rotulo in base.items():
-        grupos[chave_colisao(rotulo)].append(fila_id)
+    for item_id, rotulo in base.items():
+        grupos[chave_colisao(rotulo)].append(item_id)
 
     rotulos = {}
     for ids in grupos.values():
-        for fila_id in ids:
-            rotulos[fila_id] = base[fila_id] if len(ids) == 1 else f"{base[fila_id]} ({fila_id})"
+        for item_id in ids:
+            rotulos[item_id] = base[item_id] if len(ids) == 1 else f"{base[item_id]} ({item_id})"
     return rotulos
 
 

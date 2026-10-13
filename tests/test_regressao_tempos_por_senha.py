@@ -243,6 +243,17 @@ def get(url):
         return c.get(url)
 
 
+def senhas_na_tabela(pagina):
+    """Códigos da coluna "Senha" (1ª célula de cada linha) da tabela de
+    resultados (`table.tabela-larga`), na ordem exibida. Identifica as linhas
+    pelo código exato, não por um prefixo que outra coluna pode repetir (ex.:
+    "Sem área", coluna do 10.76)."""
+    tabela = re.search(r'<table class="tabela-larga">(.*?)</table>', pagina, re.S)
+    assert tabela, "tabela de resultados não encontrada"
+    corpo = re.search(r"<tbody>(.*?)</tbody>", tabela.group(1), re.S).group(1)
+    return re.findall(r"<tr>\s*<td>([^<]*)</td>", corpo)
+
+
 tela = html.unescape(get(URL).get_data(as_text=True))
 assert "<td>08/10/2026 21:50</td>" in tela  # S8 no fuso da clínica e dentro do dia 08/10
 assert f'title="{rotas_relatorios.DICAS_SITUACAO[SITUACAO_HISTORICO_PARCIAL]}">Histórico parcial</span>' in tela
@@ -257,7 +268,10 @@ with relogio(), patch.object(rotas_relatorios, "LINHAS_POR_PAGINA", 3):
     p1 = html.unescape(c.get(URL).get_data(as_text=True))
     p3 = html.unescape(c.get(URL + "&pagina=3").get_data(as_text=True))
 assert "Página 1 de 3 (8 senhas)" in p1 and "pagina=2" in p1
-assert p1.count("<td>S") == 3 and p3.count("<td>S") == 2
+# Linhas identificadas pela coluna Senha, com os códigos EXATOS e na ordem (emissão, id).
+assert senhas_na_tabela(p1) == ["S1", "S2", "S3"], senhas_na_tabela(p1)
+assert senhas_na_tabela(p3) == ["S7", "S8"], senhas_na_tabela(p3)
+assert senhas_na_tabela(tela) == ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8"], senhas_na_tabela(tela)
 assert "7 de 8 senhas" in p3  # resumo sempre sobre o filtro inteiro, não só a página
 ok("Paginação (LINHAS_POR_PAGINA): 3 por página, resumo calculado sobre todas as 8 senhas")
 
@@ -317,7 +331,8 @@ ok("Excel: abas 'Por senha'/'Por etapa', tempos como duração [h]:mm:ss, emiss�
 # Filtro de operador: (i) por senha mantém a senha inteira, (ii) por etapa só as do operador.
 with relogio():
     tela_op = html.unescape(c.get(f"{URL}&operador_id={ids['op_t']}").get_data(as_text=True))
-assert tela_op.count("<td>S") == 1 and "<td>S2</td>" in tela_op and "<td>14:00</td>" in tela_op
+assert senhas_na_tabela(tela_op) == ["S2"], senhas_na_tabela(tela_op)
+assert "<td>14:00</td>" in tela_op
 df_op = pd.read_csv(io.StringIO(baixar("csv_etapas", f"&operador_id={ids['op_t']}").decode("utf-8-sig")), sep=";", decimal=",")
 assert list(zip(df_op["Etapa"], df_op["Tipo"], df_op["Duração (min)"])) == [(3, "Espera", 6.0), (4, "Atendimento - Repasse", 4.0)], df_op
 ok("Operador: por senha mantém S2 com o total inteiro (14 min); por etapa só as 2 etapas do operador (numeração preservada)")

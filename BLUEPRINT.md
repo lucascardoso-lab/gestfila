@@ -421,6 +421,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.73 | Relatório "Tempos por senha" (espera e atendimento de cada senha, para exportar) |
 | 10.74 | Agrupamento "por dia" e "hoje" no dia civil da clínica (não de UTC) nos relatórios e no dashboard |
 | 10.75 | Tempos exibidos em minutos e segundos (mm:ss / h:mm:ss), não em minuto decimal |
+| 10.76 | "Áreas": agrupamento cadastrável de filas para os relatórios |
 
 ---
 
@@ -7167,6 +7168,168 @@ formato, `_duracao_excel`, `colunas_duracao`/`colunas_inteiras`);
 
 ---
 
+## 10.76. ADENDO — "Áreas": agrupamento cadastrável de filas para os relatórios
+
+> Pedido: a clínica tem setores físicos formados por grupos de filas (filas de
+> médicos do "2º Andar", Quimio/Mezanino, Laboratório) e o setor só aparecia
+> no nome da fila. Agora há um agrupamento cadastrado e reutilizável nos
+> relatórios. Investigação (FASE 1) relatada e aprovada antes de implementar.
+
+**Regras de proteção (decididas antes):**
+- **Nome:** "Área" na interface; `AreaFila` / `area_fila_id` no código - NÃO
+  "setor", que já é conceito interno (`Senha.setor`, logs, URLs
+  recepcao/coleta). A palavra "área" só existia antes em comentários e em
+  classes CSS (`area-cupom`, `area-painel-tv`).
+- **Escopo: só admin e relatórios.** Totem, painel de TV, tela de
+  atendimento, rodízio, Iniciar Turno e Redirecionar não leem a área -
+  confirmado por grep na investigação (nenhum desses módulos referencia a
+  área e nada serializa a Fila inteira) e travado por teste estrutural.
+- **Uma área por fila** (1:N): coluna `filas.area_fila_id` - o schema já
+  impede N:N e a dupla contagem.
+- **Área de UMA unidade** (decisão do cliente), com validação no servidor:
+  fila só entra em área da própria unidade.
+- **Histórico:** a área usada nos relatórios é a ATUAL da fila (sem snapshot
+  por evento) - mudar uma fila de área muda também os períodos passados.
+  Limitação documentada, ligada à pendência da "fila atual" (seção 11).
+- **Filas sem área nunca somem:** "Sem área" nos agrupamentos (a soma das
+  áreas é igual ao total) e a lista "Filas sem área" no admin.
+
+**Modelo e migration** (`d4a8e2f7b915`, a partir de `c7e2a9d4f1b3`, SÓ
+aditiva - nada em `senhas` nem em `logs_atendimento`):
+- tabela `areas_fila` (`AreaFila`): empresa, unidade, nome (até 100), ativo;
+  `uq_areas_fila_unidade_nome` (nome único por unidade);
+- `filas.area_fila_id` nullable (NULL = "Sem área");
+- `logs_exportacao_relatorio.area_fila_id` nullable (filtro de área na
+  auditoria de exportação do 10.67 - decisão do cliente).
+- FKs e índices com NOME explícito, índice criado ANTES da FK (o MySQL apoia
+  a FK nele, sem índice implícito); o downgrade derruba na ordem inversa (FK
+  -> índice -> coluna -> tabela). **Ciclo upgrade/downgrade validado DUAS
+  vezes no MySQL local** - sem o erro 1553 do 10.71, schema volta exatamente.
+
+**Admin** (RBAC igual ao de Filas: admin da empresa e super admin, via
+`before_request` do `admin_bp` + `autorizar_objeto`; links com o token do
+10.72):
+- Menu "Áreas": listagem com "[SIGLA] Nome", unidade, nº de filas, status,
+  Editar/Desativar/Excluir, e o quadro **"Filas sem área"** (respeita a
+  unidade de contexto).
+- Formulário: nome, unidade, ativa e checklist das filas da unidade
+  escolhida, com busca (filtro no cliente, padrão 10.53 - fila de outra
+  unidade fica escondida E desmarcada; `.checkboxes label[hidden]` já tinha
+  a regra de `display`). Uma fila que hoje está em outra área aparece "(hoje
+  em X)"; marcá-la mostra, ANTES de salvar, o aviso "N fila(s) serão movidas
+  de outra área ao salvar: ..." (sem confirmação extra) e, depois de salvar,
+  um flash por fila ("'Dra. Ana' movida de '2º Andar' para 'Laboratório'").
+  Desmarcar tira a fila da área ("Sem área"). Nome único por unidade
+  ignorando maiúsculas e acentos (`chave_colisao`), com a UniqueConstraint
+  como rede de segurança.
+- Cadastro de Fila: select "Área (opcional)" com as áreas ATIVAS da unidade
+  escolhida (filtro no cliente, padrão 10.64; validado no servidor). Área
+  inativa some do select - exceto quando já é a área da fila, marcada
+  "(inativa)", para editar a fila não desvinculá-la sem querer. Listagem de
+  Filas ganhou a coluna "Área".
+- **Área desativada:** as filas continuam vinculadas e os relatórios seguem
+  agrupando nela; no filtro dos relatórios aparece com "(inativa)".
+
+**Exclusão segura:**
+- Excluir Área: bloqueada com filas vinculadas (ativas ou inativas) ou com
+  exportação registrada com o filtro dela (auditoria) - desativar é sempre
+  possível. **Decisão aprovada pelo cliente:** o bloqueio por uso em
+  exportação é deliberado - o log de auditoria do 10.67 não se apaga, e a FK
+  `fk_logs_exportacao_area_fila` impediria a exclusão de qualquer forma.
+- Excluir Empresa: `AreaFila` entrou na lista de bloqueios (sem isso daria
+  erro de FK, 500).
+- Excluir Fila: nada muda pela área (o vínculo é coluna da própria fila).
+  **Achado e corrigido no caminho:** `logs_exportacao_relatorio.fila_id` é
+  FK, e uma fila SEM senhas mas já usada como filtro numa exportação dava
+  erro de integridade (500) ao ser excluída (desde o 10.67) - agora é
+  bloqueada com mensagem, como o histórico de senhas.
+- Unidade: não tem exclusão (só ativar/desativar).
+
+**Relatórios:**
+- `Filtros` ganhou `area_fila_id` e `agrupar_por_area`, com default (os 7
+  pontos que montam `Filtros` à mão - dashboard e testes - não mudaram).
+  `resolver_filtros` valida a área contra empresa e unidades visíveis,
+  descarta área de outra unidade e fila fora da área (mesmo padrão
+  silencioso do 10.69).
+- **Filtro "Área"** (logo após Unidade, em todos os relatórios): a Unidade
+  filtra as áreas e a Área filtra as filas no select (JS; o mapa fila ->
+  área vai num JSON - `opcoes.area_da_fila` -, mantendo o markup do 10.69
+  intacto). `_senhas_filtradas`: senhas cuja fila ATUAL está na área.
+- **"Agrupar por: Fila | Área"** em Tempo de espera, Volume e Tempo de
+  atendimento (no Ranking, que é por operador, só o filtro): MESMOS
+  segmentos e MESMO cálculo, só a chave de agrupamento muda (a área ATUAL da
+  fila de cada segmento); "Sem área" sempre presente quando houver; no Tempo
+  de atendimento agrupado, a coluna Local sai (um local atende várias filas)
+  e segmento histórico sem fila (10.62) cai em "Sem área".
+- **Semântica (decisão do cliente, documentada também na nota da tela):** o
+  FILTRO seleciona senhas pela fila ATUAL (final) da senha, com a jornada
+  inteira; o AGRUPAMENTO usa a fila de CADA segmento. Ex.: uma senha
+  Recepção -> Coleta, filtrando a área da Coleta, entra com a espera na
+  Recepção também - e, agrupando por área, essa espera aparece sob a área da
+  Recepção. É o mesmo comportamento do filtro de Fila; filtrar pelas filas
+  por onde a senha passou continua na pendência da seção 11.
+- **Tempos por senha:** coluna "Área" (área atual da fila final) na tela,
+  CSV, Excel e PDF (também na aba "Por etapa", pela fila da etapa); com o
+  filtro de Área, quadro **"Por fila"** abaixo do resumo (senhas, média e
+  mediana de espera total e atendimento total por fila final, sobre os
+  segundos exatos) e a nota da semântica do filtro.
+- **Rótulo:** "[SIGLA] Nome" (`rotulos_areas` em `app/utils/rotulos.py`,
+  mesmo desempate " (id)" do 10.69 - agora `_com_desempate`, compartilhado
+  com `rotulos_filas`); nas exportações, o nome puro (a unidade vem em
+  coluna própria).
+- **Exportações:** com "Agrupar por: Área", a coluna "area" ocupa o lugar de
+  "fila" no CSV/Excel dos agregados; sem agrupamento o formato antigo NÃO
+  muda. **Decisão aprovada pelo cliente:** a coluna "area" existe SÓ no
+  CSV/Excel agrupado por área, por causa da pendência do Power BI (seção 11)
+  - nenhuma coluna nova nas exportações padrão dos relatórios antigos. PDF: "Área: ..." e "Agrupado por:
+  Área" no cabeçalho (`filtros_legiveis`). Log de auditoria grava
+  `area_fila_id`.
+
+**Testes:** novo `tests/test_regressao_areas_fila.py` (19 verificações): RBAC
+(gerencial 403) e isolamento multi-tenant (listagem e 404 na edição da área
+de outra empresa; `area_fila_id` de outra empresa ignorado no relatório e no
+log); validação (fila de outra unidade, nome repetido); fila em uma área só;
+resumo de fila movida no flash e aviso ANTES de salvar com o JS real
+(Chromium); select de Área no cadastro de Fila; "Filas sem área"; filtro por
+área = união das filas; Tempo de espera agrupado por área ("Sem área"
+presente, soma = total em quantidade e em tempo) e o mesmo para Volume e
+Tempo de atendimento; área inativa com "(inativa)" no filtro e seguindo no
+agrupamento; área inativa só aparece no cadastro da fila que já está nela;
+mudar a fila de área muda o passado (limitação); PDF real com "Área:" e
+"Agrupado por: Área"; log com `area_fila_id`; quadro "Por fila" e nota no
+Tempos por senha; exclusão de área (bloqueios e caso permitido), de empresa
+com áreas e de fila usada em exportação; nenhum `area_fila` em totem, painel
+e atendimento. `tests/test_regressao_tempos_por_senha.py` ajustado: as linhas
+da tabela passaram a ser identificadas pela coluna "Senha" com os códigos
+EXATOS e na ordem (`senhas_na_tabela`), em vez de contar células que começam
+com "S" - a coluna "Área" mostra "Sem área", que também começa com "S".
+Confirmado por mutação (senha S2 apagada antes da verificação): a asserção
+nova falha mostrando `['S1', 'S3', 'S4']` no lugar de `['S1', 'S2', 'S3']`. Suíte completa (76 arquivos) sem falhas.
+
+**Nota de deploy:** `git pull`, `flask db upgrade` (migration
+`d4a8e2f7b915`, só aditiva) e restart do `gestfila`; sem mudança em
+`requirements.txt`. Depois, cadastrar as áreas pela tela "Áreas".
+
+**Arquivos alterados:** novo `app/models/area_fila.py`;
+`app/models/fila.py` (`area_fila_id`, índice), `app/models/
+log_exportacao.py` (`area_fila_id`, índice), `app/models/__init__.py`; nova
+migration `d4a8e2f7b915_areas_fila.py`; novo `app/admin/areas.py`;
+`app/admin/__init__.py`; `app/admin/filas.py` (select de Área, validação,
+exclusão com exportação); `app/admin/empresas.py` (bloqueio por áreas);
+`app/utils/rotulos.py` (`rotulos_areas`, `_com_desempate`);
+`app/relatorios/helpers.py` (`Filtros`, `resolver_filtros`, opções,
+querystring, `filtros_legiveis`, log, `MapasNomes`, `rotulo_area`);
+`app/relatorios/queries.py` (filtro e agrupamento por área, área no Tempos
+por senha); `app/relatorios/routes.py` (colunas, quadro "Por fila");
+templates `admin/areas/listar.html` e `form.html` (novos),
+`admin/_layout.html` (menu), `admin/filas/form.html` e `listar.html`,
+`relatorios/_macros.html`, `tempo_espera.html`, `volume.html`,
+`tempo_atendimento.html`, `tempos_por_senha.html`, `_layout.html` e
+`print.css`; novo `tests/test_regressao_areas_fila.py`;
+`tests/test_regressao_tempos_por_senha.py` ajustado.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - **Padronizar o formato numérico dos relatórios antigos** (registrado no
@@ -7185,7 +7348,20 @@ formato, `_duracao_excel`, `colunas_duracao`/`colunas_inteiras`);
   registrada no 10.73, alinhada aos agregados na v1): uma senha realocada da
   Recepção para a Coleta some do filtro "Recepção" em todos os relatórios
   (inclusive "Tempos por senha"). Alternativa futura: filtrar pelas filas por
-  onde a senha passou (snapshots de `logs_atendimento`, 10.62).
+  onde a senha passou (snapshots de `logs_atendimento`, 10.62). **Vale também
+  para o filtro de Área (10.76):** a área usada é a ATUAL da fila (sem
+  snapshot por evento) - mudar uma fila de área muda os períodos passados -,
+  e o filtro seleciona as senhas pela fila atual, enquanto o agrupamento usa
+  a fila de cada segmento.
+- **Ajuste visual único no admin** (registrado no 10.76): (1) os `<select>`
+  dos formulários do admin (ex.: "Unidade" nos cadastros de Fila, Área etc.)
+  não têm estilo de autor - aparecem pequenos, no padrão do navegador, ao
+  lado dos `<input>` estilizados; (2) nas listagens, as ações
+  "Desativar"/"Excluir" (formulários inline) ficam coladas, sem espaçamento.
+  Corrigir uma vez, em `admin/_layout.html`, para todas as telas.
+- **Seleção múltipla avulsa de filas no filtro dos relatórios** (opção
+  complementar às Áreas do 10.76): escolher várias filas sem precisar
+  cadastrar uma área - útil para recortes eventuais.
 - **Instrumentação TEMPORÁRIA `?debug_voz=1` no painel de TV** (commits
   `89db967` e `f0c7e47`, 25/08/2026 - registrada aqui na preparação do deploy
   da leva 10.69-10.74, sem mudança de código): overlay na própria tela da TV

@@ -10,7 +10,7 @@ from app.admin.helpers import (
     unidades_da_empresa,
 )
 from app.extensions import db
-from app.models import Empresa, Fila, LocalRodizioFila, Senha, TotemBotao, Tv
+from app.models import AreaFila, Empresa, Fila, LocalRodizioFila, LogExportacaoRelatorio, Senha, TotemBotao, Tv
 from app.models.associations import local_filas_destino
 from app.models.fila import DIAS_SEMANA
 
@@ -52,15 +52,16 @@ def nova_fila():
     totens = totens_da_empresa(empresa)
     tvs = _tvs_da_empresa(empresa)
     tipos_senha = tipos_senha_da_empresa(empresa)
+    areas = AreaFila.query.filter_by(empresa_id=empresa.id).order_by(AreaFila.nome).all()
 
     if request.method == "POST":
         dados = _ler_formulario()
-        erro = _validar_fila(dados, unidades, totens, tvs, fila_atual=None)
+        erro = _validar_fila(dados, unidades, totens, tvs, areas, fila_atual=None)
         if erro:
             flash(erro, "error")
             return render_template(
                 "admin/filas/form.html", empresa=empresa, fila=None, unidades=unidades,
-                totens=totens, tvs=tvs, tipos_senha=tipos_senha, valores=dados, dias_semana=DIAS_SEMANA,
+                totens=totens, tvs=tvs, tipos_senha=tipos_senha, areas=areas, valores=dados, dias_semana=DIAS_SEMANA,
             )
 
         fila = Fila(
@@ -77,6 +78,7 @@ def nova_fila():
             tempo_atendimento_maximo_min=dados["tempo_atendimento_maximo_min"],
             alerta_email=dados["alerta_email"],
             exibir_prefixo_tipo_quando_normal=dados["exibir_prefixo_tipo_quando_normal"],
+            area_fila_id=dados["area_fila_id"],
         )
         db.session.add(fila)
         db.session.flush()  # garante fila.id para o atalho de TV abaixo
@@ -89,7 +91,7 @@ def nova_fila():
 
     return render_template(
         "admin/filas/form.html", empresa=empresa, fila=None, unidades=unidades,
-        totens=totens, tvs=tvs, tipos_senha=tipos_senha, valores=None, dias_semana=DIAS_SEMANA,
+        totens=totens, tvs=tvs, tipos_senha=tipos_senha, areas=areas, valores=None, dias_semana=DIAS_SEMANA,
     )
 
 
@@ -102,15 +104,16 @@ def editar_fila(fila_id):
     totens = totens_da_empresa(empresa)
     tvs = _tvs_da_empresa(empresa)
     tipos_senha = tipos_senha_da_empresa(empresa)
+    areas = AreaFila.query.filter_by(empresa_id=empresa.id).order_by(AreaFila.nome).all()
 
     if request.method == "POST":
         dados = _ler_formulario()
-        erro = _validar_fila(dados, unidades, totens, tvs, fila_atual=fila)
+        erro = _validar_fila(dados, unidades, totens, tvs, areas, fila_atual=fila)
         if erro:
             flash(erro, "error")
             return render_template(
                 "admin/filas/form.html", empresa=empresa, fila=fila, unidades=unidades,
-                totens=totens, tvs=tvs, tipos_senha=tipos_senha, valores=dados, dias_semana=DIAS_SEMANA,
+                totens=totens, tvs=tvs, tipos_senha=tipos_senha, areas=areas, valores=dados, dias_semana=DIAS_SEMANA,
                 esconder_seletor_contexto=True,
             )
 
@@ -127,6 +130,7 @@ def editar_fila(fila_id):
         fila.tempo_atendimento_maximo_min = dados["tempo_atendimento_maximo_min"]
         fila.alerta_email = dados["alerta_email"]
         fila.exibir_prefixo_tipo_quando_normal = dados["exibir_prefixo_tipo_quando_normal"]
+        fila.area_fila_id = dados["area_fila_id"]
         _sincronizar_tv_atalho(fila, tv_id_anterior=tv_id_anterior, tv_id_novo=dados["tv_id"], tvs=tvs)
         fila.tv_id = dados["tv_id"]
         _sincronizar_tipos_senha(fila, dados["tipo_senha_ids"], tipos_senha)
@@ -136,7 +140,7 @@ def editar_fila(fila_id):
 
     return render_template(
         "admin/filas/form.html", empresa=empresa, fila=fila, unidades=unidades,
-        totens=totens, tvs=tvs, tipos_senha=tipos_senha, valores=None, dias_semana=DIAS_SEMANA,
+        totens=totens, tvs=tvs, tipos_senha=tipos_senha, areas=areas, valores=None, dias_semana=DIAS_SEMANA,
         esconder_seletor_contexto=True,
     )
 
@@ -166,6 +170,11 @@ def excluir_fila(fila_id):
         bloqueios.append("senhas já geradas nesta fila (histórico)")
     if TotemBotao.query.filter_by(fila_id=fila.id).first():
         bloqueios.append("botões do totem vinculados a ela")
+    # Achado no 10.76: `logs_exportacao_relatorio.fila_id` é FK - uma fila sem
+    # senhas, mas já usada como filtro numa exportação, dava erro de integridade
+    # (500) ao ser excluída. Log de auditoria não se apaga.
+    if LogExportacaoRelatorio.query.filter_by(fila_id=fila.id).first():
+        bloqueios.append("exportações de relatório registradas com o filtro desta fila (auditoria)")
 
     if bloqueios:
         flash(
@@ -234,10 +243,11 @@ def _ler_formulario():
         "alerta_email": request.form.get("alerta_email") == "on",
         "exibir_prefixo_tipo_quando_normal": request.form.get("exibir_prefixo_tipo_quando_normal") == "on",
         "tipo_senha_ids": {int(v) for v in request.form.getlist("tipo_senha_ids")},
+        "area_fila_id": request.form.get("area_fila_id", type=int) or None,
     }
 
 
-def _validar_fila(dados, unidades, totens, tvs, fila_atual):
+def _validar_fila(dados, unidades, totens, tvs, areas, fila_atual):
     if not dados["nome"]:
         return "Informe o nome da fila."
 
@@ -262,6 +272,18 @@ def _validar_fila(dados, unidades, totens, tvs, fila_atual):
 
     if dados["tv_id"] is not None and dados["tv_id"] not in {t.id for t in tvs}:
         return "Selecione uma TV válida (ou nenhuma)."
+
+    # Área (adendo 10.76): da mesma empresa (lista `areas`), da MESMA unidade da
+    # fila, e ativa - exceto se já for a área atual desta fila (área desativada
+    # não some da fila só porque ela foi editada).
+    if dados["area_fila_id"] is not None:
+        area = next((a for a in areas if a.id == dados["area_fila_id"]), None)
+        if area is None:
+            return "Selecione uma área válida (ou 'Sem área')."
+        if area.unidade_id != dados["unidade_id"]:
+            return "A área escolhida é de outra unidade - uma área só agrupa filas da própria unidade."
+        if not area.ativo and (fila_atual is None or fila_atual.area_fila_id != area.id):
+            return "A área escolhida está inativa."
 
     for campo in ("tempo_espera_maximo_min", "tempo_atendimento_maximo_min"):
         if dados[campo] is not None and dados[campo] <= 0:

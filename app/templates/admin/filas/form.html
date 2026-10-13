@@ -25,6 +25,21 @@
         {% endfor %}
       </select>
 
+      <label for="area_fila_id">Área (opcional - agrupamento para os relatórios)</label>
+      {% set area_sel = valores.area_fila_id if valores else (fila.area_fila_id if fila else none) %}
+      {% set area_atual = fila.area_fila_id if fila else none %}
+      {# Só áreas ativas da unidade escolhida (filtro no cliente abaixo, padrão
+         10.64; validado no servidor). Uma área INATIVA aparece só se já for a
+         área desta fila - editar a fila não desvincula a área sem querer. #}
+      <select id="area_fila_id" name="area_fila_id">
+        <option value="">Sem área</option>
+        {% for area in areas %}
+          {% if area.ativo or area.id == area_atual %}
+            <option value="{{ area.id }}" data-unidade-id="{{ area.unidade_id }}" {{ 'selected' if area.id == area_sel else '' }}>{{ area.nome }}{% if not area.ativo %} (inativa){% endif %}</option>
+          {% endif %}
+        {% endfor %}
+      </select>
+
       <p class="subtitulo">A sigla usada no código da senha (ex.: LAB001) agora é definida no <strong>Botão do totem</strong> vinculado a esta fila, não aqui - cadastre/edite o botão em "Botões do totem" para configurá-la.</p>
 
       <label for="digitos_sequencial">Dígitos do sequencial</label>
@@ -135,4 +150,23 @@
       <p><button class="botao" type="submit" style="margin-top:1.5rem;">Salvar</button></p>
     </form>
   </div>
+
+  <script>
+    (function () {
+      // Área só da unidade escolhida (adendo 10.76, mesmo padrão do 10.64):
+      // opções de outra unidade ficam escondidas, e uma seleção que sai de
+      // vista volta para "Sem área". <option> não tem display de autor aqui.
+      const elUnidade = document.getElementById("unidade_id");
+      const elArea = document.getElementById("area_fila_id");
+      function filtrarAreas() {
+        Array.from(elArea.options).forEach((opcao) => {
+          if (!opcao.dataset.unidadeId) return;
+          opcao.hidden = opcao.dataset.unidadeId !== elUnidade.value;
+          if (opcao.hidden && opcao.selected) elArea.value = "";
+        });
+      }
+      elUnidade.addEventListener("change", filtrarAreas);
+      filtrarAreas();
+    })();
+  </script>
 {% endblock %}

@@ -1,0 +1,59 @@
+{% extends "admin/_layout.html" %}
+
+{% block titulo %}Áreas{% endblock %}
+
+{% block conteudo %}
+  <h1>Áreas</h1>
+  {% set nome_tela = self.titulo() %}
+  {% include "admin/_breadcrumb.html" %}
+  <p class="subtitulo">
+    Uma área agrupa filas de uma unidade (ex.: "2º Andar", "Laboratório") para os relatórios.
+    Cada fila fica em no máximo uma área. Não muda nada no totem, no painel de TV nem no atendimento.
+  </p>
+  <p class="subtitulo"><a class="botao" href="{{ url_for('admin.nova_area', empresa_id=empresa.id) }}">+ Nova área</a></p>
+  <table>
+    <thead><tr><th>Área</th><th>Unidade</th><th>Filas</th><th>Status</th><th>Ações</th></tr></thead>
+    <tbody>
+      {% for area in areas %}
+        <tr>
+          <td>{{ rotulos[area.id] }}</td>
+          <td>{{ area.unidade.nome }}</td>
+          <td>{{ area.filas|length }}</td>
+          <td><span class="badge {{ 'ativo' if area.ativo else 'inativo' }}">{{ 'Ativa' if area.ativo else 'Inativa' }}</span></td>
+          <td class="acoes">
+            <a href="{{ url_for('admin.editar_area', area_id=area.id) }}">Editar</a>
+            <form class="inline" method="post" action="{{ url_for('admin.alternar_area', area_id=area.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="link" type="submit">{{ 'Desativar' if area.ativo else 'Ativar' }}</button>
+            </form>
+            <form class="inline" method="post" action="{{ url_for('admin.excluir_area', area_id=area.id) }}" onsubmit="return confirm('Excluir definitivamente a área \'{{ area.nome }}\'?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="link-perigo" type="submit">Excluir</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5">Nenhuma área cadastrada.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2 id="filas-sem-area">Filas sem área ({{ filas_sem_area|length }})</h2>
+  {% if not filas_sem_area %}
+    <p class="subtitulo">Todas as filas{{ ' desta unidade' if unidade else '' }} estão em alguma área.</p>
+  {% else %}
+    <p class="subtitulo">Aparecem como "Sem área" nos relatórios agrupados por área. Para vinculá-las, edite (ou crie) a área da unidade delas.</p>
+    <table>
+      <thead><tr><th>Unidade</th><th>Fila</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for fila in filas_sem_area %}
+          <tr>
+            <td>{{ fila.unidade.nome }}</td>
+            <td>{{ rotulo_fila(fila) }}</td>
+            <td><span class="badge {{ 'ativo' if fila.ativo else 'inativo' }}">{{ 'Ativa' if fila.ativo else 'Inativa' }}</span></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}

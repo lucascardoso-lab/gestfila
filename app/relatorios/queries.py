@@ -64,7 +64,32 @@ def _senhas_filtradas(filtros):
         query = query.filter(Senha.unidade_id.in_(filtros.unidades_permitidas))
     if filtros.fila_id:
         query = query.filter(Senha.fila_id == filtros.fila_id)
+    if filtros.area_fila_id:
+        # Área (adendo 10.76): senhas cuja fila ATUAL está na área - mesma
+        # semântica do filtro de Fila (a senha entra inteira; no agrupamento,
+        # cada segmento vai para a área da SUA fila).
+        query = query.filter(Senha.fila_id.in_(db.session.query(Fila.id).filter(Fila.area_fila_id == filtros.area_fila_id)))
     return query
+
+
+def _area_por_fila(empresa_id):
+    """{fila_id: área ATUAL da fila} (None = "Sem área") - adendo 10.76. Sem
+    snapshot por evento: mudar a fila de área muda os relatórios do passado
+    (limitação documentada, igual à da "fila atual")."""
+    return {fila_id: area_id for fila_id, area_id in
+            Fila.query.filter_by(empresa_id=empresa_id).with_entities(Fila.id, Fila.area_fila_id)}
+
+
+def _grupo(fila_id, area_de, por_area):
+    """Chave de agrupamento: a fila, ou ("area", área da fila) com "Agrupar por:
+    Área" - MESMOS segmentos e MESMO cálculo, só a chave muda (a soma das áreas,
+    incluindo "Sem área", é igual ao total)."""
+    return ("area", area_de.get(fila_id)) if por_area else fila_id
+
+
+def _separar_grupo(grupo):
+    """Chave -> (fila_id, area_id) para a linha de saída."""
+    return (None, grupo[1]) if isinstance(grupo, tuple) else (grupo, None)
 
 
 def _segmentos_espera_por_senha(filtros):
@@ -188,23 +213,27 @@ def tempo_medio_espera(filtros):
     `timestamp.date()` direto daria o dia em UTC, e uma espera aberta às 22h de
     Brasília cairia no dia seguinte.
     """
+    por_area = filtros.agrupar_por_area
+    area_de = _area_por_fila(filtros.empresa_id) if por_area else {}
     grupos = defaultdict(list)
     for abertura, fechamento, fila_id, unidade_id in _segmentos_espera_por_senha(filtros):
-        chave = (fila_id, unidade_id, para_horario_clinica(abertura.timestamp).date())
+        chave = (_grupo(fila_id, area_de, por_area), unidade_id, para_horario_clinica(abertura.timestamp).date())
         grupos[chave].append((fechamento.timestamp - abertura.timestamp).total_seconds())
 
     resultado = []
-    for (fila_id, unidade_id, dia), tempos in grupos.items():
+    for (grupo, unidade_id, dia), tempos in grupos.items():
+        fila_id, area_id = _separar_grupo(grupo)
         resultado.append(
             {
                 "fila_id": fila_id,
+                "area_id": area_id,
                 "unidade_id": unidade_id,
                 "data": dia,
                 "tempo_medio_segundos": round(sum(tempos) / len(tempos), 1),
                 "quantidade": len(tempos),
             }
         )
-    resultado.sort(key=lambda r: (r["data"], r["fila_id"], r["unidade_id"]))
+    resultado.sort(key=lambda r: (r["data"], r["fila_id"] or 0, r["area_id"] or 0, r["unidade_id"] or 0))
     return resultado
 
 
@@ -215,15 +244,20 @@ def volume_senhas(filtros):
         Senha.fila_id, Senha.unidade_id, Senha.criada_em, Senha.prioridade
     )
 
+    por_area = filtros.agrupar_por_area
+    area_de = _area_por_fila(filtros.empresa_id) if por_area else {}
     grupos = defaultdict(lambda: {"prioridade": 0, "normal": 0})
     for fila_id, unidade_id, criada_em, prioridade in linhas:
-        grupos[(fila_id, unidade_id, para_horario_clinica(criada_em).date())]["prioridade" if prioridade else "normal"] += 1
+        chave = (_grupo(fila_id, area_de, por_area), unidade_id, para_horario_clinica(criada_em).date())
+        grupos[chave]["prioridade" if prioridade else "normal"] += 1
 
     resultado = []
-    for (fila_id, unidade_id, dia), contagem in grupos.items():
+    for (grupo, unidade_id, dia), contagem in grupos.items():
+        fila_id, area_id = _separar_grupo(grupo)
         resultado.append(
             {
                 "fila_id": fila_id,
+                "area_id": area_id,
                 "unidade_id": unidade_id,
                 "data": dia,
                 "prioridade": contagem["prioridade"],
@@ -231,7 +265,7 @@ def volume_senhas(filtros):
                 "total": contagem["prioridade"] + contagem["normal"],
             }
         )
-    resultado.sort(key=lambda r: (r["data"], r["fila_id"], r["unidade_id"]))
+    resultado.sort(key=lambda r: (r["data"], r["fila_id"] or 0, r["area_id"] or 0, r["unidade_id"] or 0))
     return resultado
 
 
@@ -398,29 +432,42 @@ def tempo_atendimento(filtros):
     adiante) cairiam na mesma linha/média, sem forma de diferenciar "tempo até
     concluir" de "tempo até repassar" no relatório.
     """
+    # "Agrupar por: Área" (adendo 10.76): fila/local viram a área da fila (o
+    # local sai do agrupamento - um local atende várias filas); segmento
+    # histórico sem fila (10.62) cai em "Sem área".
+    por_area = filtros.agrupar_por_area
+    area_de = _area_por_fila(filtros.empresa_id) if por_area else {}
+
+    def fila_e_local(fila_id, local_id):
+        return (_grupo(fila_id, area_de, True), None) if por_area else (fila_id, local_id)
+
     grupos = defaultdict(list)
     for inicio, fim, fila_id, local_id in _pares_inicio_fim(filtros):
         if filtros.operador_id and inicio.usuario_id != filtros.operador_id:
             continue
-        chave = (inicio.usuario_id, inicio.setor, fila_id, local_id, None, TIPO_FECHAMENTO_CONCLUSAO)
+        chave = (inicio.usuario_id, inicio.setor, *fila_e_local(fila_id, local_id), None, TIPO_FECHAMENTO_CONCLUSAO)
         grupos[chave].append((fim.timestamp - inicio.timestamp).total_seconds())
 
     for inicio, realocado, fila_id, local_id, unidade_id in _segmentos_intermediarios_realocacao(filtros):
         if filtros.operador_id and inicio.usuario_id != filtros.operador_id:
             continue
         if fila_id is not None:
-            chave = (inicio.usuario_id, inicio.setor, fila_id, local_id, None, TIPO_FECHAMENTO_REPASSE)
+            chave = (inicio.usuario_id, inicio.setor, *fila_e_local(fila_id, local_id), None, TIPO_FECHAMENTO_REPASSE)
+        elif por_area:
+            chave = (inicio.usuario_id, inicio.setor, ("area", None), None, unidade_id, TIPO_FECHAMENTO_REPASSE)
         else:
             chave = (inicio.usuario_id, inicio.setor, None, None, unidade_id, TIPO_FECHAMENTO_REPASSE)
         grupos[chave].append((realocado.timestamp - inicio.timestamp).total_seconds())
 
     resultado = []
-    for (operador_id, setor, fila_id, local_id, _unidade_id, tipo_fechamento), tempos in grupos.items():
+    for (operador_id, setor, grupo, local_id, _unidade_id, tipo_fechamento), tempos in grupos.items():
+        fila_id, area_id = _separar_grupo(grupo) if grupo is not None else (None, None)
         resultado.append(
             {
                 "operador_id": operador_id,
                 "setor": setor,
                 "fila_id": fila_id,
+                "area_id": area_id,
                 "local_id": local_id,
                 # Só preenchido no Repasse histórico sem snapshot de fila (chave
                 # acima) - exposto pra coluna "unidade" do CSV/Excel (adendo
@@ -513,6 +560,7 @@ def tempos_por_senha(filtros):
     for inicio, realocado, fila_id, local_id, _unidade_id in _segmentos_intermediarios_realocacao(filtros):
         atendimentos[inicio.senha_id].append((TIPO_FECHAMENTO_REPASSE, inicio, realocado, fila_id, local_id))
 
+    area_de = _area_por_fila(filtros.empresa_id)  # adendo 10.76
     eventos = defaultdict(list)
     for log in LogAtendimento.query.filter(
         LogAtendimento.senha_id.in_([s.id for s in senhas]),
@@ -559,6 +607,7 @@ def tempos_por_senha(filtros):
                 "unidade_id": senha.unidade_id,
                 "fila_inicial_id": fila_inicial,
                 "fila_final_id": senha.fila_id,
+                "area_id": area_de.get(senha.fila_id),  # área ATUAL da fila final (10.76)
                 "espera_inicial_segundos": segundos(esp[0]) if esp and esp[0][1].evento == "gerada" else None,
                 "espera_total_segundos": sum(map(segundos, esp)) if esp and not parcial else None,
                 "atendimento_total_segundos": sum(map(segundos, atd)) if fim is not None and atd and not parcial else None,
@@ -583,6 +632,7 @@ def tempos_por_senha(filtros):
                 "numero": numero,
                 "tipo": tipo,
                 "fila_id": fila_id,
+                "area_id": area_de.get(fila_id),
                 "local_id": local_id,
                 "operador_id": operador_etapa,
                 "inicio": abertura.timestamp,

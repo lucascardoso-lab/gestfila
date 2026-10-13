@@ -8,20 +8,20 @@
   <p class="subtitulo">Senhas geradas por fila/unidade/dia, prioridade vs. normal.</p>
   {% if not modo_impressao %}
     <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
-    {{ form_filtros(filtros, opcoes, 'relatorios.volume', querystring) }}
+    {{ form_filtros(filtros, opcoes, 'relatorios.volume', querystring, mostrar_agrupar=True) }}
   {% endif %}
 
   {% if not linhas %}
     <p>Nenhum dado para os filtros selecionados.</p>
   {% else %}
     <table>
-      <thead><tr><th>Data</th><th>Unidade</th><th>Fila</th><th>Prioridade</th><th>Normal</th><th>Total</th></tr></thead>
+      <thead><tr><th>Data</th><th>Unidade</th><th>{{ 'Área' if filtros.agrupar_por_area else 'Fila' }}</th><th>Prioridade</th><th>Normal</th><th>Total</th></tr></thead>
       <tbody>
         {% for linha in linhas %}
           <tr>
             <td>{{ linha.data.strftime('%d/%m/%Y') }}</td>
             <td>{{ linha.unidade }}</td>
-            <td>{{ linha.fila }}</td>
+            <td>{{ linha.area if filtros.agrupar_por_area else linha.fila }}</td>
             <td><span class="badge prioridade">{{ linha.prioridade }}</span></td>
             <td><span class="badge normal">{{ linha.normal }}</span></td>
             <td>{{ linha.total }}</td>

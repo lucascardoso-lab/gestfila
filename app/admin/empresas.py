@@ -2,7 +2,7 @@ from flask import flash, redirect, render_template, request, url_for
 
 from app.admin import admin_bp
 from app.extensions import db
-from app.models import Empresa, Fila, Local, Servico, TipoSenha, Totem, TotemBotao, Tv, Unidade, Usuario
+from app.models import AreaFila, Empresa, Fila, Local, Servico, TipoSenha, Totem, TotemBotao, Tv, Unidade, Usuario
 from app.utils.decorators import super_admin_required
 from app.utils.uploads import remover_logo_empresa, salvar_logo_empresa
 
@@ -105,6 +105,7 @@ def excluir_empresa(empresa_id):
         (Unidade, "unidades"),
         (Usuario, "usuários"),
         (Fila, "filas"),
+        (AreaFila, "áreas"),
         (Local, "locais"),
         (Totem, "totens"),
         (Tv, "TVs"),

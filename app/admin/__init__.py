@@ -46,6 +46,6 @@ def empresas_para_contexto():
     return Empresa.query.order_by(Empresa.nome).all()
 
 
-from . import empresas, filas, locais, perfis, servicos, tipos_senha, totem_botoes, totens, tvs, unidades, usuarios  # noqa: E402  (registram rotas no admin_bp)
+from . import areas, empresas, filas, locais, perfis, servicos, tipos_senha, totem_botoes, totens, tvs, unidades, usuarios  # noqa: E402  (registram rotas no admin_bp)
 
 __all__ = ["admin_bp"]

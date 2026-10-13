@@ -52,12 +52,18 @@ class Fila(db.Model):
 
     ativo = db.Column(db.Boolean, default=True, nullable=False)
 
+    # Área (adendo 10.76) - agrupamento de filas para o admin/relatórios; NULL =
+    # "Sem área". Só admin e relatórios leem este campo (nunca totem, painel de
+    # TV ou atendimento). FK e índice com nome explícito (lição do 10.71).
+    area_fila_id = db.Column(db.Integer, db.ForeignKey("areas_fila.id", name="fk_filas_area_fila"), nullable=True)
+
     empresa = db.relationship("Empresa")
     unidade = db.relationship("Unidade")
     servico = db.relationship("Servico")  # legado - não usar em código novo
     totem = db.relationship("Totem")
     tvs = db.relationship("Tv", secondary=tv_filas, back_populates="filas")
     tipos_senha = db.relationship("TipoSenha", secondary=fila_tipos_senha, back_populates="filas")
+    area_fila = db.relationship("AreaFila", back_populates="filas")
 
     def __repr__(self):
         return f"<Fila {self.id} {self.nome}>"
@@ -84,4 +90,5 @@ class Fila(db.Model):
 
     __table_args__ = (
         db.UniqueConstraint("unidade_id", "sigla", name="uq_fila_unidade_sigla"),
+        db.Index("ix_filas_area_fila_id", "area_fila_id"),
     )

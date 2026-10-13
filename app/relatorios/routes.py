@@ -1,5 +1,6 @@
 import math
 import statistics
+from collections import defaultdict
 
 from flask import Response, current_app, flash, redirect, render_template, request, url_for
 
@@ -15,6 +16,7 @@ from .helpers import (
     filtros_para_querystring,
     mapas_nomes,
     opcoes_filtro,
+    rotulo_area,
     registrar_exportacao,
     resolver_filtros,
 )
@@ -122,6 +124,15 @@ def _exportar_relatorio(tipo_relatorio, nome_base, template, empresa, filtros, l
     )
 
 
+def _coluna_grupo(linha, filtros):
+    """Coluna de agrupamento das exportações dos agregados: "fila" (como
+    sempre) ou, com "Agrupar por: Área" (adendo 10.76), "area" no mesmo lugar
+    - o formato padrão das exportações antigas não muda."""
+    if filtros.agrupar_por_area:
+        return {"area": linha["area_nome"]}
+    return {"fila": linha["fila_nome"]}
+
+
 def _empresa_ou_selecao(destino):
     empresa = resolver_empresa_contexto()
     if empresa is None:
@@ -196,11 +207,13 @@ def tempo_espera():
     for linha in linhas:
         linha["fila"] = mapas.filas.get(linha["fila_id"], "—")
         linha["fila_nome"] = mapas.filas_nome.get(linha["fila_id"], "—")
+        linha["area"] = rotulo_area(mapas, linha.get("area_id"))
+        linha["area_nome"] = rotulo_area(mapas, linha.get("area_id"), nome_puro=True)
         linha["unidade"] = mapas.unidades.get(linha["unidade_id"], "—")
 
     opcoes = opcoes_filtro(empresa)
     colunas = [
-        {"data": l["data"], "unidade": l["unidade"], "fila": l["fila_nome"],
+        {"data": l["data"], "unidade": l["unidade"], **_coluna_grupo(l, filtros),
          "quantidade": l["quantidade"], "tempo_medio_segundos": l["tempo_medio_segundos"]}
         for l in linhas
     ]
@@ -229,11 +242,14 @@ def tempo_atendimento_view():
     for linha in linhas:
         linha["fila"] = mapas.filas.get(linha["fila_id"], "—")
         linha["fila_nome"] = mapas.filas_nome.get(linha["fila_id"], "—")
+        linha["area"] = rotulo_area(mapas, linha.get("area_id"))
+        linha["area_nome"] = rotulo_area(mapas, linha.get("area_id"), nome_puro=True)
         # Coluna "unidade" só no CSV/Excel (adendo 10.69) - a tela já mostra a
         # unidade no prefixo "[SIGLA]" da fila. Linha com fila conhecida usa a
         # unidade da fila; segmento de Repasse histórico sem snapshot de fila
         # (fila_id None, adendo 10.62) usa a unidade da senha.
-        unidade_id = mapas.filas_unidade.get(linha["fila_id"]) or linha["unidade_id"]
+        unidade_id = (mapas.filas_unidade.get(linha["fila_id"]) or mapas.areas_unidade.get(linha["area_id"])
+                      or linha["unidade_id"])
         linha["unidade"] = mapas.unidades.get(unidade_id, "—")
         linha["operador"] = mapas.operadores.get(linha["operador_id"], "—") if linha["operador_id"] else "—"
         # Só identificador_admin - mesmo motivo do dashboard operacional
@@ -247,8 +263,8 @@ def tempo_atendimento_view():
 
     opcoes = opcoes_filtro(empresa)
     colunas = [
-        {"operador": l["operador"], "setor": l["setor"], "unidade": l["unidade"], "fila": l["fila_nome"],
-         "local": l["local"],
+        {"operador": l["operador"], "setor": l["setor"], "unidade": l["unidade"], **_coluna_grupo(l, filtros),
+         **({} if filtros.agrupar_por_area else {"local": l["local"]}),
          "tipo": l["tipo_fechamento_rotulo"],
          "quantidade": l["quantidade"], "tempo_medio_segundos": l["tempo_medio_segundos"]}
         for l in linhas
@@ -278,11 +294,13 @@ def volume():
     for linha in linhas:
         linha["fila"] = mapas.filas.get(linha["fila_id"], "—")
         linha["fila_nome"] = mapas.filas_nome.get(linha["fila_id"], "—")
+        linha["area"] = rotulo_area(mapas, linha.get("area_id"))
+        linha["area_nome"] = rotulo_area(mapas, linha.get("area_id"), nome_puro=True)
         linha["unidade"] = mapas.unidades.get(linha["unidade_id"], "—")
 
     opcoes = opcoes_filtro(empresa)
     colunas = [
-        {"data": l["data"], "unidade": l["unidade"], "fila": l["fila_nome"],
+        {"data": l["data"], "unidade": l["unidade"], **_coluna_grupo(l, filtros),
          "prioridade": l["prioridade"], "normal": l["normal"], "total": l["total"]}
         for l in linhas
     ]
@@ -378,6 +396,23 @@ def _resumo_tempos(linhas):
     return resumo
 
 
+def _resumo_por_fila(linhas, mapas):
+    """Quadro "Por fila" do Tempos por senha filtrado por Área (adendo 10.76):
+    por fila FINAL da senha (a mesma do filtro), quantidade de senhas e
+    média/mediana por senha de espera total e atendimento total, sobre os
+    segundos exatos (mesma regra do resumo, 10.75)."""
+    por_fila = defaultdict(list)
+    for l in linhas:
+        por_fila[l["fila_final_id"]].append(l)
+    quadro = []
+    for fila_id, das_filas in por_fila.items():
+        resumo = _resumo_tempos(das_filas)
+        quadro.append({"fila": mapas.filas.get(fila_id, "—"), "senhas": len(das_filas),
+                       "espera_total": resumo["espera_total"], "atendimento_total": resumo["atendimento_total"]})
+    quadro.sort(key=lambda q: q["fila"])
+    return quadro
+
+
 @relatorios_bp.route("/tempos-por-senha")
 def tempos_por_senha_view():
     empresa, selecao = _empresa_ou_selecao("relatorios.tempos_por_senha_view")
@@ -400,13 +435,15 @@ def tempos_por_senha_view():
         l["operador"] = mapas.operadores.get(l["operador_id"], "—")
         l["local"] = mapas.locais.get(l["local_id"], "—")
         l["dica_situacao"] = DICAS_SITUACAO[l["situacao"]]
+        l["area"] = rotulo_area(mapas, l["area_id"])
 
     def colunas_por_senha(formato):
         colunas = []
         for l in linhas:
             linha = {"Senha": l["codigo"], "Emissão": l["emissao"], "Unidade": l["unidade"],
                      "Fila inicial": mapas.filas_nome.get(l["fila_inicial_id"]),
-                     "Fila final": mapas.filas_nome.get(l["fila_final_id"])}
+                     "Fila final": mapas.filas_nome.get(l["fila_final_id"]),
+                     "Área": rotulo_area(mapas, l["area_id"], nome_puro=True)}
             for rotulo, chave in TEMPOS_POR_SENHA:
                 linha.update(_colunas_tempo(rotulo, l[f"{chave}_segundos"], formato))
             linha.update({"Etapas de atendimento": l["etapas"],
@@ -423,6 +460,7 @@ def tempos_por_senha_view():
             "Senha": e["codigo"], "Emissão": emissao(e["criada_em"]),
             "Unidade": mapas.unidades.get(e["unidade_id"]), "Etapa": e["numero"],
             "Tipo": ROTULOS_TIPO_ETAPA[e["tipo"]], "Fila": mapas.filas_nome.get(e["fila_id"]),
+            "Área": rotulo_area(mapas, e["area_id"], nome_puro=True),
             "Local": mapas.locais.get(e["local_id"]),
             # Coluna única (adendo 10.73): numa linha de Espera é quem CHAMOU a
             # senha (encerrou a espera); numa de Atendimento, quem atendeu.
@@ -443,6 +481,8 @@ def tempos_por_senha_view():
         "resumo": _resumo_tempos(linhas), "total_senhas": len(linhas),
         "limite_linhas_pdf": LIMITE_LINHAS_PDF, "pdf_omitido": pdf_omitido,
         "pagina": pagina, "total_paginas": total_paginas,
+        # Quadro "Por fila" (adendo 10.76) - só com o filtro de Área ativo.
+        "por_fila": _resumo_por_fila(linhas, mapas) if filtros.area_fila_id else [],
     }
 
     opcoes = opcoes_filtro(empresa)
