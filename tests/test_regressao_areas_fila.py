@@ -37,11 +37,11 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 from playwright.sync_api import sync_playwright
-from pypdf import PdfReader
 
 from app import create_app
 from app.extensions import db
 from app.models import AreaFila, Empresa, Fila, LogAtendimento, LogExportacaoRelatorio, Perfil, Senha, Unidade, Usuario
+from tests._pdf_texto import compactar, texto_compacto_pdf
 
 app = create_app("testing")
 
@@ -263,8 +263,11 @@ ok("Mudar a Recepção para o 2º Andar muda o passado (S4 já aparece lá): ár
 # ===========================================================================
 resp = c.get(f"/relatorios/tempo-espera?{PER}&agrupar=area&area_fila_id={andar}&formato=pdf")
 assert resp.status_code == 200
-pdf = " ".join("".join(p.extract_text() or "" for p in PdfReader(io.BytesIO(resp.get_data())).pages).split())
-assert "Área: [MAT] 2º Andar" in pdf and "Agrupado por: Área" in pdf and "[MAT] 2º Andar" in pdf
+# Texto SEM espaços dos dois lados (tests/_pdf_texto.py, adendo 10.78): a célula
+# "[MAT] 2º Andar" pode quebrar em duas linhas conforme a fonte do servidor.
+pdf = texto_compacto_pdf(resp.get_data())
+for esperado in ("Área: [MAT] 2º Andar", "Agrupado por: Área", "[MAT] 2º Andar"):
+    assert compactar(esperado) in pdf, f"PDF sem '{esperado}': {pdf}"
 with app.app_context():
     log = LogExportacaoRelatorio.query.filter_by(formato="pdf").order_by(LogExportacaoRelatorio.id.desc()).first()
     assert log.area_fila_id == andar

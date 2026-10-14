@@ -423,6 +423,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.75 | Tempos exibidos em minutos e segundos (mm:ss / h:mm:ss), não em minuto decimal |
 | 10.76 | "Áreas": agrupamento cadastrável de filas para os relatórios |
 | 10.77 | Senhas abertas de dias anteriores: encerramento por dia da clínica + filtro de "hoje" em toda fila de espera |
+| 10.78 | Action vermelha desde o 10.69: testes de PDF dependiam de onde a fonte quebra as células |
 
 ---
 
@@ -7524,8 +7525,82 @@ seções 8 e 10.18 (notas cruzadas); novo
 
 ---
 
+## 10.78. ADENDO — Action vermelha desde o 10.69: testes de PDF dependiam de onde a fonte quebra as células
+
+> Achado ao fechar o 10.77: a Action "Testes" estava vermelha desde 08/10
+> (commit do 10.69) em dois testes - `test_regressao_relatorios_fila_unidade`
+> e `test_regressao_tempos_por_senha` -, embora a suíte local (Windows)
+> passasse. Investigação (FASE 1) relatada e aprovada antes de corrigir.
+> **Os adendos 10.69 e 10.73 foram dados como fechados com a CI vermelha** -
+> cada um criou um desses testes, que nunca passou no runner.
+
+**Diagnóstico** (PDFs gerados no runner baixados como artifact, numa branch
+descartável `diag/pdf-runner`, já apagada):
+
+1. **Os PDFs do runner estão corretos e completos** - renderizados como
+   imagem e comparados com os do Windows: mesmas colunas, mesmas linhas,
+   "Histórico parcial" visível. Não é bug de produto.
+2. **Fonte:** no runner (ubuntu-latest), `system-ui`/`Segoe UI`/`Roboto`/
+   `sans-serif` do `print.css` resolvem todas para **DejaVu Sans** (mais
+   larga); no Windows, Segoe UI. Com a fonte mais larga, mais células da
+   tabela quebram em duas linhas. Instalar `fonts-liberation`/
+   `fonts-dejavu-core` não muda nada (o fontconfig continua escolhendo
+   DejaVu Sans; texto extraído idêntico nas duas variantes).
+3. **A causa da falha é a extração do pypdf numa célula quebrada:** ora vem
+   com "\n" (`"[MAT]\nColeta"` - o `count("[MAT] Coleta") >= 2` dava 1), ora
+   SEM separador nenhum (`"Históricoparcial"`, `"Semárea"`,
+   `"Filainicial"`) - a normalização de espaços do teste não junta de volta.
+4. **Não é a versão do Playwright:** ela não está fixada (local 1.62.0,
+   runner 1.64.0 / Chromium 156), mas `test_regressao_exportacao_pdf`
+   (10.67) passou no runner com 1.62, 1.63 e 1.64 - ele confere textos que
+   não quebram dentro de célula.
+
+**Correção (só nos testes):** novo `tests/_pdf_texto.py`, com duas regras:
+
+- **Presença (qualquer texto) e ausência de frases/nomes:**
+  `texto_compacto_pdf()` + `compactar()` no texto procurado - compara SEM
+  nenhum espaço em branco dos dois lados. Na ausência do nome do paciente,
+  compactar deixa a checagem mais rigorosa: o nome é achado até quebrado no
+  meio da célula ("Maria Sigi\nlosa"), o que a checagem antiga não pegava.
+- **Ausência de token curto** (código de senha `S2`):
+  `texto_normalizado_pdf()` (espaços reduzidos a um) +
+  `re.search(r"\bS2\b", ...)`. No texto compactado, a junção de células
+  vizinhas poderia formar o token por acaso e a checagem falharia à toa.
+
+Migrados para o helper os QUATRO testes que conferem texto de PDF com
+células de tabela: `test_regressao_relatorios_fila_unidade` (`[MAT] Coleta`
+no cabeçalho e a contagem), `test_regressao_tempos_por_senha` (`S2`,
+"Histórico parcial", "Etapas de atendimento", o aviso de limite e o resumo;
+ausência do nome nos dois PDFs - o completo e o só-resumo -, ausência de
+`S2` no só-resumo com borda de palavra; cada asserção com mensagem própria,
+antes uma asserção tripla sem mensagem), `test_regressao_areas_fila` ("Área:
+[MAT] 2º Andar", "Agrupado por: Área", "[MAT] 2º Andar") e
+`test_regressao_duracao` (21:48, 16:15:24, 11:24 e o cabeçalho "Tempo
+médio (mm:ss)"). Os dois últimos passavam no runner, mas eram frágeis do
+mesmo jeito. Validado contra o texto extraído NO RUNNER (artifact): o
+código antigo falha, o novo passa. `test_regressao_exportacao_pdf` (10.67)
+não mudou: confere textos de cabeçalho/rodapé, fora de célula de tabela.
+
+**Fora do escopo:** fixar a versão do Playwright vai em commit separado, na
+versão de produção. Seção 11: fonte própria no PDF.
+
+**Arquivos alterados:** novo `tests/_pdf_texto.py`;
+`tests/test_regressao_relatorios_fila_unidade.py`;
+`tests/test_regressao_tempos_por_senha.py`;
+`tests/test_regressao_areas_fila.py`; `tests/test_regressao_duracao.py`.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
+- **Fonte própria nos PDFs de relatório** (prioridade BAIXA, registrado no
+  10.78): o `print.css` pede `system-ui, -apple-system, Segoe UI, Roboto,
+  sans-serif` - em produção (Linux) isso cai em **DejaVu Sans** (confirmado
+  no runner do GitHub, mesma família de SO), mais larga que a Segoe UI do
+  Windows: o PDF real sai legível, mas com outro visual e mais quebras de
+  linha nas células. Um `@font-face` com uma fonte embutida no projeto
+  daria o mesmo visual em qualquer servidor e tornaria os testes de PDF
+  determinísticos (mesmas quebras no Windows e no Linux).
 - **`TurnoAtivo`/`Usuario.local_atual_id` de dias anteriores ficam abertos**
   (achado na FASE 1 do 10.77; só registrado, não corrigido, a pedido do
   cliente): mesma causa do gatilho só por relógio do 10.18, e mais ampla - o

@@ -33,13 +33,13 @@ from zoneinfo import ZoneInfo
 import openpyxl
 import pandas as pd
 from openpyxl.utils import get_column_letter
-from pypdf import PdfReader
 
 from app import create_app
 from app.extensions import db
 from app.models import Empresa, Fila, LogAtendimento, Perfil, Senha, Unidade, Usuario
 from app.relatorios.routes import _duracao_excel, _resumo_tempos
 from app.utils.tempo import formatar_duracao, segundos_arredondados
+from tests._pdf_texto import compactar, texto_compacto_pdf
 
 UTC = ZoneInfo("UTC")
 app = create_app("testing")
@@ -141,10 +141,6 @@ def baixar(rota, formato):
     return resp.get_data()
 
 
-def texto_pdf(conteudo):
-    return " ".join("".join(p.extract_text() or "" for p in PdfReader(io.BytesIO(conteudo)).pages).split())
-
-
 # ===========================================================================
 # 2) Tela e PDF: "Tempos por senha" e os relatórios agregados.
 # ===========================================================================
@@ -165,10 +161,15 @@ for rota, esperado in (("tempo-espera", "21:48"), ("tempo-atendimento", "16:15:2
 assert "<td>-00:05</td>" in tela("tempo-atendimento")
 ok("Relatórios agregados (tela): tempo de espera 21:48, tempo de atendimento e ranking 16:15:24, negativo -00:05")
 
-pdf = texto_pdf(baixar("tempos-por-senha", "pdf"))
-assert "21:48" in pdf and "16:15:24" in pdf and "11:24" in pdf
-pdf_espera = texto_pdf(baixar("tempo-espera", "pdf"))
-assert "21:48" in pdf_espera and "Tempo médio (mm:ss)" in pdf_espera
+# Texto SEM espaços dos dois lados (tests/_pdf_texto.py, adendo 10.78): a quebra
+# das células depende da fonte (DejaVu Sans no runner Linux) - o cabeçalho
+# "Tempo médio (mm:ss)" pode sair da extração sem separador entre as linhas.
+pdf = texto_compacto_pdf(baixar("tempos-por-senha", "pdf"))
+for esperado in ("21:48", "16:15:24", "11:24"):
+    assert esperado in pdf, f"PDF do Tempos por senha sem {esperado}: {pdf}"
+pdf_espera = texto_compacto_pdf(baixar("tempo-espera", "pdf"))
+assert "21:48" in pdf_espera, f"PDF do Tempo de espera sem 21:48: {pdf_espera}"
+assert compactar("Tempo médio (mm:ss)") in pdf_espera, f"PDF do Tempo de espera sem o cabeçalho: {pdf_espera}"
 ok("PDF (Chromium real): Tempos por senha e Tempo de espera com mm:ss / h:mm:ss")
 
 # ===========================================================================

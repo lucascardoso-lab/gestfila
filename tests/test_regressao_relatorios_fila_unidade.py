@@ -35,12 +35,12 @@ import re
 from datetime import date, datetime, timedelta
 
 import pandas as pd
-from pypdf import PdfReader
 
 from app import create_app
 from app.extensions import db
 from app.models import Empresa, Fila, LogAtendimento, Perfil, Senha, Unidade, Usuario
 from app.utils.rotulos import rotulos_filas
+from tests._pdf_texto import compactar, texto_compacto_pdf
 
 app = create_app("testing")
 
@@ -270,9 +270,11 @@ ok("core/dashboard: mesmo rótulo na lista de filas e em 'Últimos atendimentos'
 
 resp = c_admin.get(f"/relatorios/tempo-atendimento?{PERIODO}&fila_id={ids['coleta_mat']}&formato=pdf")
 assert resp.status_code == 200 and resp.mimetype == "application/pdf", resp.status_code
-texto_pdf = "".join(p.extract_text() or "" for p in PdfReader(io.BytesIO(resp.get_data())).pages)
-assert f"Fila: {ROTULO_MAT}" in texto_pdf, texto_pdf  # cabeçalho filtros_legiveis
-assert texto_pdf.count(ROTULO_MAT) >= 2, texto_pdf  # cabeçalho + tabela
+# Sem espaços dos dois lados (tests/_pdf_texto.py): no runner Linux a célula
+# "[MAT] Coleta" quebra em duas linhas e a extração devolve "[MAT]\nColeta".
+texto_pdf = texto_compacto_pdf(resp.get_data())
+assert compactar(f"Fila: {ROTULO_MAT}") in texto_pdf, texto_pdf  # cabeçalho filtros_legiveis
+assert texto_pdf.count(compactar(ROTULO_MAT)) >= 2, texto_pdf  # cabeçalho + tabela
 ok("PDF: 'Fila: [SIGLA] Nome' no cabeçalho (filtros_legiveis) e o mesmo rótulo na tabela")
 
 # Desempate calculado sobre a empresa inteira: o gerencial só vê UMA das

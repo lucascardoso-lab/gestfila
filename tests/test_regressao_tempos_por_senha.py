@@ -34,7 +34,6 @@ from zoneinfo import ZoneInfo
 
 import openpyxl
 import pandas as pd
-from pypdf import PdfReader
 
 from app import create_app
 from app.extensions import db
@@ -46,6 +45,7 @@ from app.relatorios.queries import (
     SITUACAO_NUNCA_CHAMADA, tempo_atendimento, tempo_medio_espera, tempos_por_senha,
 )
 from app.utils.tempo import janela_dia_clinica_em_utc
+from tests._pdf_texto import compactar, texto_compacto_pdf, texto_normalizado_pdf
 
 UTC = ZoneInfo("UTC")
 SP = ZoneInfo("America/Sao_Paulo")
@@ -340,17 +340,25 @@ ok("Operador: por senha mantém S2 com o total inteiro (14 min); por etapa só a
 # ===========================================================================
 # 5) PDF (Chromium real): dados, limite de linhas, sem nome; log de auditoria.
 # ===========================================================================
-def texto_pdf(conteudo):
-    # Espaços normalizados: colunas estreitas quebram "Histórico parcial" em duas linhas na extração.
-    return " ".join("".join(p.extract_text() or "" for p in PdfReader(io.BytesIO(conteudo)).pages).split())
-
-pdf = texto_pdf(baixar("pdf"))
-assert "S2" in pdf and "Histórico parcial" in pdf and NOME not in pdf
-assert "Etapas de atendimento" in pdf
+# Texto SEM espaços dos dois lados (tests/_pdf_texto.py): célula quebrada em duas
+# linhas sai da extração ora com "\n", ora sem separador ("Históricoparcial" no
+# runner Linux, fonte DejaVu Sans). Vale também para a AUSÊNCIA do nome -
+# compactado, ele é achado mesmo se quebrar no meio da célula. Ausência do token
+# curto "S2": texto normalizado + borda de palavra (compactado, células vizinhas
+# poderiam formar "S2" por acaso).
+pdf = texto_compacto_pdf(baixar("pdf"))
+assert "S2" in pdf, f"PDF sem a senha S2: {pdf}"
+assert compactar("Histórico parcial") in pdf, f"PDF sem a situação 'Histórico parcial': {pdf}"
+assert compactar("Etapas de atendimento") in pdf, f"PDF sem o cabeçalho 'Etapas de atendimento': {pdf}"
+assert compactar(NOME) not in pdf and "Sigilosa" not in pdf, "nome do paciente vazou no PDF (LGPD)"
 with patch.object(rotas_relatorios, "LIMITE_LINHAS_PDF", 2):
-    pdf_resumo = texto_pdf(baixar("pdf"))
-assert "acima do limite de 2 linhas do PDF" in pdf_resumo and "Média:" in pdf_resumo
-assert not re.search(r"\bS2\b", pdf_resumo)
+    conteudo_resumo = baixar("pdf")
+pdf_resumo = texto_compacto_pdf(conteudo_resumo)
+assert compactar("acima do limite de 2 linhas do PDF") in pdf_resumo, f"PDF sem o aviso de limite: {pdf_resumo}"
+assert compactar("Média:") in pdf_resumo, f"PDF sem o resumo (Média:): {pdf_resumo}"
+pdf_resumo_normalizado = texto_normalizado_pdf(conteudo_resumo)
+assert not re.search(r"\bS2\b", pdf_resumo_normalizado), f"PDF acima do limite ainda lista a senha S2: {pdf_resumo_normalizado}"
+assert compactar(NOME) not in pdf_resumo and "Sigilosa" not in pdf_resumo, "nome do paciente vazou no PDF (LGPD)"
 ok("PDF: lista completa abaixo do limite; acima de LIMITE_LINHAS_PDF só o resumo + aviso de CSV/Excel; sem nome")
 
 with app.app_context():
