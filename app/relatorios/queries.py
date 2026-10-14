@@ -24,6 +24,7 @@ from sqlalchemy import func
 
 from app.extensions import db
 from app.models import Fila, LogAtendimento, Senha, Totem, Tv
+from app.models.senha import criada_hoje_na_clinica, senhas_abertas_de_dias_anteriores
 from app.utils.tempo import para_horario_clinica
 
 EVENTOS_INICIO_ATENDIMENTO = ("chamada_senha", "chamada_nome")
@@ -490,6 +491,11 @@ SITUACAO_HISTORICO_PARCIAL = "Histórico parcial"
 SITUACAO_NUNCA_CHAMADA = "Aguardando (nunca chamada)"
 SITUACAO_CANCELADA = "Cancelada (encerramento automático)"
 SITUACAO_NAO_FINALIZADA = "Chamada, não finalizada"
+# adendo 10.77 - 'aguardando' de dia anterior cancelada pelo sistema (evento
+# 'expirada_aguardando'), separada pelo histórico: nunca chamada, ou chamada
+# antes e devolvida à espera (realocação / "voltar a aguardar").
+SITUACAO_EXPIRADA_NUNCA_CHAMADA = "Expirada (nunca chamada)"
+SITUACAO_EXPIRADA_APOS_ESPERA = "Expirada (após realocação/volta à espera)"
 DICAS_SITUACAO = {
     SITUACAO_CONCLUIDA: "Atendimento finalizado, com todas as etapas registradas.",
     SITUACAO_HISTORICO_PARCIAL: (
@@ -502,6 +508,15 @@ DICAS_SITUACAO = {
         "finalizada - não há tempo de atendimento."
     ),
     SITUACAO_NAO_FINALIZADA: "Foi chamada, mas o atendimento ainda não foi finalizado.",
+    SITUACAO_EXPIRADA_NUNCA_CHAMADA: (
+        "Ficou aguardando até o fim do dia sem ser chamada e foi encerrada automaticamente "
+        "(adendo 10.77) - não há tempo de espera nem de atendimento."
+    ),
+    SITUACAO_EXPIRADA_APOS_ESPERA: (
+        "Foi chamada, voltou à espera (realocação ou \"voltar a aguardar\") e ficou aguardando "
+        "até o fim do dia - encerrada automaticamente (adendo 10.77). A espera final, que não "
+        "terminou em chamada, não entra nos tempos."
+    ),
 }
 TIPO_ETAPA_ESPERA = "espera"
 ROTULOS_TIPO_ETAPA = {
@@ -509,7 +524,10 @@ ROTULOS_TIPO_ETAPA = {
     TIPO_FECHAMENTO_CONCLUSAO: "Atendimento - Conclusão",
     TIPO_FECHAMENTO_REPASSE: "Atendimento - Repasse",
 }
-EVENTOS_JORNADA = ("gerada", "realocado", "voltou_aguardar", *EVENTOS_INICIO_ATENDIMENTO, "fim_atendimento")
+EVENTO_EXPIRADA = "expirada_aguardando"  # adendo 10.77
+EVENTOS_JORNADA = (
+    "gerada", "realocado", "voltou_aguardar", *EVENTOS_INICIO_ATENDIMENTO, "fim_atendimento", EVENTO_EXPIRADA,
+)
 
 
 def tempos_por_senha(filtros):
@@ -582,8 +600,11 @@ def tempos_por_senha(filtros):
         foi_chamada = any(e.evento in EVENTOS_INICIO_ATENDIMENTO for e in evs)
         fim = next((e for e in evs if e.evento == "fim_atendimento"), None)
         gerada = next((e for e in evs if e.evento == "gerada"), None)
+        expirada = any(e.evento == EVENTO_EXPIRADA for e in evs)
 
-        if not foi_chamada:
+        if expirada:
+            situacao = SITUACAO_EXPIRADA_APOS_ESPERA if foi_chamada else SITUACAO_EXPIRADA_NUNCA_CHAMADA
+        elif not foi_chamada:
             situacao = SITUACAO_NUNCA_CHAMADA
         elif senha.status == "cancelada":
             situacao = SITUACAO_CANCELADA
@@ -724,6 +745,7 @@ def senhas_aguardando_por_fila(empresa, unidades_visiveis):
             Senha.empresa_id == empresa.id,
             Senha.unidade_id.in_(unidades_visiveis),
             Senha.status == "aguardando",
+            criada_hoje_na_clinica(),  # adendo 10.77
         )
         .group_by(Senha.fila_id)
         .all()
@@ -772,11 +794,39 @@ def ultimas_chamadas(empresa, unidades_visiveis, limite=15):
     return resultado
 
 
-def coletar_alertas(filas, totens, tvs):
+def contar_senhas_abertas_dias_anteriores(empresa, unidades_visiveis):
+    """Dashboard (adendo 10.77): senhas ainda abertas criadas antes de hoje no
+    dia da clínica, nas unidades visíveis. Com a varredura do middleware
+    funcionando é sempre 0 - o alerta existe para que uma falha dela não fique
+    escondida pelo filtro de dia das telas."""
+    if not unidades_visiveis:
+        return 0
+    return (
+        senhas_abertas_de_dias_anteriores()
+        .filter(Senha.empresa_id == empresa.id, Senha.unidade_id.in_(unidades_visiveis))
+        .count()
+    )
+
+
+def coletar_alertas(filas, totens, tvs, senhas_abertas_dias_anteriores=0):
     """Dashboard: alertas de configuração incompleta, calculados em Python sobre as
     MESMAS listas já buscadas por resumo_recursos (evita 4 queries extras). Cada
-    alerta é {'tipo', 'mensagem'} - lista plana, sem uma tabela/query por tipo."""
+    alerta é {'tipo', 'mensagem'} - lista plana, sem uma tabela/query por tipo.
+
+    `senhas_abertas_dias_anteriores` (adendo 10.77, de
+    `contar_senhas_abertas_dias_anteriores`): > 0 gera um alerta próprio."""
     alertas = []
+    if senhas_abertas_dias_anteriores:
+        alertas.append(
+            {
+                "tipo": "senhas_dias_anteriores",
+                "mensagem": (
+                    f"{senhas_abertas_dias_anteriores} senha(s) aberta(s) de dias anteriores - deveriam "
+                    "ter sido encerradas automaticamente. Verifique o log do servidor ou rode "
+                    '"flask encerrar-pendentes --antes-de-hoje".'
+                ),
+            }
+        )
     for fila in filas:
         if not fila.ativo:
             continue

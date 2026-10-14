@@ -7,6 +7,7 @@ from sqlalchemy import func, update
 
 from app.extensions import db, socketio
 from app.models import Fila, Local, LogAtendimento, Senha, TipoSenha, TurnoAtivo, Usuario
+from app.models.senha import criada_hoje_na_clinica
 from app.utils.slug import gerar_slug_audio_local
 from app.utils.tempo import janela_dia_clinica_em_utc
 
@@ -272,8 +273,11 @@ def filas_rapidas_redirecionar(local, operador, filas_destino_atual):
 
 
 def senhas_aguardando(fila):
+    """'Senhas em espera' da tela por-fila - só as do dia da clínica (adendo
+    10.77; mesmo filtro em todo ponto que lista/conta/seleciona 'aguardando')."""
     return (
         Senha.query.filter_by(fila_id=fila.id, status="aguardando")
+        .filter(criada_hoje_na_clinica())
         .order_by(Senha.criada_em.asc())
         .all()
     )
@@ -294,7 +298,9 @@ def senhas_aguardando_local(local, operador=None):
     if not fila_ids:
         return []
     return (
-        Senha.query.filter(Senha.fila_id.in_(fila_ids), Senha.status == "aguardando")
+        Senha.query.filter(
+            Senha.fila_id.in_(fila_ids), Senha.status == "aguardando", criada_hoje_na_clinica()  # 10.77
+        )
         .order_by(Senha.criada_em.asc())
         .all()
     )
@@ -358,10 +364,14 @@ def selecionar_proxima_senha(fila):
     é recalculada a partir do histórico real de chamadas (chamada_em, já existente no
     schema) em vez de um contador persistido novo - evita qualquer alteração de schema
     só para guardar o estado do rodízio.
+
+    Só senhas do dia da clínica (adendo 10.77): com o FIFO por `criada_em`, uma
+    senha esquecida de um dia anterior seria sempre a PRIMEIRA chamada.
     """
     if fila.prioridade_rodizio <= 0:
         return (
             Senha.query.filter_by(fila_id=fila.id, status="aguardando")
+            .filter(criada_hoje_na_clinica())
             .order_by(Senha.criada_em.asc())
             .first()
         )
@@ -372,12 +382,14 @@ def selecionar_proxima_senha(fila):
     # entre elas, igual ao comportamento já existente antes da seção 10.4).
     proxima_prioritaria = (
         Senha.query.filter_by(fila_id=fila.id, status="aguardando", prioridade=True)
+        .filter(criada_hoje_na_clinica())
         .outerjoin(TipoSenha, Senha.tipo_senha_id == TipoSenha.id)
         .order_by(func.coalesce(TipoSenha.peso_prioridade, 0).desc(), Senha.criada_em.asc())
         .first()
     )
     proxima_normal = (
         Senha.query.filter_by(fila_id=fila.id, status="aguardando", prioridade=False)
+        .filter(criada_hoje_na_clinica())
         .order_by(Senha.criada_em.asc())
         .first()
     )

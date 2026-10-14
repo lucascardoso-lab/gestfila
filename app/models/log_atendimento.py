@@ -5,6 +5,7 @@ from app.extensions import db
 EVENTO_LOG = (
     "gerada", "chamada_senha", "chamada_nome", "inicio_atendimento", "fim_atendimento",
     "realocado", "voltou_aguardar", "encerramento_automatico_sistema",
+    "expirada_aguardando",  # adendo 10.77 - 'aguardando' de dia anterior cancelada pelo sistema
 )
 SETOR_LOG = ("recepcao", "coleta", "outro")
 

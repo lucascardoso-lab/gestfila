@@ -1,8 +1,12 @@
 from datetime import datetime
 
 from app.extensions import db
+from app.utils.tempo import janela_dia_clinica_em_utc
 
 STATUS_SENHA = ("aguardando", "chamada", "em_atendimento", "finalizada", "cancelada")
+# Status de uma senha ainda "aberta" (não finalizada nem cancelada) - o que a
+# varredura de dias anteriores encerra (adendo 10.77).
+STATUS_ABERTOS = ("aguardando", "chamada", "em_atendimento")
 SETOR = ("recepcao", "coleta", "outro")
 
 
@@ -50,3 +54,26 @@ class Senha(db.Model):
 
     def __repr__(self):
         return f"<Senha {self.id} {self.codigo}>"
+
+
+def criada_hoje_na_clinica():
+    """Condição SQL "senha criada hoje no dia civil da clínica" (adendo 10.77) -
+    aplicada a toda listagem/contagem/seleção de senhas 'aguardando' (telas de
+    atendimento, Chamar, dashboards). Defesa em profundidade: a varredura do
+    middleware (`encerrar_senhas_de_dias_anteriores`) já cancela as de dias
+    anteriores, mas se ela falhar uma senha velha nunca é chamada antes da de
+    hoje (o FIFO por `criada_em` a colocaria na frente) nem confundida com outra
+    de mesmo código (o sequencial zera diariamente). Só o limite inferior da
+    janela do 10.39 - não existe `criada_em` no futuro."""
+    inicio_hoje, _fim = janela_dia_clinica_em_utc()
+    return Senha.criada_em >= inicio_hoje
+
+
+def senhas_abertas_de_dias_anteriores():
+    """Query (não executada) das senhas ainda abertas (`STATUS_ABERTOS`)
+    criadas ANTES do dia civil de hoje da clínica (adendo 10.77) - limite pela
+    janela do 10.39, nunca por `.date()` em UTC. Base única da varredura do
+    middleware, do comando `flask encerrar-pendentes` e do alerta do dashboard
+    de Relatórios."""
+    inicio_hoje, _fim = janela_dia_clinica_em_utc()
+    return Senha.query.filter(Senha.status.in_(STATUS_ABERTOS), Senha.criada_em < inicio_hoje)

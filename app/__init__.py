@@ -97,6 +97,11 @@ def create_app(config_name=None):
 
     register_error_handlers(app)
 
+    # `flask encerrar-pendentes` (adendo 10.77)
+    from .comandos import register_comandos
+
+    register_comandos(app)
+
     from . import sockets  # noqa: F401  (importar registra os handlers no namespace /painel)
 
     return app

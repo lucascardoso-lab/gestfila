@@ -298,7 +298,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 - **Multi-tenant**: todo o middleware de autenticação deve injetar `empresa_id` no contexto da requisição e **toda query deve filtrar por ele** — nunca confiar em filtro feito só no front.
 - **Senhas de usuário (login)**: hash com `werkzeug.security` (`generate_password_hash`/`bcrypt`), nunca texto puro.
 - **Rate limit no endpoint de geração de senha do totem** (evita "ataque" de toque repetido gerando milhares de senhas).
-- **Data/hora no fuso da clínica (regra explícita desde o adendo 10.74):** colunas de data/hora são gravadas em UTC "naive" (`datetime.utcnow`). Hora/data exibida no servidor **sempre** via `para_horario_clinica()` ou o filtro Jinja `hora_clinica` (`app/utils/tempo.py`); agrupar "por dia" = `para_horario_clinica(coluna).date()`; filtrar "hoje"/um dia = `janela_dia_clinica_em_utc()`; "agora" = `agora_na_clinica()`. **Nunca** `strftime`/`.date()`/`.hour` direto sobre coluna UTC, nem `datetime.now()`/`datetime.utcnow().date()` para decidir o dia. Datetime enviado ao JS: ISO + `"Z"` (o navegador converte).
+- **Data/hora no fuso da clínica (regra explícita desde o adendo 10.74):** colunas de data/hora são gravadas em UTC "naive" (`datetime.utcnow`). Hora/data exibida no servidor **sempre** via `para_horario_clinica()` ou o filtro Jinja `hora_clinica` (`app/utils/tempo.py`); agrupar "por dia" = `para_horario_clinica(coluna).date()`; filtrar "hoje"/um dia = `janela_dia_clinica_em_utc()` (senhas `aguardando` listadas/contadas/chamadas: sempre com `criada_hoje_na_clinica()`, 10.77); "agora" = `agora_na_clinica()`. **Nunca** `strftime`/`.date()`/`.hour` direto sobre coluna UTC, nem `datetime.now()`/`datetime.utcnow().date()` para decidir o dia. Datetime enviado ao JS: ISO + `"Z"` (o navegador converte).
 - **Acessibilidade**: tela do totem com fontes grandes, alto contraste — já presente no design de referência (botões grandes, cores fortes).
 - **LGPD**: nome do paciente é dado pessoal mesmo sendo "campo livre sem cadastro" — definir política de retenção/expurgo desse campo após X dias.
 
@@ -422,6 +422,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.74 | Agrupamento "por dia" e "hoje" no dia civil da clínica (não de UTC) nos relatórios e no dashboard |
 | 10.75 | Tempos exibidos em minutos e segundos (mm:ss / h:mm:ss), não em minuto decimal |
 | 10.76 | "Áreas": agrupamento cadastrável de filas para os relatórios |
+| 10.77 | Senhas abertas de dias anteriores: encerramento por dia da clínica + filtro de "hoje" em toda fila de espera |
 
 ---
 
@@ -1696,6 +1697,11 @@ A cada requisição, se `datetime.now().time() >= HORARIO_ENCERRAMENTO_SESSOES`:
   sistema, não uma ação por-tenant); idempotente e sem flag "já rodei hoje" -
   a query já filtra pelos dois status, então rodar de novo sem nada aberto é
   um no-op barato.
+  **Complementado pelo 10.77:** este gatilho é só por relógio e não tocava
+  `aguardando` - senhas de dias anteriores ficavam abertas para sempre. O
+  10.77 acrescenta a varredura por DIA da clínica (1º request de cada dia,
+  a qualquer hora, inclusive `aguardando` -> evento `expirada_aguardando`) e
+  o UPDATE condicional também neste cancelamento das 23h.
 - Se a requisição é numa rota do blueprint `atendimento` e há um usuário
   autenticado: limpa `local_atual_id`/`local_desde`, `logout_user()`,
   `session.clear()`, flash informativo, redireciona pro login.
@@ -7330,8 +7336,210 @@ templates `admin/areas/listar.html` e `form.html` (novos),
 
 ---
 
+## 10.77. ADENDO — Senhas abertas de dias anteriores: encerramento por dia da clínica + filtro de "hoje" em toda fila de espera
+
+> Problema real em produção: ~450 senhas com status `aguardando` de DIAS
+> ANTERIORES, nunca finalizadas (confirmado no banco). Investigação (FASE 1)
+> relatada e aprovada antes de implementar.
+
+**Causas confirmadas na investigação:**
+
+1. **O encerramento nunca tocava `aguardando`:** `cancelar_senhas_em_andamento`
+   (10.18) filtrava só `chamada`/`em_atendimento` - por decisão do 10.18 (o
+   teste dele inclusive verificava que `aguardando` ficava intacta). Senha
+   emitida e nunca chamada ficava aberta para sempre.
+2. **Gatilho só por relógio:** o `before_request` só agia se
+   `agora_na_clinica().time() >= 23:00`. À meia-noite a condição volta a ser
+   falsa - se nenhum request chegasse entre 23:00 e 23:59, nada era encerrado
+   (às 07:00 do dia seguinte, `07:00 < 23:00`).
+3. **Contagens e listas de `aguardando` sem janela de dia** - 9 pontos (tabela
+   abaixo), incluindo o KPI "Senhas aguardando agora" e "Senhas em espera".
+4. **Pior que o suspeito na fila:** o Chamar automático (FIFO, rodízio de
+   prioridade e rodízio por Local) ordena por `criada_em ASC` - a senha
+   esquecida de um dia anterior era SEMPRE a primeira chamada; e o "Chamar
+   por código" usava `.first()` sem ordem - com o sequencial zerando por dia
+   (10.39), o BSG003 de ontem e o de hoje coexistiam e o banco devolvia
+   qualquer um.
+
+**Correção:**
+
+- **Encerramento por DIA da clínica** (`app/middleware/encerramento.py`,
+  `encerrar_senhas_de_dias_anteriores`): toda senha aberta (`STATUS_ABERTOS`
+  = aguardando/chamada/em_atendimento, `app/models/senha.py`) com
+  `criada_em` antes da meia-noite de hoje da clínica
+  (`janela_dia_clinica_em_utc()`, 10.39 - nunca `.date()` em UTC) vira
+  `cancelada` (nunca DELETE, seção 8), com `LogAtendimento` de
+  `usuario_id=NULL` e snapshot `fila_id`/`local_id` (10.62):
+  - `aguardando` -> evento NOVO **`expirada_aguardando`** (migration
+    `e5b7c2d9a4f8`, só o ENUM `evento_log`, padrão da `c3d9f4a1e6b2`). Nome
+    escolhido em vez de "expirada_sem_chamada" porque uma senha `aguardando`
+    pode já ter sido chamada antes (realocação / "voltar a aguardar").
+  - `chamada`/`em_atendimento` -> `encerramento_automatico_sistema` (mesma
+    semântica do 10.18).
+  - Roda no 1º request de cada dia da clínica, A QUALQUER HORA (antes do
+    teste de relógio das 23h, que continua igual para as senhas de hoje).
+    Memo "dia já varrido" por processo em `app.extensions` - evita uma query
+    por request (TV, polling, estáticos); é seguro porque, depois da
+    varredura, nenhuma senha de antes de hoje volta a ficar aberta. Memo
+    gravado só depois do commit. Uma transação só. A query das senhas
+    pendentes (`senhas_abertas_de_dias_anteriores`) fica em
+    `app/models/senha.py`, ao lado de `criada_hoje_na_clinica` - base única
+    da varredura, do comando e do alerta (Relatórios não importa do
+    middleware).
+  - **Falha da varredura não derruba o sistema:** exceção -> rollback + log
+    (`logger.exception`) e o request segue normalmente (sem isso, um erro num
+    `before_request` global seria 500 em TODA tela, totem e TV inclusive); o
+    memo não é gravado. **Intervalo mínimo entre tentativas:**
+    `INTERVALO_RETENTATIVA_VARREDURA` = 5 min (instante da última falha em
+    `app.extensions`) - TV e totem fazem polling, e sem o intervalo uma falha
+    persistente repetiria a query e o stack trace no log a cada request. Na
+    primeira tentativa que der certo, a marca de falha é apagada e o memo do
+    dia é gravado.
+- **UPDATE condicional contra corrida (destaque):** o cancelamento passou a
+  ser `UPDATE senhas SET status='cancelada' WHERE id=:id AND status=:lido`, e
+  o log só é gravado se `rowcount == 1` (`_cancelar_se_status_ainda_for`).
+  Aplicado à varredura nova **e também ao `cancelar_senhas_em_andamento` das
+  23h (10.18)**, que tinha o mesmo risco latente: dois requests concorrentes
+  (greenlets do eventlet) ou o comando abaixo rodando junto com o servidor
+  liam a mesma senha aberta e gravavam o log de auditoria em dobro.
+- **Comando `flask encerrar-pendentes --antes-de-hoje [--dry-run]`**
+  (`app/comandos.py`, registrado em `create_app` - primeiro comando CLI do
+  projeto): mostra a contagem por dia da clínica / empresa / unidade / fila /
+  status e chama a MESMA `encerrar_senhas_de_dias_anteriores`, numa
+  transação (um commit no fim; em erro, rollback e "nada foi gravado").
+  `--dry-run` só faz SELECT e termina com `db.session.rollback()` explícito.
+  Sem `--antes-de-hoje` o comando recusa (nunca encerra senhas de hoje).
+  Idempotente. **Não depende de `ENCERRAMENTO_SESSOES_ATIVO`** - o gate só
+  liga/desliga o gatilho automático do middleware; o comando age sempre
+  (testado com o gate desligado).
+- **Migration `e5b7c2d9a4f8`:** o ALTER de ENUM do MySQL substitui a lista
+  inteira - a lista antiga tem os 8 valores existentes (os de
+  `EVENTO_LOG` antes do 10.77, mesma ordem da `c3d9f4a1e6b2`) e o novo vai
+  no fim. **Downgrade recusa** (`RuntimeError` com a contagem) se existir
+  alguma linha `expirada_aguardando`: fora do modo estrito, o MySQL gravaria
+  '' no lugar do valor removido e apagaria o evento da trilha de auditoria em
+  silêncio. Verificado num SQLite temporário (stamp + linha inserida): o
+  `flask db downgrade` para com a mensagem e a versão continua
+  `e5b7c2d9a4f8`. O ALTER em si só roda em MySQL (`mysql.ENUM`, mesma
+  limitação da `c3d9f4a1e6b2`).
+- **Filtro do dia da clínica em todo ponto que lista/conta/seleciona
+  `aguardando`** (defesa em profundidade): helper único
+  `criada_hoje_na_clinica()` (`app/models/senha.py`; só o limite inferior da
+  janela do 10.39 - não existe `criada_em` no futuro):
+
+| # | Ponto | Uso |
+|---|---|---|
+| 1 | `core/dashboard_queries.py::calcular_kpis` | KPI "Senhas aguardando agora" (e `/api/dashboard/kpis`) |
+| 2 | `core/dashboard_queries.py::filas_com_status` | contagem por fila do dashboard |
+| 3 | `relatorios/queries.py::senhas_aguardando_por_fila` | dashboard de Relatórios |
+| 4 | `atendimento/filas.py::listar_filas` | contagens "aguardando"/"prioridade" |
+| 5 | `atendimento/helpers.py::senhas_aguardando` | "Senhas em espera" (tela por fila, HTML e JSON) |
+| 6 | `atendimento/helpers.py::senhas_aguardando_local` | "Senhas em espera" (tela por Local, HTML e JSON) |
+| 7 | `atendimento/helpers.py::selecionar_proxima_senha` | Chamar automático: FIFO, rodízio de prioridade e (via `selecionar_proxima_fila_e_senha`) rodízio por Local |
+| 8 | `atendimento/chamada.py::chamar_local` | Chamar por código (tela por Local) |
+| 9 | `atendimento/chamada.py::chamar` | Chamar por código (tela por fila) |
+
+  Não precisam: a criação no totem (`_emitir_senha`) e realocar/voltar a
+  aguardar (`criada_em` original preservado).
+
+  **Sem filtro de dia, de propósito: `senha_atual_no_local`**
+  (`atendimento/helpers.py` - a "Senha chamada" do posto, que também decide
+  o bloqueio "Finalize o atendimento atual antes de chamar o próximo"). Ela
+  procura `chamada`/`em_atendimento` do operador no Local, sem janela de dia.
+  Se a varredura falhar, uma senha `chamada` de ontem no nome do operador o
+  deixa bloqueado até a limpeza (varredura na próxima tentativa ou `flask
+  encerrar-pendentes`). Filtrar por dia aqui esconderia a senha da tela e
+  liberaria o Chamar com uma senha ainda "em andamento" no banco - por isso
+  não foi feito. A falha não fica escondida: o alerta do dashboard de
+  Relatórios a mostra. Achado ao escrever o teste.
+- **Alerta no dashboard de Relatórios** ("N senha(s) aberta(s) de dias
+  anteriores", `coletar_alertas` + `contar_senhas_abertas_dias_anteriores`,
+  escopado às unidades visíveis): com a varredura funcionando é sempre 0 - o
+  alerta existe para que uma falha dela NÃO fique mascarada pelo filtro de
+  dia das telas. O título da caixa passou de "Alertas de configuração" para
+  "Alertas".
+- **Tempos por senha (10.73):** situação decidida pelo HISTÓRICO -
+  `expirada_aguardando` sem chamada anterior -> **"Expirada (nunca
+  chamada)"**; com chamada anterior -> **"Expirada (após realocação/volta à
+  espera)"** (com dica no tooltip). Antes, uma `cancelada` nunca chamada
+  cairia em "Aguardando (nunca chamada)". O evento NÃO entra em
+  `EVENTOS_ABERTURA_ESPERA`: a espera que terminou em expiração continua
+  descartada (segmento aberto) e nunca entra em tempos/médias.
+
+**Testes:** novo `tests/test_regressao_senhas_dias_anteriores.py` (27
+verificações; relógio simulado em 15/10 07:00 de Brasília via
+`_instante_utc`; nenhum request às 23h): com a varredura desligada, os 9
+pontos só listam/contam/chamam as senhas de hoje (inclusive FA003 de ontem x
+FA003 de hoje no Chamar por código, nas duas telas) e o alerta mostra "5
+senha(s)"; o 1º request às 07:00 encerra as 5 abertas de ontem com os eventos
+e snapshots certos (inclusive a das 21:50 de ontem, que já é 15/10 em UTC) e
+deixa as de hoje e a finalizada intactas; idempotência (request e chamada
+direta); o alerta some depois da varredura; UPDATE condicional (corrida
+perdida não grava log; 23h rodado 2x grava 1 log); virada para o dia seguinte
+com o memo; falha da varredura responde 200 e não grava o memo; dentro de 5
+min da falha, requests seguidos não tentam de novo; depois de 5 min tenta,
+encerra, grava o memo e limpa a falha; comando com o gate do middleware
+desligado (recusa sem `--antes-de-hoje`, `--dry-run` sem alterar, execução
+real, reexecução com 0); as duas situações novas no Tempos por senha (consulta e
+tela) e a espera expirada fora dos tempos.
+`tests/test_regressao_horario_relogio.py` ajustado: cria senhas com data fixa
+(23/07/2026) e espera vê-las em "Senhas em espera" - passou a fixar o relógio
+naquele dia. Suíte completa (77 arquivos) sem falhas.
+
+**Pendência registrada (seção 11), não corrigida aqui:** `TurnoAtivo`/
+`Usuario.local_atual_id` de dias anteriores também ficam abertos pela mesma
+causa.
+
+**Roteiro de deploy (nesta ordem - limpeza ANTES do restart):**
+
+1. `git pull`
+2. `flask db upgrade` (migration `e5b7c2d9a4f8`, só ENUM; necessária antes
+   da limpeza real, que grava `expirada_aguardando`)
+3. `flask encerrar-pendentes --antes-de-hoje --dry-run` - conferir a
+   contagem contra a query de investigação (GROUP BY empresa/unidade/fila/
+   dia)
+4. `flask encerrar-pendentes --antes-de-hoje` - limpeza real, uma transação
+5. restart do `gestfila`
+
+Por que a limpeza antes do restart: o restart sobe o código novo, cujo 1º
+request já faria a varredura sozinho (sem relatório e num momento qualquer).
+Rodando o comando antes, a limpeza acontece de forma controlada, com o
+resumo na tela, e o 1º request depois do restart não acha nada (no-op).
+Entre o `git pull` e o restart o servidor antigo continua no ar: as telas
+ainda não filtram por dia, mas depois do passo 4 não sobra senha de dias
+anteriores para aparecer. Sem mudança em `requirements.txt`.
+
+**Arquivos alterados:** `app/middleware/encerramento.py`;
+`app/models/senha.py` (`STATUS_ABERTOS`, `criada_hoje_na_clinica`,
+`senhas_abertas_de_dias_anteriores`);
+`app/models/log_atendimento.py`; nova migration
+`e5b7c2d9a4f8_evento_expirada_aguardando.py`; novo `app/comandos.py`;
+`app/__init__.py`; `app/core/dashboard_queries.py`;
+`app/relatorios/queries.py`; `app/relatorios/routes.py`;
+`app/atendimento/filas.py`; `app/atendimento/helpers.py`;
+`app/atendimento/chamada.py`; `app/templates/relatorios/dashboard.html`;
+seções 8 e 10.18 (notas cruzadas); novo
+`tests/test_regressao_senhas_dias_anteriores.py`;
+`tests/test_regressao_horario_relogio.py`.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
+- **`TurnoAtivo`/`Usuario.local_atual_id` de dias anteriores ficam abertos**
+  (achado na FASE 1 do 10.77; só registrado, não corrigido, a pedido do
+  cliente): mesma causa do gatilho só por relógio do 10.18, e mais ampla - o
+  backup server-side só encerra o turno do `current_user` que fizer um
+  request no blueprint `atendimento` depois das 23h; os demais operadores só
+  saem pelo logout ou pelo JS da aba. Um `local_atual_id` que sobra de ontem
+  bloqueia o Local no dia seguinte ("outro operador já ocupa",
+  `atendimento/local.py` e `turno.py`) até alguém usar "Desconectar" na tela
+  de ocupação. Correção natural: estender a varredura por dia do 10.77
+  (encerrar `TurnoAtivo` iniciado antes de hoje e liberar `local_atual_id`
+  com `local_desde` antes de hoje). Conferir em produção:
+  `SELECT id, local_atual_id, local_desde FROM usuarios WHERE local_atual_id
+  IS NOT NULL;` e `SELECT usuario_id, local_id, iniciado_em FROM
+  turnos_ativos WHERE ativo = 1;`.
 - **Padronizar o formato numérico dos relatórios antigos** (registrado no
   10.73): (1) CSV de Tempo de espera, Tempo de atendimento, Volume e Ranking
   para o padrão do Excel em português (";" e "," decimal, UTF-8 com BOM, como

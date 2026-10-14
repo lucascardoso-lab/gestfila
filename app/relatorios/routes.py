@@ -27,6 +27,7 @@ from .queries import (
     SITUACAO_HISTORICO_PARCIAL,
     TIPO_FECHAMENTO_ROTULOS,
     coletar_alertas,
+    contar_senhas_abertas_dias_anteriores,
     ranking_operadores,
     resumo_recursos,
     senhas_aguardando_por_fila,
@@ -168,7 +169,10 @@ def dashboard():
     recursos = resumo_recursos(empresa, unidades_visiveis)
     aguardando_por_fila = senhas_aguardando_por_fila(empresa, unidades_visiveis)
     chamadas = ultimas_chamadas(empresa, unidades_visiveis)
-    alertas = coletar_alertas(recursos["filas"], recursos["totens"], recursos["tvs"])
+    alertas = coletar_alertas(
+        recursos["filas"], recursos["totens"], recursos["tvs"],
+        senhas_abertas_dias_anteriores=contar_senhas_abertas_dias_anteriores(empresa, unidades_visiveis),
+    )
 
     mapas = mapas_nomes(empresa)
     filas_com_espera = [

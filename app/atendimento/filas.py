@@ -2,6 +2,7 @@ from flask import flash, redirect, render_template, request, url_for
 
 from app.extensions import db
 from app.models import Senha
+from app.models.senha import criada_hoje_na_clinica
 from app.utils.decorators import roles_required
 
 from . import atendimento_bp
@@ -16,10 +17,13 @@ def listar_filas():
     filas = filas_acessiveis()
     contagens = {
         fila.id: {
-            "aguardando": Senha.query.filter_by(fila_id=fila.id, status="aguardando").count(),
-            "prioridade": Senha.query.filter_by(
-                fila_id=fila.id, status="aguardando", prioridade=True
-            ).count(),
+            # adendo 10.77: só senhas do dia da clínica
+            "aguardando": Senha.query.filter_by(fila_id=fila.id, status="aguardando")
+            .filter(criada_hoje_na_clinica())
+            .count(),
+            "prioridade": Senha.query.filter_by(fila_id=fila.id, status="aguardando", prioridade=True)
+            .filter(criada_hoje_na_clinica())
+            .count(),
         }
         for fila in filas
     }

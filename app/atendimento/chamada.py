@@ -3,6 +3,7 @@ from flask_login import current_user
 
 from app.extensions import db
 from app.models import Senha
+from app.models.senha import criada_hoje_na_clinica
 from app.utils.rotulos import rotulo_fila
 
 from . import atendimento_bp
@@ -187,8 +188,11 @@ def chamar_local(setor, local_id):
 
     codigo = request.form.get("codigo", "").strip().upper()
     if codigo:
+        # adendo 10.77: o sequencial zera diariamente - sem o filtro de dia, o
+        # BSG003 de ontem e o de hoje coexistiriam e `.first()` pegaria qualquer um
         senha = Senha.query.filter(
-            Senha.fila_id.in_(fila_ids), Senha.status == "aguardando", Senha.codigo == codigo
+            Senha.fila_id.in_(fila_ids), Senha.status == "aguardando", Senha.codigo == codigo,
+            criada_hoje_na_clinica(),
         ).first()
         if senha is None:
             flash(f"Código '{codigo}' não encontrado ou já atendido nas filas deste Local.", "error")
@@ -364,7 +368,11 @@ def chamar(setor, fila_id):
 
     codigo = request.form.get("codigo", "").strip().upper()
     if codigo:
-        senha = Senha.query.filter_by(fila_id=fila.id, status="aguardando", codigo=codigo).first()
+        senha = (
+            Senha.query.filter_by(fila_id=fila.id, status="aguardando", codigo=codigo)
+            .filter(criada_hoje_na_clinica())  # adendo 10.77 - mesmo motivo do chamar_local
+            .first()
+        )
         if senha is None:
             flash(f"Código '{codigo}' não encontrado ou já atendido nesta fila.", "error")
             return redirect(url_for("atendimento.painel_fila", setor=setor, fila_id=fila.id))

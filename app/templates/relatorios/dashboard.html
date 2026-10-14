@@ -27,7 +27,7 @@
   </div>
 
   {% if alertas %}
-    <h2>Alertas de configuração</h2>
+    <h2>Alertas</h2>
     <div class="alertas">
       {% for alerta in alertas %}
         <p class="aviso alerta alerta-{{ alerta.tipo }}">{{ alerta.mensagem }}</p>

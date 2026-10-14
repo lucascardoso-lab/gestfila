@@ -21,6 +21,8 @@ projeto, com o virtualenv ativado).
 """
 import os
 from datetime import datetime
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 os.environ.setdefault("SECRET_KEY", "test")
 os.environ.setdefault("FLASK_ENV", "testing")
@@ -104,6 +106,13 @@ def login_como(login):
     assert resp.status_code == 200, (login, resp.status_code)
     return c
 
+
+# Relógio no MESMO dia (da clínica) das senhas de data fixa: as telas de
+# atendimento só listam senhas criadas hoje (adendo 10.77) - sem isto, a
+# senha de 23/07 seria "de um dia anterior" e sumiria de "Senhas em espera".
+patch(
+    "app.utils.tempo._instante_utc", return_value=datetime(2026, 7, 23, 18, 0, tzinfo=ZoneInfo("UTC"))
+).start()
 
 c_recepcao = login_como("recepcao_a_horario")
 with c_recepcao.session_transaction() as sess:

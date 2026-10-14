@@ -12,6 +12,7 @@ from flask_login import current_user
 
 from app.admin.helpers import resolver_unidade_contexto, unidades_da_empresa
 from app.models import Fila, LogAtendimento, Senha
+from app.models.senha import criada_hoje_na_clinica
 from app.relatorios.helpers import Filtros
 from app.relatorios.queries import _segmentos_espera_por_senha
 from app.utils.tempo import formatar_duracao, janela_dia_clinica_em_utc
@@ -58,6 +59,7 @@ def calcular_kpis(empresa, unidades_visiveis):
         Senha.empresa_id == empresa.id,
         Senha.unidade_id.in_(unidades_visiveis),
         Senha.status == "aguardando",
+        criada_hoje_na_clinica(),  # adendo 10.77 - só o dia da clínica
     ).count()
 
     inicio_hoje, fim_hoje = janela_dia_clinica_em_utc()
@@ -139,6 +141,7 @@ def filas_com_status(empresa, unidades_visiveis):
             Senha.empresa_id == empresa.id,
             Senha.unidade_id.in_(unidades_visiveis),
             Senha.status == "aguardando",
+            criada_hoje_na_clinica(),  # adendo 10.77
         ).with_entities(Senha.fila_id)
     ):
         contagens[fila_id] = contagens.get(fila_id, 0) + 1
