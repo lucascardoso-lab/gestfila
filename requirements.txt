@@ -26,7 +26,13 @@ openpyxl>=3.1,<4.0
 # sozinho engana). Playwright baixa o Chromium consigo mesmo (`playwright
 # install chromium`, ver README/CI) - mesma experiência "instala e roda" em
 # qualquer SO, sem passo de sistema separado.
-playwright>=1.62,<2.0
+# Fixo (não faixa) por reprodutibilidade (adendo 10.78): com a faixa, o CI
+# estava pegando 1.64 (Chromium diferente) enquanto produção e local estão
+# em 1.62.0. Cada versão do playwright baixa o SEU build do Chromium - trocar
+# este pin exige, em produção, `sudo -u www-data venv/bin/playwright install
+# chromium` depois do pip install (ver 10.68), senão o PDF falha com
+# "Executable doesn't exist".
+playwright==1.62.0
 # Só usada pela suíte de testes (tests/test_regressao_exportacao_pdf.py), pra
 # extrair o texto de um PDF gerado de verdade e confirmar o conteúdo (mesmo
 # papel que pandas/openpyxl já cumprem pros testes de CSV/Excel) - não há

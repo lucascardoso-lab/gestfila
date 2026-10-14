@@ -7582,12 +7582,23 @@ código antigo falha, o novo passa. `test_regressao_exportacao_pdf` (10.67)
 não mudou: confere textos de cabeçalho/rodapé, fora de célula de tabela.
 
 **Fora do escopo:** fixar a versão do Playwright vai em commit separado, na
-versão de produção. Seção 11: fonte própria no PDF.
+versão de produção (ver nota abaixo). Seção 11: fonte própria no PDF.
 
 **Arquivos alterados:** novo `tests/_pdf_texto.py`;
 `tests/test_regressao_relatorios_fila_unidade.py`;
 `tests/test_regressao_tempos_por_senha.py`;
 `tests/test_regressao_areas_fila.py`; `tests/test_regressao_duracao.py`.
+
+**Nota - Playwright fixado (commit separado):** `requirements.txt` passou de
+`playwright>=1.62,<2.0` para **`playwright==1.62.0`**, a versão de produção
+(confirmada por `pip show playwright` no servidor) e do local. Motivo:
+reprodutibilidade - com a faixa, o CI pegava 1.64 (Chromium 156) enquanto
+produção e local rodam 1.62.0. **No deploy deste pin NÃO é preciso
+reinstalar o Chromium em produção:** a versão instalada lá não muda, então
+o build do Chromium que ela usa já está baixado. Trocar o pin no futuro
+exige, depois do `pip install`, `sudo -u www-data venv/bin/playwright
+install chromium` (10.68) - registrado também no comentário do
+`requirements.txt`.
 
 ---
 
