@@ -7655,13 +7655,15 @@ o Local antigo em "Iniciar Turno" e continua mandando no rodízio do operador
   (adendo 10.79): N turno(s) desativado(s), N local(is) liberado(s)"), só
   quando houver algo. Não é INFO de propósito: esse log é o único registro, e
   o nível efetivo de `app.logger` em produção é WARNING - o logger não tem
-  nível próprio e herda o do root (padrão WARNING), e o `loglevel = "info"`
-  do `deploy/gunicorn.conf.py` só vale para os loggers do Gunicorn
-  (`gunicorn.error`/`gunicorn.access`). Conferido com
-  `create_app("production")`; o `wsgi.py` de produção não é versionado - se
-  ele configurar logging, nada muda (WARNING passa em qualquer nível até
-  WARNING). Procurar no servidor: `journalctl -u gestfila | grep "adendo
-  10.79"`.
+  nível próprio e herda o do root (padrão WARNING). Conferido com
+  `create_app("production")`. **Confirmado em produção (corrigido no
+  10.80):** o serviço roda `gunicorn --workers 1 --worker-class eventlet
+  --bind 127.0.0.1:8000 --timeout 120 run:app` - `run.py` não configura
+  logging e o `deploy/gunicorn.conf.py` nem é carregado (sem `-c`); em
+  qualquer caso, `loglevel` do Gunicorn só vale para os loggers dele
+  (`gunicorn.error`/`gunicorn.access`). Não existe `wsgi.py` (a versão
+  anterior desta nota dizia que ele "não é versionado" - errado). Procurar
+  no servidor: `journalctl -u gestfila | grep "adendo 10.79"`.
 - **Uma transação só para as três coisas:** nova
   `encerrar_pendencias_de_dias_anteriores()` chama
   `encerrar_senhas_de_dias_anteriores()` (10.77, que **deixou de commitar
@@ -7722,6 +7724,83 @@ hoje.
 `app/models/turno_ativo.py`; `app/models/usuario.py`; `app/admin/locais.py`;
 seção 10.15 (nota cruzada) e seção 11; novo
 `tests/test_regressao_turnos_locais_dias_anteriores.py`.
+
+---
+
+## 10.80. ADENDO — "Tempos por senha": coluna Situação cortada na tela (13 colunas) + PDF em A4 paisagem
+
+> Bug visual em produção: com a coluna Área (10.76) a tabela tem 13 colunas
+> e a última, Situação, ficava cortada na borda direita, sem rolagem
+> perceptível. Investigação (FASE 1) com prints no Chromium relatada e
+> aprovada antes de implementar.
+
+**Causa (medida no Chromium, dados sintéticos com os nomes reais mais
+longos de produção - filas "EQUIPE MULTIDISCIPLINAR", "ULTRASSONOGRAFIA",
+"BRONCOSCOPIA", "[MAT] Administração de Medicamentos M1"; locais
+"[ANÁ-LAB] Guichê-04", "[MAT] Anexo-M1 Guichê-01", "[MAT] Coleta-A
+01-Terreo"; unidades "Anápolis - Laborátorio", "República do Líbano";
+operador "Aline Laranjeira de Souza Santana Monteiro"):**
+
+- Cada coluna só encolhe até a sua palavra mais longa; a soma dessas
+  larguras mínimas é **1164 px**, e o contêiner preso em `main {
+  max-width: 1100px }` mostra **1052 px** - 112 px escondidos, em
+  1920x1080 (com 820 px de tela sobrando) e em 1366x768, nos dois temas.
+- A rolagem existia (`.tabela-rolagem { overflow-x: auto }`), mas a barra
+  fica no PÉ da tabela - com 100 linhas por página, ~8.500 px abaixo do
+  topo: quem está na lista nunca a vê.
+- **PDF:** não cortava, mas o Chromium **reduzia a escala da página
+  inteira** para a tabela caber no A4 retrato (área útil ~655 px; a
+  tabela pede 888 px com a Área, 821 px sem ela - já encolhia desde o
+  10.73, a Área piorou). Células de 8pt saíam com **5,83pt** (Segoe UI) e
+  **5,42pt** com DejaVu Sans, a fonte de produção (10.78).
+
+**Correção:**
+
+- **Tela larga só neste relatório:** `relatorios/_layout.html` ganhou o
+  block `main_classe` no `<main>`; `tempos_por_senha.html` usa
+  `main-largo` (`max-width: none`, mantém a margem de 1.5rem). Largura útil
+  da tabela (com a barra de rolagem vertical da página ocupando espaço, como
+  no Windows): 1842 px em 1920 e 1288 px em 1366 - os 1164 px cabem com
+  folga. Os outros relatórios não mudam (`<main class="">`).
+- **Rolagem de reserva para telas estreitas** (`.tabela-rolagem.tabela-fixa`):
+  altura limitada (`max-height: calc(100vh - 7rem)`, `overflow: auto`)
+  para a barra horizontal ficar sempre na tela; cabeçalho fixo no topo e
+  coluna Senha fixa à esquerda (`position: sticky`). **`overflow: visible`
+  na tabela é obrigatório:** o `table { overflow: hidden }` global faria
+  da própria tabela o contêiner de rolagem e o sticky não funcionaria.
+  Fundo opaco nas células fixas (tokens hexadecimais nos dois temas),
+  inclusive no hover da linha (`--gf-primaria-clara`); a linha divisória
+  da coluna fixa virou sombra interna (borda de célula sticky some com
+  `border-collapse`). Conferido em 900x768, claro e escuro, rolado e com
+  hover.
+- **Unidade NÃO foi escondida:** com os nomes reais cabe em 1366x768 (1164
+  px mínimos em 1288 px). Sem a Unidade seriam 1082 px - reserva, não
+  aplicada. CSV, Excel e PDF continuam com todas as colunas.
+- **PDF em A4 paisagem:** `_pdf_worker.py` passou a gerar com
+  `prefer_css_page_size=True` (o `@page { size }` do HTML manda; `format`
+  fica de reserva) e `_layout_impressao.html` ganhou o block
+  `estilo_impressao`, onde o "Tempos por senha" declara `@page { size: A4
+  landscape; }`. Os 5 PDFs gerados antes e depois: **só o Tempos por senha
+  mudou de orientação** (842 x 595 pt); Tempo de espera, Tempo de
+  atendimento, Volume e Ranking seguem em retrato (595 x 842 pt - o A4 do
+  CSS; antes, pelo `format` do Playwright, 596 x 843, diferença de
+  arredondamento). Células do Tempos por senha: **7,99pt** (Segoe UI) e
+  **7,94pt** com DejaVu Sans embutida no mesmo HTML - redução residual de
+  <1% em produção. Com fonte de 8pt e paisagem, o PDF tem mais páginas (8
+  -> 16 no cenário de 130 senhas); o limite de 500 linhas (10.73) não
+  mudou.
+
+**Testes:** `test_regressao_tempos_por_senha` (PDF em 842 x 595 pt; tela
+com `main-largo` e `tabela-fixa`; Volume sem) e
+`test_regressao_exportacao_pdf` (10.67 - Volume continua em retrato).
+Testes de PDF do 10.67 e do 10.78 verdes.
+
+**Arquivos alterados:** `app/templates/relatorios/_layout.html`;
+`app/templates/relatorios/_layout_impressao.html`;
+`app/templates/relatorios/tempos_por_senha.html`;
+`app/relatorios/_pdf_worker.py`; `tests/test_regressao_tempos_por_senha.py`;
+`tests/test_regressao_exportacao_pdf.py`; nota do 10.79 (logging) e seção
+11.
 
 ---
 
@@ -7792,6 +7871,29 @@ seção 10.15 (nota cruzada) e seção 11; novo
   resultado no adendo da correção; na remoção, revalidar o render do painel
   sem erro de JS e rodar a suíte (mesmo procedimento do 10.33). Não deve
   sobreviver indefinidamente em produção.
+- **Referências antigas a `wsgi:app` e `deploy/gunicorn.conf.py` fora de
+  uso** (registrado no 10.80, só registro): produção roda `gunicorn
+  --workers 1 --worker-class eventlet --bind 127.0.0.1:8000 --timeout 120
+  run:app` (README, "Instalação em produção") - SEM `-c`, então
+  `deploy/gunicorn.conf.py` NÃO é carregado (os `accesslog`/`errorlog`/
+  `loglevel`/`timeout = 60` de lá não valem; o timeout real é 120). Não
+  existe `wsgi.py`, mas ainda o citam: `deploy/painel-senhas.service`
+  (`ExecStart ... wsgi:app`, deploy de referência pré-rebrand), a docstring
+  do `deploy/gunicorn.conf.py` e um comentário do `run.py`. Corrigir para
+  `run:app` (ou remover o deploy de referência) e decidir se o
+  `gunicorn.conf.py` passa a ser usado (`-c`) ou sai do repositório.
+- **Flask-Limiter com armazenamento em memória** (registrado no 10.80, só
+  registro): sem `storage_uri`, os contadores do rate limit (login, totem,
+  painel de TV) vivem no processo e zeram a cada restart do `gestfila`.
+  Aceitável com 1 worker (um processo só, contador coerente); com mais
+  workers ou para limites que sobrevivam ao restart, apontar para
+  Redis/Memcached.
+- **Eventlet descontinuado** (registrado no 10.80, migração de longo
+  prazo): o projeto do Eventlet está em modo de manutenção e recomenda
+  migrar; o Gunicorn já removeu o worker na 26.0.0 (BLUEPRINT, deploy).
+  Caminho natural: worker `gthread` ou `gevent` com o Flask-SocketIO
+  (`async_mode` correspondente) - mexe no `run.py` (monkey_patch), no
+  serviço e na geração de PDF em subprocess (10.67/10.68).
 - **Foco visível por teclado no `<nav>`** (acessibilidade, fora do 10.72):
   os links do menu principal não têm `:focus-visible` próprio - o contorno
   `--gf-link` do 10.72 é só para a área de conteúdo e teria pouco contraste

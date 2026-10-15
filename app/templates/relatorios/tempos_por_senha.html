@@ -3,6 +3,12 @@
 
 {% block titulo %}Tempos por senha{% endblock %}
 
+{# Adendo 10.80: 13 colunas - tela com a largura toda da janela (o layout de
+   impressão não usa este block) e PDF em A4 paisagem (o worker usa o tamanho
+   do @page, `prefer_css_page_size`). #}
+{% block main_classe %}main-largo{% endblock %}
+{% block estilo_impressao %}@page { size: A4 landscape; }{% endblock %}
+
 {# Relatório por senha (adendo 10.73). Tempos em mm:ss / h:mm:ss pelo filtro
    `duracao` (adendo 10.75); sem dado = "—" na tela e célula vazia na
    exportação, nunca 00:00. Sem nome do paciente (LGPD, mesmo critério do 10.67). #}
@@ -69,7 +75,7 @@
         Use a exportação CSV ou Excel para a lista completa.
       </p>
     {% else %}
-      <div class="tabela-rolagem">
+      <div class="tabela-rolagem tabela-fixa">
       <table class="tabela-larga">
         <thead>
           <tr>

@@ -34,6 +34,7 @@ from zoneinfo import ZoneInfo
 
 import openpyxl
 import pandas as pd
+from pypdf import PdfReader
 
 from app import create_app
 from app.extensions import db
@@ -346,7 +347,8 @@ ok("Operador: por senha mantém S2 com o total inteiro (14 min); por etapa só a
 # compactado, ele é achado mesmo se quebrar no meio da célula. Ausência do token
 # curto "S2": texto normalizado + borda de palavra (compactado, células vizinhas
 # poderiam formar "S2" por acaso).
-pdf = texto_compacto_pdf(baixar("pdf"))
+bytes_pdf = baixar("pdf")
+pdf = texto_compacto_pdf(bytes_pdf)
 assert "S2" in pdf, f"PDF sem a senha S2: {pdf}"
 assert compactar("Histórico parcial") in pdf, f"PDF sem a situação 'Histórico parcial': {pdf}"
 assert compactar("Etapas de atendimento") in pdf, f"PDF sem o cabeçalho 'Etapas de atendimento': {pdf}"
@@ -360,6 +362,13 @@ pdf_resumo_normalizado = texto_normalizado_pdf(conteudo_resumo)
 assert not re.search(r"\bS2\b", pdf_resumo_normalizado), f"PDF acima do limite ainda lista a senha S2: {pdf_resumo_normalizado}"
 assert compactar(NOME) not in pdf_resumo and "Sigilosa" not in pdf_resumo, "nome do paciente vazou no PDF (LGPD)"
 ok("PDF: lista completa abaixo do limite; acima de LIMITE_LINHAS_PDF só o resumo + aviso de CSV/Excel; sem nome")
+
+# Adendo 10.80: 13 colunas - PDF em A4 paisagem (o @page do template manda,
+# `prefer_css_page_size`), para a tabela caber sem o Chromium reduzir a escala.
+pagina_pdf = PdfReader(io.BytesIO(bytes_pdf)).pages[0].mediabox
+assert pagina_pdf.width > pagina_pdf.height, (pagina_pdf.width, pagina_pdf.height)
+assert round(float(pagina_pdf.width)) == 842 and round(float(pagina_pdf.height)) == 595, pagina_pdf
+ok("PDF do Tempos por senha em A4 paisagem (842 x 595 pt)")
 
 with app.app_context():
     registros = {(r.tipo_relatorio, r.formato) for r in LogExportacaoRelatorio.query.all()}
@@ -375,5 +384,13 @@ c_op.post("/login", data={"login": "op_recepcao", "senha": "senha123"})
 assert c_op.get(URL).status_code == 403
 assert "Tempos por senha" in get("/relatorios/").get_data(as_text=True)
 ok("RBAC igual aos relatórios (403 para atendente) e item 'Tempos por senha' no menu")
+
+# Adendo 10.80: tela larga e tabela com rolagem própria (cabeçalho e Senha
+# fixos) só neste relatório - os outros continuam com o <main> de 1100px.
+tela_larga = get(URL).get_data(as_text=True)
+assert '<main class="main-largo">' in tela_larga
+assert '<div class="tabela-rolagem tabela-fixa">' in tela_larga
+assert '<main class="">' in get("/relatorios/volume").get_data(as_text=True)
+ok("Tela: só o Tempos por senha usa o <main> largo e a tabela com rolagem própria")
 
 print(f"\n{len(passos)} verificações OK")

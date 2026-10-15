@@ -21,6 +21,9 @@
   <title>{% block titulo %}Relatório{% endblock %} - GESTFILA</title>
   <style>
     {% include "relatorios/print.css" %}
+    {# CSS de impressão próprio de um relatório (adendo 10.80 - ex.: A4
+       paisagem no "Tempos por senha"); vem depois do print.css. #}
+    {% block estilo_impressao %}{% endblock %}
   </style>
 </head>
 <body>

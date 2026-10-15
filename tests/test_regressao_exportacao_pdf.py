@@ -133,6 +133,12 @@ assert "Volume de senhas" in texto_pdf  # título do relatório
 assert "Coleta Matinal" in texto_pdf  # dado real da tabela, mesmo template da tela
 ok("Cabeçalho do PDF traz os filtros aplicados por extenso (Unidade Central, Período) e o dado real da tabela")
 
+# Adendo 10.80: o worker passou a usar o @page do HTML (prefer_css_page_size) -
+# os relatórios que declaram só `size: A4` continuam em retrato.
+pagina = leitor.pages[0].mediabox
+assert pagina.width < pagina.height and round(float(pagina.width)) == 595, (pagina.width, pagina.height)
+ok("PDF do Volume continua em A4 retrato (595 x 842 pt)")
+
 # ===========================================================================
 # 3) Log de auditoria gravado para os 3 formatos (CSV, Excel, PDF).
 # ===========================================================================

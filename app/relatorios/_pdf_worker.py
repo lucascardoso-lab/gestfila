@@ -47,7 +47,10 @@ def gerar_pdf(html):
             contexto = p.chromium.launch_persistent_context(perfil_dir)
             pagina = contexto.new_page()
             pagina.set_content(html, wait_until="load")
-            pdf_bytes = pagina.pdf(format="A4", print_background=True)
+            # prefer_css_page_size (adendo 10.80): o `@page { size }` do HTML
+            # manda - todos os relatórios declaram A4 no print.css; o "Tempos
+            # por senha" pede A4 paisagem. `format` fica como reserva.
+            pdf_bytes = pagina.pdf(format="A4", print_background=True, prefer_css_page_size=True)
             contexto.close()
         return pdf_bytes
     finally:
