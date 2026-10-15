@@ -4,6 +4,7 @@ from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from app.extensions import db
+from app.utils.tempo import janela_dia_clinica_em_utc
 from .associations import usuario_perfil, usuario_unidade
 
 
@@ -79,3 +80,14 @@ class Usuario(UserMixin, db.Model):
 
     def __repr__(self):
         return f"<Usuario {self.id} {self.login}>"
+
+
+def usuarios_com_local_de_dias_anteriores():
+    """Query (não executada) dos usuários que ainda "ocupam" um Local escolhido
+    ANTES do dia civil de hoje da clínica (adendo 10.79) - `local_desde` é UTC
+    naive (`datetime.utcnow()`), limite pela janela do 10.39. `local_desde`
+    NULL com `local_atual_id` preenchido NÃO entra: as duas colunas são sempre
+    gravadas juntas, e produção não tem nenhuma linha assim (FASE 1 do 10.79).
+    Base única da varredura do middleware e do `flask encerrar-pendentes`."""
+    inicio_hoje, _fim = janela_dia_clinica_em_utc()
+    return Usuario.query.filter(Usuario.local_atual_id.isnot(None), Usuario.local_desde < inicio_hoje)

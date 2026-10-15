@@ -1550,6 +1550,9 @@ precisar de nenhuma lista de sessões revogadas em memória/banco. "Desconectar"
 (`admin/locais.py::desconectar_usuario_local`) incrementa `sessao_versao` E
 limpa `local_atual_id`/`local_desde` do usuário-alvo. Guarda: admin não pode
 desconectar a si mesmo (mesmo padrão já usado em "não desativar a si mesmo").
+**Atualizado no 10.79:** "Desconectar" também desativa o `TurnoAtivo` do
+usuário-alvo (antes o turno ficava `ativo=1` para sempre - bug confirmado em
+produção).
 
 ---
 
@@ -7489,7 +7492,7 @@ naquele dia. Suíte completa (77 arquivos) sem falhas.
 
 **Pendência registrada (seção 11), não corrigida aqui:** `TurnoAtivo`/
 `Usuario.local_atual_id` de dias anteriores também ficam abertos pela mesma
-causa.
+causa. **Resolvida no 10.79.**
 
 **Roteiro de deploy (nesta ordem - limpeza ANTES do restart):**
 
@@ -7602,6 +7605,126 @@ install chromium` (10.68) - registrado também no comentário do
 
 ---
 
+## 10.79. ADENDO — Turnos e Locais de dias anteriores: a varredura do 10.77 também fecha `TurnoAtivo` e libera `local_atual_id` + "Desconectar" desativa o turno
+
+> Pendência da seção 11 (achada na FASE 1 do 10.77). Investigação (FASE 1)
+> relatada e aprovada antes de implementar, com as consultas de produção.
+
+**Produção em 15/10/2026** (corte de hoje = 2026-10-15 03:00 UTC):
+
+- `usuarios` com `local_atual_id`: 64. **11 de dias anteriores** (o mais
+  antigo: Local 39, desde 18/09) e 53 de hoje. Nenhuma linha com
+  `local_desde` NULL.
+- `turnos_ativos` com `ativo=1`: 66. **13 de dias anteriores** (o mais
+  antigo: usuário 4 / Local 2, desde 01/09) e 53 de hoje. 11 dos 13 batem
+  com os 11 locais presos. **Os outros 2 (usuário 4 / Local 2 e usuário 97 /
+  Local 93) não têm `local_atual_id`, e os Locais deles foram ocupados por
+  outros operadores hoje** - evidência do bug do "Desconectar" abaixo.
+
+**Causa:** a mesma do gatilho só por relógio (10.18), e mais ampla - o
+backup server-side das 23h só encerra o turno do `current_user` que fizer um
+request no blueprint `atendimento` depois das 23h. Os demais operadores só
+saíam pelo logout, pelo "Encerrar turno" ou pelo JS da aba. **O que trava é
+só `Usuario.local_atual_id`:** as duas checagens de "já está em uso por ..."
+(`atendimento/local.py::escolher_local` e `turno.py::iniciar_turno`) olham só
+essa coluna, então um Local de ontem ficava bloqueado até um admin usar
+"Desconectar". Um `TurnoAtivo` velho não bloqueia ninguém, mas pré-preenche
+o Local antigo em "Iniciar Turno" e continua mandando no rodízio do operador
+(`turno_ativo_do_usuario`) se ele abrir a tela do Local sem iniciar turno.
+
+**Correção:**
+
+- **Duas queries base** (irmãs de `senhas_abertas_de_dias_anteriores` do
+  10.77, limite pela janela do 10.39 - `iniciado_em`/`local_desde` são UTC
+  naive, `datetime.utcnow()`):
+  - `turnos_ativos_de_dias_anteriores()` (`app/models/turno_ativo.py`):
+    `ativo = 1 AND iniciado_em < inicio_hoje`;
+  - `usuarios_com_local_de_dias_anteriores()` (`app/models/usuario.py`):
+    `local_atual_id IS NOT NULL AND local_desde < inicio_hoje`. **`local_desde`
+    NULL não é tratado** (não existe em produção; as duas colunas são sempre
+    gravadas juntas) - só um teste documenta que essa linha não é liberada.
+- **`liberar_turnos_e_locais_de_dias_anteriores()`**
+  (`app/middleware/encerramento.py`): **UPDATE condicional em lote** - um
+  `UPDATE turnos_ativos SET ativo=0 WHERE <condição>` e um `UPDATE usuarios
+  SET local_atual_id=NULL, local_desde=NULL WHERE <condição>`, com o WHERE
+  repetindo a condição da query. Um operador que inicia turno ou escolhe
+  local no mesmo instante grava `utcnow()` e deixa de casar com o WHERE - a
+  varredura nunca desfaz uma escolha de hoje. Sem log de auditoria por linha
+  (não existe tabela de histórico de turno; `LogAtendimento` é por senha):
+  as contagens vão para o log da aplicação em **WARNING** ("Dias anteriores
+  (adendo 10.79): N turno(s) desativado(s), N local(is) liberado(s)"), só
+  quando houver algo. Não é INFO de propósito: esse log é o único registro, e
+  o nível efetivo de `app.logger` em produção é WARNING - o logger não tem
+  nível próprio e herda o do root (padrão WARNING), e o `loglevel = "info"`
+  do `deploy/gunicorn.conf.py` só vale para os loggers do Gunicorn
+  (`gunicorn.error`/`gunicorn.access`). Conferido com
+  `create_app("production")`; o `wsgi.py` de produção não é versionado - se
+  ele configurar logging, nada muda (WARNING passa em qualquer nível até
+  WARNING). Procurar no servidor: `journalctl -u gestfila | grep "adendo
+  10.79"`.
+- **Uma transação só para as três coisas:** nova
+  `encerrar_pendencias_de_dias_anteriores()` chama
+  `encerrar_senhas_de_dias_anteriores()` (10.77, que **deixou de commitar
+  sozinha**) e a função acima, com um commit no fim, e devolve `(senhas,
+  turnos, locais)`. O middleware (`_varrer_dias_anteriores_uma_vez_por_dia`)
+  passa a chamá-la, reaproveitando tudo do 10.77: 1º request do dia da
+  clínica, memo do dia em `app.extensions`, `INTERVALO_RETENTATIVA_VARREDURA`
+  (5 min) depois de uma falha, rollback + `logger.exception` sem derrubar o
+  request, gate `ENCERRAMENTO_SESSOES_ATIVO`. Falha em qualquer parte desfaz
+  as três (testado: a falha ao liberar turnos desfaz o cancelamento das
+  senhas).
+- **Comando `flask encerrar-pendentes --antes-de-hoje [--dry-run]`:** o
+  resumo ganhou "Turnos ativos de dias anteriores: N" e "Locais ocupados
+  desde dias anteriores: N", uma linha por usuário (`dia da clínica |
+  empresa | usuário (id) | local (id)`); a execução real chama
+  `encerrar_pendencias_de_dias_anteriores` e mostra "Turnos desativados: N.
+  Locais liberados: N.". `--dry-run` continua só SELECT + rollback.
+- **"Desconectar" desativa o `TurnoAtivo` (destaque - bug confirmado em
+  produção):** `admin/locais.py::desconectar_usuario_local` liberava o Local
+  e derrubava a sessão, mas deixava o turno `ativo=1` para sempre (os 2
+  turnos sem local acima). Agora faz o mesmo `UPDATE ... ativo=False` do
+  logout, nos dois caminhos (com e sem Local a liberar). Mensagens da tela
+  sem mudança.
+
+**`sessao_versao` / sessão única (10.41) - decisão: opção A.** A varredura
+**não mexe em `sessao_versao`**: ninguém é deslogado, e a sessão única (que
+só depende do incremento no login) não muda. Quem entrou hoje está protegido
+pela condição de data. A opção B (incrementar `sessao_versao` dos usuários
+varridos) foi descartada: sem uma coluna `ultimo_login`, ela poderia derrubar
+quem entrou hoje e ainda não escolheu Local, se a varredura atrasar por
+falha. **Risco residual aceito:** uma sessão que sobreviveu à noite (navegador
+aberto fora das telas de Atendimento, onde o redirecionamento das 23h não
+roda) continua válida com o Local liberado - e as telas/ações por Local não
+exigem que o operador ocupe aquele Local (seção 11).
+
+**Tela de ocupação de locais:** lista quem tem `local_atual_id`; depois da
+varredura, as linhas de dias anteriores somem e "Desde" só mostra ocupações
+de hoje. "Desconectar" continua servindo para travas do próprio dia. Template
+sem mudança.
+
+**Roteiro de deploy (nesta ordem - limpeza ANTES do restart, mesmo motivo do
+10.77):**
+
+1. `git pull`
+2. `flask encerrar-pendentes --antes-de-hoje --dry-run` - deve mostrar
+   **~11 locais e ~13 turnos** (menos o que for liberado até lá por logout,
+   "Encerrar turno" ou "Desconectar"), mais as senhas que houver.
+3. `flask encerrar-pendentes --antes-de-hoje` - limpeza real, uma transação.
+4. restart do `gestfila`.
+
+Sem migration e sem mudança em `requirements.txt`. Conferir depois com as
+mesmas consultas da FASE 1 (`SELECT id, local_atual_id, local_desde FROM
+usuarios WHERE local_atual_id IS NOT NULL;` e `SELECT usuario_id, local_id,
+iniciado_em FROM turnos_ativos WHERE ativo = 1;`): só devem sobrar linhas de
+hoje.
+
+**Arquivos alterados:** `app/middleware/encerramento.py`; `app/comandos.py`;
+`app/models/turno_ativo.py`; `app/models/usuario.py`; `app/admin/locais.py`;
+seção 10.15 (nota cruzada) e seção 11; novo
+`tests/test_regressao_turnos_locais_dias_anteriores.py`.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - **Fonte própria nos PDFs de relatório** (prioridade BAIXA, registrado no
@@ -7612,20 +7735,16 @@ install chromium` (10.68) - registrado também no comentário do
   linha nas células. Um `@font-face` com uma fonte embutida no projeto
   daria o mesmo visual em qualquer servidor e tornaria os testes de PDF
   determinísticos (mesmas quebras no Windows e no Linux).
-- **`TurnoAtivo`/`Usuario.local_atual_id` de dias anteriores ficam abertos**
-  (achado na FASE 1 do 10.77; só registrado, não corrigido, a pedido do
-  cliente): mesma causa do gatilho só por relógio do 10.18, e mais ampla - o
-  backup server-side só encerra o turno do `current_user` que fizer um
-  request no blueprint `atendimento` depois das 23h; os demais operadores só
-  saem pelo logout ou pelo JS da aba. Um `local_atual_id` que sobra de ontem
-  bloqueia o Local no dia seguinte ("outro operador já ocupa",
-  `atendimento/local.py` e `turno.py`) até alguém usar "Desconectar" na tela
-  de ocupação. Correção natural: estender a varredura por dia do 10.77
-  (encerrar `TurnoAtivo` iniciado antes de hoje e liberar `local_atual_id`
-  com `local_desde` antes de hoje). Conferir em produção:
-  `SELECT id, local_atual_id, local_desde FROM usuarios WHERE local_atual_id
-  IS NOT NULL;` e `SELECT usuario_id, local_id, iniciado_em FROM
-  turnos_ativos WHERE ativo = 1;`.
+- **Telas e ações por Local não exigem que o operador ocupe aquele Local**
+  (registrado no 10.79, não corrigido): `painel_local`, `dados_local`,
+  `chamar_local` e as demais ações por Local (`atendimento/chamada.py`)
+  usam o `local_id` da URL (`local_acessivel_ou_404`) e não conferem
+  `current_user.local_atual_id == local.id`. Isso permite, por exemplo, que
+  a sessão que sobrou de ontem (risco residual da opção A do 10.79), ou um
+  operador que perdeu o Local sem perder a sessão, continue chamando daquele
+  Local enquanto outro operador o ocupa. Correção natural: exigir a ocupação
+  nas ações que mudam estado (Chamar/Finalizar/Redirecionar etc.),
+  mandando para "Iniciar Turno"/"Escolher local" quando não bater.
 - **Padronizar o formato numérico dos relatórios antigos** (registrado no
   10.73): (1) CSV de Tempo de espera, Tempo de atendimento, Volume e Ranking
   para o padrão do Excel em português (";" e "," decimal, UTF-8 com BOM, como

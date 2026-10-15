@@ -13,7 +13,7 @@ from app.admin.helpers import (
 )
 from app.atendimento.helpers import caminho_audio_local, usuarios_ativos_da_empresa
 from app.extensions import db
-from app.models import Empresa, Fila, Local, LocalRodizioFila, Senha, Tv, Usuario
+from app.models import Empresa, Fila, Local, LocalRodizioFila, Senha, TurnoAtivo, Tv, Usuario
 from app.models.local import TIPO_LOCAL
 from app.utils.slug import gerar_slug_audio_local
 
@@ -194,6 +194,11 @@ def desconectar_usuario_local(usuario_id):
         return redirect(url_for("admin.ocupacao_locais", empresa_id=usuario.empresa_id))
 
     usuario.sessao_versao = (usuario.sessao_versao or 0) + 1
+    # Desativa também o turno (adendo 10.79 - bug confirmado em produção): antes
+    # só o Local era liberado, o `TurnoAtivo` ficava `ativo=1` para sempre e
+    # continuava mandando no rodízio do operador e pré-preenchendo o Local na
+    # tela 'Iniciar Turno' - mesmo efeito do logout (auth/routes.py::logout).
+    TurnoAtivo.query.filter_by(usuario_id=usuario.id, ativo=True).update({"ativo": False})
 
     if usuario.local_atual_id is None:
         db.session.commit()

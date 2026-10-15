@@ -99,8 +99,9 @@ def encerrar_senhas_de_dias_anteriores():
     horário de encerramento e a meia-noite. Cancela toda senha aberta criada
     antes de hoje: 'aguardando' -> evento 'expirada_aguardando';
     'chamada'/'em_atendimento' -> 'encerramento_automatico_sistema' (mesma
-    semântica do 10.18). Uma transação só (um commit no fim). Idempotente:
-    rodar de novo não acha nada. Devolve a quantidade de senhas encerradas."""
+    semântica do 10.18). Idempotente: rodar de novo não acha nada. Devolve a
+    quantidade de senhas encerradas. Não commita (desde o 10.79) - a transação
+    é de `encerrar_pendencias_de_dias_anteriores`."""
     from app.models import Senha
     from app.models.senha import senhas_abertas_de_dias_anteriores
 
@@ -110,17 +111,62 @@ def encerrar_senhas_de_dias_anteriores():
         evento = "expirada_aguardando" if status_lido == "aguardando" else "encerramento_automatico_sistema"
         if _cancelar_se_status_ainda_for(senha, status_lido, evento):
             encerradas += 1
-    db.session.commit()
     return encerradas
 
 
+def liberar_turnos_e_locais_de_dias_anteriores():
+    """Turnos e Locais de dias anteriores (adendo 10.79) - mesma causa do 10.77:
+    o backup das 23h (10.18) só encerra o turno do `current_user` que fizer um
+    request em `atendimento` depois das 23h; os demais operadores só saíam pelo
+    logout ou pelo JS da aba, e um `local_atual_id` que sobrava de ontem
+    bloqueava o Local no dia seguinte ("já está em uso por ...").
+
+    Desativa todo `TurnoAtivo` iniciado antes de hoje e libera `local_atual_id`/
+    `local_desde` de quem escolheu o Local antes de hoje. Cada um é UM UPDATE
+    condicional em lote cujo WHERE repete a condição - um operador que inicia
+    turno ou escolhe local no mesmo instante grava `utcnow()` e deixa de casar
+    com o WHERE, então a varredura nunca desfaz uma escolha de hoje. NÃO mexe
+    em `sessao_versao` (decisão do 10.79, opção A): ninguém é deslogado.
+
+    Sem log de auditoria por linha (não existe tabela de histórico de turno -
+    `LogAtendimento` é por senha); as contagens vão para o log da aplicação
+    (WARNING - chega ao journalctl).
+    Não commita. Devolve `(turnos_desativados, locais_liberados)`."""
+    from app.models.turno_ativo import turnos_ativos_de_dias_anteriores
+    from app.models.usuario import usuarios_com_local_de_dias_anteriores
+
+    turnos = turnos_ativos_de_dias_anteriores().update({"ativo": False}, synchronize_session=False)
+    locais = usuarios_com_local_de_dias_anteriores().update(
+        {"local_atual_id": None, "local_desde": None}, synchronize_session=False
+    )
+    if turnos or locais:
+        # WARNING, não INFO: é o único registro (sem tabela de auditoria) e o
+        # nível efetivo de `app.logger` em produção é WARNING - o `loglevel` do
+        # gunicorn.conf.py só vale para os loggers do próprio Gunicorn.
+        current_app.logger.warning(
+            "Dias anteriores (adendo 10.79): %s turno(s) desativado(s), %s local(is) liberado(s)", turnos, locais
+        )
+    return turnos, locais
+
+
+def encerrar_pendencias_de_dias_anteriores():
+    """Tudo o que ficou aberto de dias anteriores, numa transação só (um commit
+    no fim): senhas (10.77), turnos e locais (10.79). Base do middleware e do
+    `flask encerrar-pendentes`. Idempotente. Devolve `(senhas, turnos, locais)`."""
+    senhas = encerrar_senhas_de_dias_anteriores()
+    turnos, locais = liberar_turnos_e_locais_de_dias_anteriores()
+    db.session.commit()
+    return senhas, turnos, locais
+
+
 def _varrer_dias_anteriores_uma_vez_por_dia():
-    """Roda `encerrar_senhas_de_dias_anteriores` no 1º request de cada dia da
-    clínica (por processo) - a qualquer hora, não só depois das 23h. O memo
+    """Roda `encerrar_pendencias_de_dias_anteriores` no 1º request de cada dia
+    da clínica (por processo) - a qualquer hora, não só depois das 23h. O memo
     (dia já varrido, em `app.extensions`) evita uma query a cada request (TV,
-    polling, estáticos); é seguro porque, depois da varredura, nenhuma senha
-    de antes de hoje volta a ficar aberta ('cancelada' não reabre e senha nova
-    nasce com `criada_em` = agora). O memo só é gravado depois do commit.
+    polling, estáticos); é seguro porque, depois da varredura, nada de antes de
+    hoje volta a ficar aberto ('cancelada' não reabre, senha nova nasce com
+    `criada_em` = agora, e turno/local novos com `iniciado_em`/`local_desde` =
+    agora). O memo só é gravado depois do commit.
 
     Falha da varredura NÃO derruba o request (roda num before_request global -
     uma exceção aqui viraria 500 em todo o sistema, totem e TV inclusive): vai
@@ -137,12 +183,12 @@ def _varrer_dias_anteriores_uma_vez_por_dia():
     if ultima_falha is not None and agora - ultima_falha < INTERVALO_RETENTATIVA_VARREDURA:
         return
     try:
-        encerrar_senhas_de_dias_anteriores()
+        encerrar_pendencias_de_dias_anteriores()
     except Exception:
         db.session.rollback()
         current_app.extensions[_CHAVE_ULTIMA_FALHA] = agora
         current_app.logger.exception(
-            "Falha ao encerrar senhas de dias anteriores (adendo 10.77) - nova tentativa em %s",
+            "Falha ao encerrar pendências de dias anteriores (adendos 10.77/10.79) - nova tentativa em %s",
             INTERVALO_RETENTATIVA_VARREDURA,
         )
         return
@@ -158,10 +204,11 @@ def register_encerramento_middleware(app):
         # senhas e derrubar sessões em TODO teste autenticado. Ligado em prod/dev.
         if not current_app.config.get("ENCERRAMENTO_SESSOES_ATIVO", True):
             return None
-        # Senhas abertas de DIAS ANTERIORES (adendo 10.77): a qualquer hora, no
-        # 1º request do dia - sem isso, um dia em que ninguém acessou entre
-        # 23:00 e 23:59 deixava senhas abertas para sempre (o gatilho abaixo é
-        # só por relógio e às 07:00 já é "antes das 23:00" de novo).
+        # Senhas abertas, turnos e locais de DIAS ANTERIORES (adendos 10.77/
+        # 10.79): a qualquer hora, no 1º request do dia - sem isso, um dia em
+        # que ninguém acessou entre 23:00 e 23:59 deixava tudo aberto para
+        # sempre (o gatilho abaixo é só por relógio e às 07:00 já é "antes das
+        # 23:00" de novo).
         _varrer_dias_anteriores_uma_vez_por_dia()
 
         # hora da CLÍNICA (fuso explícito, app/utils/tempo.py), não a hora do SO -

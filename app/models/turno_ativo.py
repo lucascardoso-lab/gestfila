@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from app.extensions import db
+from app.utils.tempo import janela_dia_clinica_em_utc
 
 
 class TurnoAtivo(db.Model):
@@ -44,3 +45,12 @@ class TurnoAtivo(db.Model):
 
     def __repr__(self):
         return f"<TurnoAtivo usuario={self.usuario_id} local={self.local_id} ativo={self.ativo}>"
+
+
+def turnos_ativos_de_dias_anteriores():
+    """Query (não executada) dos turnos ainda `ativo` iniciados ANTES do dia
+    civil de hoje da clínica (adendo 10.79) - `iniciado_em` é UTC naive, limite
+    pela janela do 10.39. Base única da varredura do middleware e do `flask
+    encerrar-pendentes`."""
+    inicio_hoje, _fim = janela_dia_clinica_em_utc()
+    return TurnoAtivo.query.filter(TurnoAtivo.ativo.is_(True), TurnoAtivo.iniciado_em < inicio_hoje)
