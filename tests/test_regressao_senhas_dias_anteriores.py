@@ -297,7 +297,9 @@ with app.app_context():
     total_logs = LogAtendimento.query.count()
 with relogio(15, 9):
     app.test_client().get("/login")
-with app.app_context():
+# a chamada direta também sob o relógio do dia 15 - com o relógio real, as
+# senhas "de hoje" (15/10) já seriam de dia anterior e seriam encerradas
+with relogio(15, 9), app.app_context():
     assert LogAtendimento.query.count() == total_logs
     assert encerramento.encerrar_senhas_de_dias_anteriores() == 0
     assert LogAtendimento.query.count() == total_logs

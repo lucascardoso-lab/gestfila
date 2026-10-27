@@ -7526,6 +7526,17 @@ seções 8 e 10.18 (notas cruzadas); novo
 `tests/test_regressao_senhas_dias_anteriores.py`;
 `tests/test_regressao_horario_relogio.py`.
 
+**Nota - teste dependente do relógio real (commit separado, 27/10/2026):**
+`test_regressao_senhas_dias_anteriores` passou a falhar a partir de
+16/10/2026, sem nenhuma mudança de código (a Action do 15/10 estava verde;
+o teste só não rodou de novo no runner desde então). Causa: na checagem de
+idempotência, a chamada direta a `encerrar_senhas_de_dias_anteriores()`
+ficava fora do `relogio(15, 9)` e usava o relógio real. Com a data real
+depois de 15/10, as 2 senhas "de hoje" do teste (15/10) viravam dia
+anterior e eram encerradas (retorno 2, não 0). Correção só no teste: a
+chamada direta roda sob o mesmo `relogio(15, 9)`. Nenhum código de produção
+mudou.
+
 ---
 
 ## 10.78. ADENDO — Action vermelha desde o 10.69: testes de PDF dependiam de onde a fonte quebra as células
