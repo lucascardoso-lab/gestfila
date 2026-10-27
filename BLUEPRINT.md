@@ -7815,6 +7815,179 @@ Testes de PDF do 10.67 e do 10.78 verdes.
 
 ---
 
+## 10.81. ADENDO — Painel de TV aberto do zero sem interação: fila de voz travada pelo autoplay do Chrome
+
+> Bug em produção: o painel ficava mudo e **parava de mostrar as chamadas
+> novas**. Informação do cliente que fechou o diagnóstico: não tem relação
+> com o boot. O erro acontece **sempre que o painel é aberto do zero sem
+> interação**, inclusive em máquina que fica ligada quando o Chrome é
+> fechado e reaberto. Máquinas que nunca reabrem o navegador não têm o
+> erro. Clicar na página depois que o som falhou não resolve; o F12
+> resolve.
+
+**Gatilho exato:** página aberta do zero sem interação (sem *user
+activation*). Sem um gesto do usuário na página, o Chrome não libera o
+áudio (política de autoplay).
+
+> **⚠ Sem a política `AutoplayAllowlist`, a voz NÃO sai sem um clique,
+> mesmo com esta correção.** O Chrome recusa tanto o áudio quanto a fala
+> (`speechSynthesis`) de uma página sem interação. A correção garante só
+> isto: **tela sempre atualizada, fila nunca presa e aviso de som bloqueado
+> visível**. A política é **PRÉ-REQUISITO DE DEPLOY** em cada computador de
+> TV, não um complemento (roteiro no fim deste adendo).
+
+**Causa (reproduzida no Chromium 151 do Playwright, headless-shell e
+Chromium completo, e no Google Chrome 155 instalado, todos com
+`--autoplay-policy=document-user-activation-required`, a política padrão do
+Chrome de desktop; o JS real de `painel/tv.html` e as chamadas disparadas
+de dentro da página):**
+
+1. Na 1ª chamada, `despertarSaidaAudio()` (10.51) cria o `AudioContext`, que
+   nasce `suspended` (`navigator.userActivation.hasBeenActive=false`).
+2. O código chama `resume()` e só toca o tom no `.then()`. Sem ativação, o
+   Chrome **deixa essa Promise pendente para sempre**: não resolve nem
+   rejeita. O oscilador nem chega a ser criado (a hipótese inicial era um
+   `onended` que não vinha; o efeito é o mesmo). O callback do tom nunca
+   roda, então `processandoFila` (10.58) fica `true` para sempre: A002,
+   A003... entram na fila e nunca saem. **A tela também para**, porque
+   `inserirChamada()` roda dentro do turno.
+3. Um clique depois da falha dá ativação à página, mas ninguém chama
+   `resume()` de novo dentro do gesto. A Promise antiga continua pendente,
+   o contexto continua `suspended` e a fila continua travada. Por isso o
+   clique não resolvia.
+4. Com a fila destravada, o Chrome também recusa `speechSynthesis.speak()`
+   sem ativação (`onerror` com `error: "not-allowed"`, imediato) e
+   `<audio>.play()` do pré-gravado (10.33, Promise rejeitada com
+   `NotAllowedError`). Daí o aviso acima.
+
+**F12: continua sem explicação confirmada.** Não foi reproduzido (no
+headless não há DevTools para abrir). Fica registrado só o relato do
+cliente; a correção não depende dele.
+
+Armadilha de teste registrada: `page.evaluate`, `wait_for_function`,
+`wait_for_selector` e `inner_text` do Playwright **concedem user
+activation** à página (`hasBeenActive` vira `true`) e escondem o bug.
+Medido: só esperar mensagens de console (`expect_console_message`) não
+concede. O teste roda o roteiro dentro da página e o clique é um clique de
+mouse real.
+
+**Correção (`painel/tv.html`), na ordem de prioridade pedida:**
+
+1. **Tempo máximo no tom** (`DESPERTAR_AUDIO_TIMEOUT_MS = 1000`, ~8x a
+   duração do tom de 130 ms): se o tom não terminar nesse tempo (`resume()`
+   pendente ou `onended` que não vem), o turno segue para a fala sem o tom.
+   `iniciarTom` não toca nada se o turno já seguiu (`resume()` que só
+   resolve depois, no gesto).
+2. **Autocorreção da fila** (watchdog por turno em
+   `processarProximaDaFila()`, `TURNO_FILA_TIMEOUT_MS` = tempo máximo do tom
+   + watchdog da fala + 4 s = 20 s). Se nenhum caminho de saída liberar o
+   turno, ele mostra a chamada na tela (se ainda não mostrou) e libera a
+   fila. `turnoEncerrado`/`turnoIniciado` garantem uma única finalização e
+   um único `falarChamada()`+`inserirChamada()` por turno. **Relação com o
+   watchdog da fala (10.58, 15 s):**
+   - **Voz:** o watchdog da fala começa no `speak()`, no máximo 1 s depois
+     do início do turno (tempo máximo do tom), e libera o turno em até 16 s.
+     O do turno (20 s) só age se esse não resolveu.
+   - **Nenhum dos dois corta uma fala normal:** o watchdog do turno **nunca
+     chama `cancel()`**. O único `cancel()` do fluxo é o do 10.58, só na
+     própria fala que passou de 15 s sem `onend`/`onerror` (frase real: ~7
+     s), sem mudança aqui. `falarChamada()` não chama `cancel()` (10.58), e
+     um `speak()` novo entra na fila do motor depois da fala em andamento.
+     Se o turno for liberado com uma fala ainda saindo, a próxima espera, não
+     corta.
+   - **Pré-gravado:** não tem watchdog próprio, e uma sequência nova pausa a
+     anterior (`audioPregravadoAtual.pause()`). Por isso o watchdog do turno
+     **não libera a fila enquanto o clipe estiver avançando**
+     (`marcaAudioPregravadoTocando()`: clipe tocando e `currentTime`
+     diferente da última leitura). Ele reverifica a cada 3 s
+     (`TURNO_FILA_REVERIFICAR_MS`) e só libera com o áudio parado.
+3. **`resume()` + destravar no 1º clique, tecla ou toque**
+   (`destravarAudioNoGesto()`, em `pointerdown`/`keydown`/`touchstart`, fase
+   de captura, só com `TV_SOM_ATIVO`): cria o `AudioContext` se ainda não
+   existe, chama `resume()` dentro do gesto (isso resolve também o
+   `resume()` que ficou pendente) e chama `processarProximaDaFila()` para
+   qualquer item parado. **Não toca nada:** `filaChamadas` só recebe evento
+   `chamada` ao vivo, nunca o histórico de `recarregarHistorico()`. Um
+   reload continua sem áudio (10.13), e as chamadas que saíram mudas antes
+   do clique não são repetidas.
+4. **Aviso de som bloqueado** (`#aviso-som-bloqueado`, faixa fixa no topo,
+   só no HTML de `tv.html`; `indisponivel.html` herda só o CSS do layout e
+   não mostra nada): *"Som bloqueado pelo navegador. Clique na tela ou
+   pressione uma tecla para liberar o áudio das chamadas."* Aparece quando
+   o `AudioContext` não está `running`, quando a fala volta `not-allowed`
+   ou quando o `play()` do pré-gravado é recusado com `NotAllowedError`. Some
+   no gesto (`onstatechange` do contexto). O contexto passou a ser criado
+   **já no load** (com som ativo), para avisar antes da 1ª chamada. O estado
+   é lido 1 s depois do `resume()`, para não acusar navegadores que liberam
+   sem gesto. **Estilo:** só tokens do painel. Fundo
+   `--painel-fundo-elemento`, texto `--painel-texto-principal` (contraste
+   medido: 13,9:1 no escuro, 15,5:1 no claro, 10.56) e `--gf-alerta` só na
+   borda. Texto branco sobre `--gf-alerta` daria ~3,2:1. Tem regra
+   `[hidden]` própria (padrão do 10.53).
+
+**Resultado medido (Chrome 155, sem interação):** aviso visível desde o
+load; A001 e A002 aparecem na tela (antes: tela parada no "—" e fila
+travada); a fala volta `not-allowed`. Depois do clique real: `resume()`
+resolve, contexto `running`, aviso some, A003 toca o tom e é falada
+normalmente. Com `--autoplay-policy=no-user-gesture-required` (o mesmo
+efeito da política abaixo): contexto `running` desde o load, sem aviso,
+tom + voz em todas as chamadas sem nenhum clique.
+
+**Testes:** `test_regressao_som_bloqueado_autoplay` (novo, Chromium do
+Playwright, o mesmo do runner, sem `channel`). Checagens no template: os 4
+mecanismos, nenhum `cancel()` no watchdog do turno e a faixa ausente do
+`indisponivel.html`. Comportamento real sem ativação, em duas TVs:
+- **voz:** reload com histórico não fala; A001 e A002 passam pela fila e
+  atualizam a tela; aviso visível; o clique não fala nada sozinho; depois
+  dele a A003 é processada e o aviso some; contraste nos dois temas;
+- **pré-gravado** (`usa_audio_pregravado`, Web Audio API removida para o
+  aviso só poder vir do `play()`): `play()` recusado mostra o aviso e não
+  trava a fila; o clique não toca nada; depois dele os clipes da A003 tocam
+  (WAV silencioso gerado no teste).
+
+Sincronização só por mensagens de console, sem espera fixa no Python
+(timeouts são teto). Não depende de fonte. Não depende de vozes: sem voz pt
+(runner Linux), a fala termina na hora e o aviso vem do `AudioContext`.
+Validado por mutação: sem o tempo máximo do tom, com o `play()` recusado sem
+marcar o aviso ou com o gesto sem `resume()`, o teste falha.
+`test_regressao_fila_voz_tv`: a checagem de ordem `falarChamada()` antes de
+`inserirChamada()` (10.48) passou a medir dentro de `executarTurno`, porque o
+watchdog do turno também chama `inserirChamada()` (só quando o turno nunca
+falou).
+
+**Roteiro de deploy (a política é pré-requisito):**
+
+a) No servidor: `git pull` + restart do gestfila.
+
+b) Em **cada computador de TV**, aplicar a política (GPO ou registro, como
+   administrador), com a origem de produção do painel:
+
+   ```
+   HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\AutoplayAllowlist
+     "1" (REG_SZ) = "https://<dominio-do-gestfila>"
+   ```
+
+c) Fechar o Chrome **por completo**, inclusive o processo em segundo plano
+   (ícone da bandeja / "Continuar executando apps em segundo plano"; na
+   dúvida, conferir no Gerenciador de Tarefas que não sobrou nenhum
+   `chrome.exe`). Abrir o Chrome, ir em `chrome://policy` e conferir
+   `AutoplayAllowlist` com status **OK**.
+
+d) Reabrir o painel e esperar a 1ª chamada **sem tocar em nada**: a faixa
+   de som bloqueado não pode aparecer, e a chamada precisa sair com tom e
+   voz. Esse passo é a validação da política em si: aqui só foi validada a
+   flag equivalente (`--autoplay-policy=no-user-gesture-required`). Se a
+   faixa aparecer, a política não pegou (voltar ao passo c). Se alguma
+   máquina usar Edge em vez de Chrome, checar a política correspondente do
+   Edge antes.
+
+**Arquivos alterados:** `app/templates/painel/tv.html`;
+`app/templates/painel/_layout.html` (estilo do aviso);
+`tests/test_regressao_som_bloqueado_autoplay.py` (novo);
+`tests/test_regressao_fila_voz_tv.py`.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - **Fonte própria nos PDFs de relatório** (prioridade BAIXA, registrado no

@@ -49,6 +49,12 @@
     </footer>
   </div>
 
+  {# Adendo 10.81: aparece quando o navegador bloqueou o áudio (página aberta
+     do zero sem interação) - some no primeiro clique/tecla. #}
+  <div class="aviso-som-bloqueado" id="aviso-som-bloqueado" role="alert" hidden>
+    Som bloqueado pelo navegador. Clique na tela ou pressione uma tecla para liberar o áudio das chamadas.
+  </div>
+
   <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
   <script>
     (function () {
@@ -145,6 +151,12 @@
       const DESPERTAR_AUDIO_DURACAO_MS = 130; // dentro da faixa 120-150ms pedida
       const DESPERTAR_AUDIO_FREQUENCIA_HZ = 150;
       const DESPERTAR_AUDIO_VOLUME = 0.02;
+      // Tempo máximo do tom de despertar (adendo 10.81): painel aberto do zero
+      // sem interação = AudioContext 'suspended', e o resume() do Chrome fica
+      // PENDENTE para sempre (não resolve nem rejeita) - o tom nunca tocava,
+      // o callback nunca rodava e a fila de voz travava. Passado este tempo,
+      // o turno segue para a fala sem o tom. ~8x a duração do tom.
+      const DESPERTAR_AUDIO_TIMEOUT_MS = 1000;
 
       // Instrumentação de timing (investigação de corte de início de fala em
       // hardware fraco): fica atrás de ?debug=1 na URL pra não sujar o console
@@ -485,10 +497,25 @@
           });
           // play() pode ser rejeitado por política de autoplay (sem gesto do
           // usuário) - nesse caso o 'ended' não vem, então avança na mão pra não
-          // travar a sequência.
-          audio.play().catch(() => avancar());
+          // travar a sequência. NotAllowedError = autoplay bloqueado: mostra o
+          // aviso de som bloqueado (adendo 10.81).
+          audio.play().catch((erro) => {
+            if (erro && erro.name === "NotAllowedError") marcarSomBloqueadoPeloNavegador();
+            avancar();
+          });
         }
         tocar(0);
+      }
+
+      // Adendo 10.81: o clipe pré-gravado da chamada atual, com o ponto em que
+      // está - null se nenhum clipe está tocando. O watchdog do turno compara
+      // duas leituras: se o ponto avançou, a sequência está saindo de verdade
+      // e a fila NÃO é liberada (a próxima chamada pausaria esta, ver
+      // audioPregravadoAtual.pause() acima - seria cortar a anterior).
+      function marcaAudioPregravadoTocando() {
+        const audio = audioPregravadoAtual;
+        if (!audio || audio.paused || audio.ended) return null;
+        return { audio, tempo: audio.currentTime };
       }
 
       // Tempo máximo que uma fala pode ficar "em andamento" antes do watchdog
@@ -496,6 +523,15 @@
       // forçar a liberação da fila via cancel() - ver comentário no fim desta
       // função. Bem acima de qualquer frase real (nome/código de senha).
       const WATCHDOG_FALA_TIMEOUT_MS = 15000;
+      // Autocorreção da fila (adendo 10.81): teto de um turno inteiro (tom +
+      // fala/áudio pré-gravado). Acima do tempo máximo do tom + watchdog da
+      // fala de propósito: na voz, o watchdog da fala (15s, cancel() só da
+      // própria fala travada) sempre resolve antes - este só age se ele não
+      // resolveu. Nunca chama cancel(). No pré-gravado (que não tem watchdog
+      // próprio), reverifica a cada TURNO_FILA_REVERIFICAR_MS enquanto o clipe
+      // estiver avançando - só libera com o áudio parado.
+      const TURNO_FILA_TIMEOUT_MS = DESPERTAR_AUDIO_TIMEOUT_MS + WATCHDOG_FALA_TIMEOUT_MS + 4000;
+      const TURNO_FILA_REVERIFICAR_MS = 3000;
 
       function falarChamada(dados, aoTerminar) {
         // `aoTerminar` (adendo 10.58) - chamado exatamente uma vez quando esta
@@ -614,6 +650,9 @@
               " - error=" + JSON.stringify(evento.error) +
               " charIndex=" + evento.charIndex +
               " elapsedTime=" + evento.elapsedTime);
+            if (evento.error === "not-allowed") {
+              marcarSomBloqueadoPeloNavegador(); // autoplay sem user activation (adendo 10.81)
+            }
           } else {
             logarOverlayDebugVoz("[TTS] onend/conclusão disparou às " + new Date().toLocaleTimeString("pt-BR"));
           }
@@ -707,9 +746,11 @@
         // do lado da voz. Cada caminho de saída abaixo loga qual foi tomado.
         logarOverlayDebugVoz("[TTS] despertarSaidaAudio() chamado");
         let chamado = false;
+        let timeoutTom = null;
         const chamarUmaVez = () => {
           if (chamado) return;
           chamado = true;
+          clearTimeout(timeoutTom);
           logarOverlayDebugVoz("[TTS] despertarSaidaAudio() -> callback()");
           callback();
         };
@@ -721,13 +762,25 @@
           return;
         }
         try {
-          if (!audioContextDespertar) {
-            audioContextDespertar = new AudioContextClasse();
-          }
-          const ctx = audioContextDespertar;
+          const ctx = garantirAudioContextDespertar();
           logarOverlayDebugVoz("[TTS] despertarSaidaAudio() - AudioContext.state=" + ctx.state);
 
+          // Tempo máximo no tom (adendo 10.81) - cobre o resume() pendente de
+          // página aberta do zero sem interação e qualquer onended que não
+          // venha. A fala segue sem o tom; o aviso de som bloqueado aparece
+          // se o contexto continuar sem rodar.
+          timeoutTom = setTimeout(() => {
+            console.warn("GESTFILA: tom de despertar não terminou em " + DESPERTAR_AUDIO_TIMEOUT_MS +
+              "ms (AudioContext.state=" + ctx.state + ") - seguindo para a chamada sem o tom.");
+            logarOverlayDebugVoz("[TTS] despertarSaidaAudio() - TEMPO MÁXIMO do tom estourado (state=" + ctx.state + ")");
+            atualizarAvisoSomBloqueado();
+            chamarUmaVez();
+          }, DESPERTAR_AUDIO_TIMEOUT_MS);
+
           const iniciarTom = () => {
+            // resume() pendente que só resolve depois (gesto do usuário) com
+            // o turno já seguido pelo tempo máximo - não toca um tom solto.
+            if (chamado) return;
             const oscilador = ctx.createOscillator();
             const ganho = ctx.createGain();
             oscilador.frequency.value = DESPERTAR_AUDIO_FREQUENCIA_HZ;
@@ -767,6 +820,77 @@
         } catch (erro) {
           logarOverlayDebugVoz("[TTS] despertarSaidaAudio() - exceção: " + erro);
           chamarUmaVez(); // qualquer falha do AudioContext - degrada graciosamente
+        }
+      }
+
+      // Som bloqueado pela política de autoplay (adendo 10.81). Gatilho exato
+      // confirmado: página aberta DO ZERO sem interação (Chrome reaberto, com
+      // ou sem reboot) - o navegador não concede "user activation" e o áudio
+      // nasce suspenso. Um clique/tecla DEPOIS não destrava nada sozinho:
+      // alguém precisa chamar resume() de novo dentro do gesto - é o que
+      // destravarAudioNoGesto() faz. Sem clique, a voz só sai com a política
+      // AutoplayAllowlist do Chrome com a URL do painel - PRÉ-REQUISITO DE
+      // DEPLOY nas máquinas das TVs (roteiro no adendo 10.81, BLUEPRINT.md).
+      const elAvisoSomBloqueado = document.getElementById("aviso-som-bloqueado");
+      // fala com onerror "not-allowed" ou clipe pré-gravado com play()
+      // rejeitado por NotAllowedError - zerado no gesto do usuário
+      let somBloqueadoPeloNavegador = false;
+
+      function atualizarAvisoSomBloqueado() {
+        const ctxBloqueado = !!audioContextDespertar && audioContextDespertar.state !== "running";
+        elAvisoSomBloqueado.hidden = !(TV_SOM_ATIVO && (ctxBloqueado || somBloqueadoPeloNavegador));
+      }
+
+      function marcarSomBloqueadoPeloNavegador() {
+        somBloqueadoPeloNavegador = true;
+        atualizarAvisoSomBloqueado();
+      }
+
+      function garantirAudioContextDespertar() {
+        const AudioContextClasse = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClasse) return null;
+        if (!audioContextDespertar) {
+          audioContextDespertar = new AudioContextClasse();
+          audioContextDespertar.onstatechange = atualizarAvisoSomBloqueado;
+        }
+        return audioContextDespertar;
+      }
+
+      // Só destrava: resume() + retomar a fila (filaChamadas só recebe evento
+      // 'chamada' AO VIVO, nunca o histórico de recarregarHistorico() - um
+      // reload continua sem tocar nada, 10.13). Não fala nem toca nada aqui.
+      function destravarAudioNoGesto() {
+        somBloqueadoPeloNavegador = false;
+        try {
+          const ctx = garantirAudioContextDespertar();
+          if (ctx && ctx.state === "suspended") {
+            // dentro do gesto, resume() resolve - inclusive o resume() que
+            // um tom anterior deixou pendente
+            ctx.resume().then(atualizarAvisoSomBloqueado).catch(atualizarAvisoSomBloqueado);
+          }
+        } catch (erro) {
+          logarOverlayDebugVoz("[TTS] destravarAudioNoGesto() - exceção: " + erro);
+        }
+        atualizarAvisoSomBloqueado();
+        processarProximaDaFila(); // autocorreção: item parado na fila sem turno em andamento volta a andar
+      }
+
+      if (TV_SOM_ATIVO) {
+        ["pointerdown", "keydown", "touchstart"].forEach((evento) => {
+          window.addEventListener(evento, destravarAudioNoGesto, true);
+        });
+        // Checagem logo no load: avisa ANTES da primeira chamada, não só
+        // depois que ela sai muda. resume() sem gesto resolve nos navegadores
+        // que permitem (ou com AutoplayAllowlist) e fica pendente no Chrome
+        // sem permissão - daí a leitura do estado só depois de um tempo.
+        try {
+          const ctx = garantirAudioContextDespertar();
+          if (ctx && ctx.state === "suspended") {
+            ctx.resume().catch(() => {});
+            setTimeout(atualizarAvisoSomBloqueado, DESPERTAR_AUDIO_TIMEOUT_MS);
+          }
+        } catch (erro) {
+          logarOverlayDebugVoz("[TTS] checagem de som bloqueado no load - exceção: " + erro);
         }
       }
 
@@ -1050,7 +1174,36 @@
 
         const t0 = DEBUG_TIMING ? performance.now() : 0;
 
+        // Autocorreção da fila (adendo 10.81): `turnoEncerrado`/`turnoIniciado`
+        // garantem uma única finalização e um único falarChamada()+
+        // inserirChamada() por turno, venha a saída do caminho normal ou do
+        // watchdog abaixo.
+        let turnoEncerrado = false;
+        let turnoIniciado = false;
+        let ultimaMarcaPregravado = null;
+        const verificarTurno = () => {
+          const marca = marcaAudioPregravadoTocando();
+          if (marca && (!ultimaMarcaPregravado || marca.audio !== ultimaMarcaPregravado.audio ||
+              marca.tempo !== ultimaMarcaPregravado.tempo)) {
+            ultimaMarcaPregravado = marca; // clipe avançando - a chamada ainda está saindo
+            watchdogTurno = setTimeout(verificarTurno, TURNO_FILA_REVERIFICAR_MS);
+            return;
+          }
+          console.warn("GESTFILA: turno da fila de voz não terminou em " + (TURNO_FILA_TIMEOUT_MS / 1000) +
+            "s - liberando a fila (autocorreção).");
+          logarOverlayDebugVoz("[TTS] WATCHDOG DO TURNO disparado - liberando a fila");
+          if (!turnoIniciado) {
+            turnoIniciado = true;
+            inserirChamada(item.dados); // a tela nunca fica sem a chamada, mesmo sem voz
+          }
+          finalizarTurno();
+        };
+        let watchdogTurno = setTimeout(verificarTurno, TURNO_FILA_TIMEOUT_MS);
+
         const finalizarTurno = () => {
+          if (turnoEncerrado) return;
+          turnoEncerrado = true;
+          clearTimeout(watchdogTurno);
           processandoFila = false;
           if (filaChamadas.length > 0) {
             // setTimeout(0), não chamada direta: evita empilhar a pilha de
@@ -1063,6 +1216,8 @@
         };
 
         const executarTurno = () => {
+          if (turnoIniciado) return;
+          turnoIniciado = true;
           const t1 = DEBUG_TIMING ? performance.now() : 0;
           falarChamada(item.dados, finalizarTurno);
           const t2 = DEBUG_TIMING ? performance.now() : 0;

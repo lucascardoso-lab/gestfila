@@ -135,9 +135,12 @@ assert "executarTurno();" in corpo_processar
 ok("Tom de despertar só toca quando tocarTom=true (decidido na chegada, decisão 1) - senão pula direto pra executarTurno()")
 
 # ORDEM falarChamada() antes de inserirChamada() dentro do turno, preservando
-# a 10.48 (evita reflow/animação competindo com o início do áudio).
-pos_falar = corpo_processar.index("falarChamada(item.dados, finalizarTurno);")
-pos_inserir = corpo_processar.index("inserirChamada(item.dados);")
+# a 10.48 (evita reflow/animação competindo com o início do áudio). Medida a
+# partir de executarTurno: o watchdog do turno (10.81) também chama
+# inserirChamada(), mas só quando o turno nunca chegou a falar.
+corpo_executar = corpo_processar[corpo_processar.index("const executarTurno = () => {"):]
+pos_falar = corpo_executar.index("falarChamada(item.dados, finalizarTurno);")
+pos_inserir = corpo_executar.index("inserirChamada(item.dados);")
 assert pos_falar < pos_inserir
 ok("Dentro de cada turno, falarChamada() roda ANTES de inserirChamada() - ordem da 10.48 preservada por item")
 

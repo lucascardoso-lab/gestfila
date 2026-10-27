@@ -100,6 +100,22 @@
     #status-conexao.reconectando { background: var(--gf-alerta); }
     #status-conexao.desconectado { background: var(--gf-primaria-escura); }
 
+    /* Adendo 10.81: aviso de som bloqueado pelo navegador (autoplay) - fixo
+       no topo. O HTML da faixa só existe em painel/tv.html (indisponivel.html
+       também usa este layout e não mostra nada). Fundo/texto com os tokens
+       do painel (contraste alto nos dois temas, 10.56); a cor de alerta do
+       status "Reconectando" fica na borda - texto branco sobre --gf-alerta
+       daria ~3,2:1. `[hidden]` próprio no padrão do 10.53, para nenhuma regra
+       de display futura vencer o atributo. */
+    .aviso-som-bloqueado {
+      position: fixed; top: 5rem; left: 50%; transform: translateX(-50%); z-index: 1000;
+      max-width: 90vw; padding: .9rem 1.6rem; border-radius: 12px;
+      background: var(--painel-fundo-elemento); color: var(--painel-texto-principal);
+      border: 3px solid var(--gf-alerta); border-left-width: 12px;
+      font-weight: 700; text-align: center; font-size: clamp(1rem, 1.6vw, 1.5rem);
+    }
+    .aviso-som-bloqueado[hidden] { display: none; }
+
     #mensagem-vazio { font-size: 1.6rem; color: var(--painel-texto-secundario); text-align: center; margin-top: 3rem; }
 
     /* Correção: font-size fixo em rem não escala com o tamanho físico da tela
