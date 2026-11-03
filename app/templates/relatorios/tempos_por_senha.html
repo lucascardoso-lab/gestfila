@@ -3,9 +3,10 @@
 
 {% block titulo %}Tempos por senha{% endblock %}
 
-{# Adendo 10.80: 13 colunas - tela com a largura toda da janela (o layout de
-   impressão não usa este block) e PDF em A4 paisagem (o worker usa o tamanho
-   do @page, `prefer_css_page_size`). #}
+{# Adendo 10.80: tela com a largura toda da janela (o layout de impressão não
+   usa este block) e PDF em A4 paisagem (o worker usa o tamanho do @page,
+   `prefer_css_page_size`). Adendo 10.83: a tela mostra 14 colunas (15 com
+   "Outros atendimentos"); o PDF, as colunas da tela + Outros, sempre (15). #}
 {% block main_classe %}main-largo{% endblock %}
 {% block estilo_impressao %}@page { size: A4 landscape; }{% endblock %}
 
@@ -15,7 +16,7 @@
 
 {% block conteudo %}
   <h1>Tempos por senha</h1>
-  <p class="subtitulo">Espera (da emissão até a chamada) e atendimento (da chamada até a finalização) de cada senha, em minutos e segundos (mm:ss; a partir de 1 hora, h:mm:ss).</p>
+  <p class="subtitulo">Espera, atendimento por etapa (atendente, executor) e permanência de cada senha, em minutos e segundos (mm:ss; a partir de 1 hora, h:mm:ss).</p>
   {% if not modo_impressao %}
     <p class="empresa-tag">Empresa: <strong>{{ empresa.nome }}</strong></p>
     {{ form_filtros(filtros, opcoes, 'relatorios.tempos_por_senha_view', querystring, mostrar_operador=True,
@@ -26,12 +27,12 @@
     <p>Nenhuma senha para os filtros selecionados.</p>
   {% else %}
     <div class="resumo-tempos">
-      {% for chave, titulo in [('espera_inicial', 'Espera inicial'), ('espera_total', 'Espera total'), ('atendimento_total', 'Atendimento total')] %}
+      {% for t in tempos_resumo %}
         <div class="card-resumo">
-          <strong>{{ titulo }}</strong>
-          <span>Média: {{ resumo[chave].media | duracao or '—' }}</span>
-          <span>Mediana: {{ resumo[chave].mediana | duracao or '—' }}</span>
-          <span>{{ resumo[chave].quantidade }} de {{ total_senhas }} senhas</span>
+          <strong>{{ t.rotulo }}</strong>
+          <span>Média: {{ resumo[t.chave].media | duracao or '—' }}</span>
+          <span>Mediana: {{ resumo[t.chave].mediana | duracao or '—' }}</span>
+          <span>{{ resumo[t.chave].quantidade }} de {{ total_senhas }} senhas</span>
         </div>
       {% endfor %}
     </div>
@@ -44,6 +45,18 @@
       Atendimento, quem atendeu. No Excel, os tempos são durações (h:mm:ss): dá para somar ou tirar
       a média direto na planilha.
     </p>
+    {# Adendo 10.83 - permanência e classificação das etapas. #}
+    <p class="aviso">
+      A permanência é o tempo real na clínica, da emissão da senha à finalização. Inclui as esperas entre
+      as etapas (coluna Espera intermediária) e trechos de 'Aguardar', que não aparecem nas colunas de
+      etapa. Por isso pode ser maior que a soma das colunas.
+    </p>
+    <p class="aviso">
+      Cada etapa de atendimento é classificada pelo Tipo do local no cadastro de Locais: Atendente
+      (cadastro e inclusão dos exames), Executor (coleta) ou, sem tipo ou do tipo Outro (ex.: Triagem),
+      Outros atendimentos. É o tipo ATUAL do local: corrigir o cadastro muda também os períodos passados.
+      Em unidades sem etapa de coleta no sistema, Atendimento executor fica vazio - está correto.
+    </p>
     {% if filtros.area_fila_id %}
       {# Semântica do filtro de Área (adendo 10.76) - igual à do filtro de Fila. #}
       <p class="aviso">
@@ -53,16 +66,16 @@
       </p>
       <h2>Por fila</h2>
       <table class="tabela-por-fila">
-        <thead><tr><th>Fila</th><th>Senhas</th><th>Espera total - média</th><th>Espera total - mediana</th><th>Atendimento total - média</th><th>Atendimento total - mediana</th></tr></thead>
+        <thead><tr><th>Fila</th><th>Senhas</th><th>Permanência total - média</th><th>Permanência total - mediana</th><th>Atendimento executor - média</th><th>Atendimento executor - mediana</th></tr></thead>
         <tbody>
           {% for q in por_fila %}
             <tr>
               <td>{{ q.fila }}</td>
               <td>{{ q.senhas }}</td>
-              <td>{{ q.espera_total.media | duracao or '—' }}</td>
-              <td>{{ q.espera_total.mediana | duracao or '—' }}</td>
-              <td>{{ q.atendimento_total.media | duracao or '—' }}</td>
-              <td>{{ q.atendimento_total.mediana | duracao or '—' }}</td>
+              <td>{{ q.permanencia_total.media | duracao or '—' }}</td>
+              <td>{{ q.permanencia_total.mediana | duracao or '—' }}</td>
+              <td>{{ q.atendimento_executor.media | duracao or '—' }}</td>
+              <td>{{ q.atendimento_executor.mediana | duracao or '—' }}</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -75,13 +88,18 @@
         Use a exportação CSV ou Excel para a lista completa.
       </p>
     {% else %}
+      {# Adendo 10.83: tela e PDF sem Unidade (o rótulo "[SIGLA] Nome" da fila
+         já a identifica, 10.69), Espera total e Atendimento total - os três
+         seguem no CSV e no Excel. Cabeçalhos com hífen opcional (`hifenar`,
+         &shy;) para as colunas estreitarem. #}
+      {% set tempos_tabela = tempos_tabela_pdf if modo_impressao else tempos_tabela_tela %}
       <div class="tabela-rolagem tabela-fixa">
       <table class="tabela-larga">
         <thead>
           <tr>
-            <th>Senha</th><th>Emissão</th><th>Unidade</th><th>Fila inicial</th><th>Fila final</th><th>Área</th>
-            <th>Espera inicial (mm:ss)</th><th>Espera total (mm:ss)</th><th>Atendimento total (mm:ss)</th>
-            <th>Etapas de atendimento</th><th>Operador (finalização)</th><th>Local (finalização)</th><th>Situação</th>
+            <th>Senha</th><th>Emissão</th><th>Fila inicial</th><th>Fila final</th><th>Área</th>
+            {% for t in tempos_tabela %}<th{% if t.dica %} title="{{ t.dica }}"{% endif %}>{{ t.cabecalho }}</th>{% endfor %}
+            <th>{{ hifenar('Etapas de atendimento') }}</th><th>{{ hifenar('Operador (finalização)') }}</th><th>{{ hifenar('Local (finalização)') }}</th><th>Situação</th>
           </tr>
         </thead>
         <tbody>
@@ -89,13 +107,10 @@
             <tr>
               <td>{{ linha.codigo }}</td>
               <td>{{ linha.criada_em | hora_clinica('%d/%m/%Y %H:%M') }}</td>
-              <td>{{ linha.unidade }}</td>
               <td>{{ linha.fila_inicial }}</td>
               <td>{{ linha.fila_final }}</td>
               <td>{{ linha.area }}</td>
-              <td>{{ linha.espera_inicial_segundos | duracao or '—' }}</td>
-              <td>{{ linha.espera_total_segundos | duracao or '—' }}</td>
-              <td>{{ linha.atendimento_total_segundos | duracao or '—' }}</td>
+              {% for t in tempos_tabela %}<td>{{ linha[t.chave ~ '_segundos'] | duracao or '—' }}</td>{% endfor %}
               <td>{{ linha.etapas if linha.etapas is not none else '—' }}</td>
               <td>{{ linha.operador }}</td>
               <td>{{ linha.local }}</td>

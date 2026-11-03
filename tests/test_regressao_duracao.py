@@ -37,7 +37,7 @@ from openpyxl.utils import get_column_letter
 from app import create_app
 from app.extensions import db
 from app.models import Empresa, Fila, LogAtendimento, Perfil, Senha, Unidade, Usuario
-from app.relatorios.routes import _duracao_excel, _resumo_tempos
+from app.relatorios.routes import TEMPOS_POR_SENHA, _duracao_excel, _resumo_tempos
 from app.utils.tempo import formatar_duracao, segundos_arredondados
 from tests._pdf_texto import compactar, texto_compacto_pdf
 
@@ -73,8 +73,7 @@ assert app.jinja_env.filters["duracao"] is formatar_duracao
 ok("formatar_duracao: 21:48, 1:00:00 (cruza a hora), 16:15:24, 02:05, meio para cima, 00:00, -00:05, None -> ''")
 
 # Resumo sobre os segundos EXATOS (antes: média do minuto já arredondado a 2 casas).
-linhas_resumo = [{f"{c}_segundos": s for c in ("espera_inicial", "espera_total", "atendimento_total")}
-                 for s in (10, 11, 11)]
+linhas_resumo = [{f"{c}_segundos": s for _rotulo, c in TEMPOS_POR_SENHA} for s in (10, 11, 11)]
 resumo = _resumo_tempos(linhas_resumo)["espera_inicial"]
 assert abs(resumo["media"] - 32 / 3) < 1e-9 and resumo["mediana"] == 11 and resumo["quantidade"] == 3
 media_antiga = sum(round(s / 60, 2) for s in (10, 11, 11)) / 3 * 60  # 10,6 s
@@ -131,7 +130,8 @@ PERIODO = "data_inicio=2026-10-08&data_fim=2026-10-08"
 def tela(rota):
     resp = c.get(f"/relatorios/{rota}?{PERIODO}")
     assert resp.status_code == 200, (rota, resp.status_code)
-    return html.unescape(resp.get_data(as_text=True))
+    # Sem o hífen opcional dos cabeçalhos (&shy;, adendo 10.83) - invisível na tela.
+    return html.unescape(resp.get_data(as_text=True)).replace("­", "")
 
 
 def baixar(rota, formato):
@@ -145,7 +145,8 @@ def baixar(rota, formato):
 # 2) Tela e PDF: "Tempos por senha" e os relatórios agregados.
 # ===========================================================================
 t = tela("tempos-por-senha")
-assert "<th>Espera inicial (mm:ss)</th>" in t and "<th>Atendimento total (mm:ss)</th>" in t
+# Adendo 10.83: Atendimento total saiu da tela (segue no PDF/CSV/Excel).
+assert "<th>Espera inicial (mm:ss)</th>" in t and ">Permanência total (mm:ss)</th>" in t
 assert "<td>21:48</td>" in t and "<td>16:15:24</td>" in t
 assert "<td>-00:05</td>" in t  # negativo exibido com sinal, sem esconder
 assert "Média: 11:24" in t  # espera inicial média (1308 + 60) / 2 = 684 s

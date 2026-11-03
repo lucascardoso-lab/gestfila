@@ -3,6 +3,7 @@ import statistics
 from collections import defaultdict
 
 from flask import Response, current_app, flash, redirect, render_template, request, url_for
+from markupsafe import Markup, escape
 
 from app.admin.helpers import resolver_empresa_contexto
 from app.models import Empresa
@@ -23,6 +24,7 @@ from .helpers import (
 from .pdf import FalhaGeracaoPdf, renderizar_pdf
 from .queries import (
     DICAS_SITUACAO,
+    ROTULOS_CLASSE,
     ROTULOS_TIPO_ETAPA,
     SITUACAO_HISTORICO_PARCIAL,
     TIPO_FECHAMENTO_ROTULOS,
@@ -371,9 +373,48 @@ def _duracao_excel(segundos):
     return inteiros / 86400 if inteiros is not None else None
 
 
-# (rótulo, chave) dos três tempos por senha - mesma ordem na tela e nos arquivos.
-TEMPOS_POR_SENHA = (("Espera inicial", "espera_inicial"), ("Espera total", "espera_total"),
-                    ("Atendimento total", "atendimento_total"))
+# (rótulo, chave) dos tempos por senha, na ordem do CSV e do Excel. A tela e o
+# PDF mostram um subconjunto (TEMPOS_NA_TELA, adendo 10.83 - largura): sem
+# Espera total e Atendimento total; "Outros atendimentos" na tela só quando
+# houver, no PDF sempre.
+TEMPOS_POR_SENHA = (
+    ("Espera inicial", "espera_inicial"),
+    ("Espera intermediária", "espera_intermediaria"),
+    ("Espera total", "espera_total"),
+    ("Atendimento atendente", "atendimento_atendente"),
+    ("Atendimento executor", "atendimento_executor"),
+    ("Outros atendimentos", "atendimento_outros"),
+    ("Atendimento total", "atendimento_total"),
+    ("Permanência total", "permanencia_total"),
+)
+TEMPOS_NA_TELA = ("espera_inicial", "espera_intermediaria", "atendimento_atendente", "atendimento_executor",
+                  "atendimento_outros", "permanencia_total")
+# Cartões do resumo (tela e PDF) - "Outros atendimentos" fica só na tabela.
+TEMPOS_NO_RESUMO = ("espera_inicial", "espera_intermediaria", "espera_total", "atendimento_atendente",
+                    "atendimento_executor", "atendimento_total", "permanencia_total")
+DICAS_TEMPOS = {
+    "atendimento_atendente": "Tempo com o atendente: cadastro e inclusão dos exames.",
+    "atendimento_executor": "Tempo na coleta, do início à finalização do procedimento.",
+    "atendimento_outros": "Etapa sem tipo de local (ou do tipo Outro) no cadastro - ex.: Triagem.",
+    "espera_intermediaria": "Esperas entre as etapas: depois de uma realocação ou de \"Aguardar\".",
+    "permanencia_total": "Tempo real na clínica, da emissão da senha à finalização.",
+}
+
+
+# Hífen opcional (&shy;) nos cabeçalhos da tabela por senha (adendo 10.83): a
+# coluna estreita até o pedaço mais longo da palavra, não até a palavra
+# inteira. Manual, e não `hyphens: auto`, porque o Chromium do PDF em produção
+# (Linux) pode não ter o dicionário de português. Só no HTML do <th>: CSV,
+# Excel e o atributo title usam o rótulo limpo.
+HIFENS_CABECALHO = {
+    "Atendimento": "Aten&shy;di&shy;mento", "atendimento": "aten&shy;di&shy;mento",
+    "atendimentos": "aten&shy;di&shy;mentos", "atendente": "aten&shy;dente", "executor": "exe&shy;cutor",
+    "intermediária": "inter&shy;mediária", "Permanência": "Perma&shy;nência", "(finalização)": "(finali&shy;zação)",
+}
+
+
+def cabecalho_hifenado(rotulo):
+    return Markup(" ".join(HIFENS_CABECALHO.get(palavra) or str(escape(palavra)) for palavra in rotulo.split(" ")))
 
 
 def _colunas_tempo(rotulo, segundos, formato):
@@ -403,8 +444,8 @@ def _resumo_tempos(linhas):
 def _resumo_por_fila(linhas, mapas):
     """Quadro "Por fila" do Tempos por senha filtrado por Área (adendo 10.76):
     por fila FINAL da senha (a mesma do filtro), quantidade de senhas e
-    média/mediana por senha de espera total e atendimento total, sobre os
-    segundos exatos (mesma regra do resumo, 10.75)."""
+    média/mediana por senha de permanência total e atendimento executor
+    (adendo 10.83), sobre os segundos exatos (mesma regra do resumo, 10.75)."""
     por_fila = defaultdict(list)
     for l in linhas:
         por_fila[l["fila_final_id"]].append(l)
@@ -412,7 +453,8 @@ def _resumo_por_fila(linhas, mapas):
     for fila_id, das_filas in por_fila.items():
         resumo = _resumo_tempos(das_filas)
         quadro.append({"fila": mapas.filas.get(fila_id, "—"), "senhas": len(das_filas),
-                       "espera_total": resumo["espera_total"], "atendimento_total": resumo["atendimento_total"]})
+                       "permanencia_total": resumo["permanencia_total"],
+                       "atendimento_executor": resumo["atendimento_executor"]})
     quadro.sort(key=lambda q: q["fila"])
     return quadro
 
@@ -463,7 +505,8 @@ def tempos_por_senha_view():
         linha = {
             "Senha": e["codigo"], "Emissão": emissao(e["criada_em"]),
             "Unidade": mapas.unidades.get(e["unidade_id"]), "Etapa": e["numero"],
-            "Tipo": ROTULOS_TIPO_ETAPA[e["tipo"]], "Fila": mapas.filas_nome.get(e["fila_id"]),
+            "Tipo": ROTULOS_TIPO_ETAPA[e["tipo"]], "Classificação": ROTULOS_CLASSE.get(e["classe"]),
+            "Fila": mapas.filas_nome.get(e["fila_id"]),
             "Área": rotulo_area(mapas, e["area_id"], nome_puro=True),
             "Local": mapas.locais.get(e["local_id"]),
             # Coluna única (adendo 10.73): numa linha de Espera é quem CHAMOU a
@@ -481,7 +524,21 @@ def tempos_por_senha_view():
     total_paginas = max(1, math.ceil(len(linhas) / LINHAS_POR_PAGINA))
     pagina = min(max(request.args.get("pagina", 1, type=int), 1), total_paginas)
     pdf_omitido = len(linhas) > LIMITE_LINHAS_PDF
+    # Adendo 10.83: na tela, "Outros atendimentos" só aparece quando o resultado
+    # FILTRADO (não só a página) tiver algum valor; no PDF (colunas da tela +
+    # Outros), no CSV e no Excel, sempre.
+    mostrar_outros = any(l["atendimento_outros_segundos"] is not None for l in linhas)
+    nomes = dict((chave, rotulo) for rotulo, chave in TEMPOS_POR_SENHA)
+
+    def tempos(chaves):
+        return [{"chave": c, "rotulo": nomes[c], "dica": DICAS_TEMPOS.get(c),
+                 "cabecalho": cabecalho_hifenado(f"{nomes[c]} (mm:ss)")} for c in chaves]
+
     contexto = {
+        "hifenar": cabecalho_hifenado,
+        "tempos_tabela_pdf": tempos(TEMPOS_NA_TELA),
+        "tempos_tabela_tela": tempos(c for c in TEMPOS_NA_TELA if c != "atendimento_outros" or mostrar_outros),
+        "tempos_resumo": tempos(TEMPOS_NO_RESUMO),
         "resumo": _resumo_tempos(linhas), "total_senhas": len(linhas),
         "limite_linhas_pdf": LIMITE_LINHAS_PDF, "pdf_omitido": pdf_omitido,
         "pagina": pagina, "total_paginas": total_paginas,

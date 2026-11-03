@@ -16,15 +16,36 @@ Regras:
 - AUSÊNCIA de token curto (ex.: código de senha "S2"): `texto_normalizado_pdf`
   + `re.search(r"\\bS2\\b", ...)`. No texto compactado, a junção de células
   vizinhas pode formar o token por acaso e a checagem falharia à toa.
+
+Hífen opcional (adendo 10.83): os cabeçalhos do "Tempos por senha" têm
+&shy; - onde o Chromium quebra a palavra, a extração devolve um hífen que
+depende da fonte: ASCII "-" com Segoe UI (Windows local), U+2010 com DejaVu
+Sans (Linux/produção) - "aten‐\\ndente"; onde não quebra, às vezes um espaço.
+`compactar` remove também os hífens ("-", U+2010, U+00AD), dos DOIS lados
+(o texto procurado passa pela mesma função), então a comparação continua
+simétrica - nenhuma checagem de PDF depende de distinguir "-00:05" de
+"00:05". ATENÇÃO: por isso `compactar`/`texto_compacto_pdf` NÃO servem para
+verificar o sinal de uma duração negativa ("-00:05") em PDF - para isso, use
+`texto_normalizado_pdf()` procurando o texto com o sinal.
+
+Ligaduras (achado no 10.83): com DejaVu Sans o Chromium grava "fi" como a
+ligadura U+FB01 ("Fila ﬁnal", "(ﬁnalização)") - `compactar` normaliza em
+NFKC (ﬁ -> fi), também dos dois lados.
 """
 import io
+import unicodedata
 
 from pypdf import PdfReader
 
 
+HIFENS = str.maketrans("", "", "-‐­")
+
+
 def compactar(texto):
-    """Remove todo espaço em branco (espaço, quebra de linha, tab)."""
-    return "".join(texto.split())
+    """Remove todo espaço em branco (espaço, quebra de linha, tab) e os hífens
+    ("-", U+2010, U+00AD - ver a nota do &shy; no topo), com as ligaduras
+    desfeitas (NFKC)."""
+    return "".join(unicodedata.normalize("NFKC", texto).translate(HIFENS).split())
 
 
 def _texto_extraido(conteudo):

@@ -428,6 +428,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.80 | "Tempos por senha": coluna Situação cortada na tela (13 colunas) + PDF em A4 paisagem |
 | 10.81 | Painel de TV aberto do zero sem interação: fila de voz travada pelo autoplay do Chrome |
 | 10.82 | Nome preenchido no Finalizar/Aguardar media o último atendimento como 0 s (log `chamada_nome` colado ao fechamento) |
+| 10.83 | "Tempos por senha" por etapa: Atendimento atendente/executor/outros, Espera intermediária e Permanência total |
 
 ---
 
@@ -8160,6 +8161,240 @@ da leitura (2º commit): `app/relatorios/queries.py`
 `TOLERANCIA_NOME_NO_FECHAMENTO` e os 4 pontos);
 `app/core/dashboard_queries.py` (KPI e gráfico); novo
 `tests/test_regressao_nome_no_fechamento_leitura.py`.
+
+---
+
+## 10.83. ADENDO — "Tempos por senha" por etapa: Atendimento atendente/executor/outros, Espera intermediária e Permanência total
+
+> Pedido da gestão: por senha, a espera inicial (da emissão ao início do
+> atendimento), o tempo com o atendente (cadastro e inclusão dos exames), o
+> tempo na coleta (do início à finalização do procedimento) e a permanência
+> total. Exemplo da gestão: 00:05:00 + 00:25:00 + 00:15:00 = 00:45:00. FASE 1
+> (investigação) relatada e aprovada antes de implementar. O bug achado nela
+> (último atendimento saindo 0 s) foi corrigido antes, em commits e adendo
+> próprios (10.82).
+
+**Classificação de cada segmento de atendimento: pelo `Local.tipo` do local
+do segmento.** O local é o snapshot do `realocado` nos repasses (10.62) e o
+`Senha.local_id` no segmento final.
+- `recepcao` → **Atendimento atendente**.
+- `coleta` → **Atendimento executor**.
+- Tipo vazio, `'outro'` ou local desconhecido → **Outros atendimentos**.
+
+Constantes em `app/relatorios/queries.py`: `CLASSE_*`, `CLASSE_POR_TIPO_LOCAL`
+e `ROTULOS_CLASSE`.
+
+Por que não as outras fontes (medido na FASE 1):
+- `LogAtendimento.setor` é o setor da URL, que `_setor_padrao_usuario` manda
+  para `recepcao` para quem tem perfil atendente ou admin. No banco local,
+  44 de 395 finalizações tinham `setor='recepcao'` num local de coleta.
+- `Senha.setor` é zerado no Realocar e no Aguardar.
+- O perfil `atendente_executor` faz as duas etapas.
+
+**A classificação depende de o `Local.tipo` estar certo no cadastro.** É o
+valor ATUAL, sem snapshot: corrigir o cadastro reclassifica também os
+períodos passados (mesma limitação da Área, 10.76). O campo só é lido no
+cadastro de Locais, e nenhuma regra de funcionamento (turno, rodízio,
+`escolher_local`, TV, URL do setor) depende dele. Trocar o tipo não muda
+nada para o operador (investigação confirmada pelo cliente).
+
+**Caso real em produção, corrigido no cadastro ANTES deste deploy.** A
+produção tem 103 locais ativos: 14 de coleta, 89 de recepção, nenhum vazio
+ou `'outro'`. A consulta de atendimentos por local × fila mostrou locais de
+coleta cadastrados como recepção:
+- Passaram para **Executor**: id 27 [LAR] Coleta (1.098 atendimentos na fila
+  Coleta), id 53 [LAR] Coleta-02 (626), ids 95 e 96 [ANC] Coleta B 01/B 02
+  e id 8 [PER] Coleta (estes três sem uso registrado).
+- Passaram para **Outro**: ids 4 e 5 [BAN] Triagem 1/2 (2.442 atendimentos
+  na fila Triagem).
+
+É o exemplo de "corrigir o cadastro reclassifica o passado": com o 10.83 no
+ar, esses 7 locais já saem classificados certo também nos meses anteriores.
+
+**Banco de Sangue (3 etapas: Guichê → Triagem → Coleta), decisão do
+cliente:** a Triagem fica com tipo `'outro'` e o relatório ganha a coluna
+**"Outros atendimentos"** (a soma dos segmentos não classificados). Ela
+substitui a nota "Etapa sem tipo de local" prevista na FASE 1. Na tela, a
+coluna só aparece quando o resultado FILTRADO (não só a página) tem algum
+valor. No CSV, no Excel e no PDF, aparece sempre.
+
+**Colunas por senha** (`tempos_por_senha`, sem pareamento novo: os mesmos
+segmentos de `_segmentos_espera_por_senha`, `_pares_inicio_fim` e
+`_segmentos_intermediarios_realocacao`):
+- **Espera inicial:** sem mudança. Vai da emissão à 1ª chamada, em qualquer
+  local; na senha que vai direto para a coleta, é a espera até a coleta.
+- **Espera intermediária** (nova): soma das esperas que NÃO abrem na
+  emissão, ou seja, depois de uma realocação ou de um "Aguardar". Em senha
+  **"Concluída" sem nenhuma espera entre as etapas, vale 00:00**: o dado
+  existe e é zero. Fica vazia só em senha não concluída ou "Histórico
+  parcial". Assim, a média do resumo considera todas as senhas concluídas,
+  e não só as que esperaram (decisão do cliente).
+- **Atendimento atendente / executor / Outros atendimentos** (novas): soma
+  dos segmentos de cada tipo. Valem as mesmas condições do Atendimento
+  total: senha finalizada e fora do "Histórico parcial". Vários segmentos do
+  mesmo tipo são somados (ex.: recepção → recepção); "Etapas de
+  atendimento" continua com a contagem.
+- **Permanência total** (nova): da emissão (o mesmo `gerada` da espera
+  inicial) ao `fim_atendimento`, só em senha "Concluída". Fica vazia se a
+  senha não foi finalizada, está em histórico parcial, foi cancelada ou
+  expirou. Decisão da gestão, opção (b) da FASE 1: é o tempo real na
+  clínica, e não a soma das etapas. No banco local, a espera entre as
+  etapas tinha mediana de 0,2 min, mas passava de 20% da permanência em 4
+  de 48 senhas realocadas.
+- **Atendente / Executor / Outros ficam vazios ("—") quando a etapa não
+  existe**, nunca 0: só recepção → Executor vazio; direto na coleta →
+  Atendente vazio. A diferença em relação à Espera intermediária é
+  deliberada. Nessas colunas, o vazio quer dizer "não se aplica" (a senha
+  não passou por aquele tipo de etapa). Na Espera intermediária, a senha
+  concluída sempre tem o dado: se não esperou entre as etapas, esperou zero.
+- **Histórico sem snapshot:** com realocação, fica "Histórico parcial" e as
+  colunas novas ficam vazias; sem realocação, é classificado pelo
+  `Senha.local_id`.
+- **Visão por etapa:** ganha a coluna "Classificação" (Atendente/Executor/
+  Outros; vazia nas esperas). São os mesmos segmentos dos agregados; a
+  classificação só os rotula.
+
+**Coerência** (testada): Atendente + Executor + Outros = Atendimento total.
+Em senha sem "Aguardar", Espera inicial + Espera intermediária = Espera
+total, e Espera total + Atendimento total = Permanência total. Com
+"Aguardar", a permanência é maior, porque o trecho chamada → Aguardar não é
+medido por nenhum segmento (lacuna da seção 11, registrada no 10.82).
+
+**Formato** (10.75, sem mudança): tela e PDF em mm:ss abaixo de 1 h e
+h:mm:ss a partir de 1 h; CSV com o par "(min)" + "(mm:ss)"; Excel com
+duração nativa `[h]:mm:ss` (segundos arredondados / 86400). Os nomes são os
+mesmos em todos os formatos.
+
+**Tela e PDF = as mesmas colunas, e o PDF tem Outros sempre.** Saem
+**Unidade** (o rótulo "[SIGLA] Nome" da fila já a identifica, 10.69),
+**Espera total** e **Atendimento total**. As três continuam no CSV e no
+Excel, que guardam a lista completa; o PDF serve para imprimir e arquivar
+(decisão do cliente).
+- **Tela:** 14 colunas, ou 15 quando o resultado filtrado tem Outros.
+- **PDF:** as colunas da tela, com "Outros atendimentos" SEMPRE (15).
+- Dicas (`title`) nos cabeçalhos novos.
+- Duas notas novas, na tela e no PDF: (1) o texto da permanência pedido pela
+  gestão; (2) a classificação pelo Tipo do local, o tipo ATUAL, e "Em
+  unidades sem etapa de coleta no sistema, Atendimento executor fica vazio -
+  está correto".
+
+**Resumo do topo** (média, mediana e "N de M senhas" sobre os segundos
+exatos): os cartões de Espera inicial, Espera total e Atendimento total
+continuam, e entram Espera intermediária, Atendimento atendente,
+Atendimento executor e Permanência total. O quadro **"Por fila"** (10.76)
+passa a mostrar Permanência total e Atendimento executor.
+
+**Largura: RESOLVIDA com hífen opcional manual (`&shy;`) nos cabeçalhos
+(`<th>`) da tabela por senha, na tela e no PDF.**
+- Exemplos: `Aten&shy;di&shy;mento`, `Perma&shy;nência`,
+  `inter&shy;mediária`, `(finali&shy;zação)` (`HIFENS_CABECALHO` e
+  `cabecalho_hifenado` em `app/relatorios/routes.py`; o template recebe
+  `hifenar`).
+- Com isso, cada coluna estreita até o pedaço mais longo da palavra, e não
+  até a palavra inteira.
+- O `&shy;` só existe no HTML do `<th>`. CSV, Excel e o atributo `title`
+  usam o texto limpo.
+- **Não foi usado `hyphens: auto`** (decisão do cliente): ele depende do
+  dicionário de português do navegador, que o Chromium do Playwright no
+  Linux de produção provavelmente não tem. A medição inicial com
+  `hyphens: auto` tinha sido feita no Windows.
+
+**Medições finais** (Chromium, os mesmos dados sintéticos do 10.80 com os
+nomes longos reais, mais locais com tipo, realocação recepção → coleta e um
+local `'outro'`). Largura disponível para a tabela: 1288 px em 1366 e
+1842 px em 1920.
+
+| Cenário | Antes do `&shy;` | Final |
+|---|---|---|
+| Tela 1366x768, 15 colunas (com Outros) | 1403 px, 115 px escondidos | **1177 px, cabe** (claro e escuro) |
+| Tela 1366x768, sem Outros | 1304 px, 16 px escondidos | **1113 px, cabe** (claro e escuro) |
+| Tela 1920x1080 | cabia | **1177 / 1113 px, cabe** (claro e escuro) |
+| PDF A4 paisagem, fonte final da célula | 6,09 pt (Segoe UI) / 5,70 pt (DejaVu Sans) | **7,99 pt (Segoe UI) / 7,82 pt (DejaVu Sans, produção)** |
+
+- No PDF, a escala da página praticamente deixou de ser reduzida. São 18
+  páginas (Segoe) / 16 (DejaVu) no cenário de 130 senhas; o limite de 500
+  linhas (10.73) não mudou.
+- Os **7,5 pt** previstos para o caso de o Chromium reduzir a página **não
+  foram aplicados**. Medidos antes do `&shy;`, deram 6,03 / 5,64 pt, quase
+  nada, porque a tabela era limitada pela largura mínima das palavras e a
+  escala final mal muda com a fonte. A tabela segue com os 8 pt do 10.73.
+- Também descartadas, nas medições anteriores: cabeçalho em .75rem (1361
+  px, não cabia) e hifenização das células, que quebrava nomes de fila,
+  operador e local no meio e passava de 26 páginas.
+
+**Achados no caminho: helper de texto do PDF** (`tests/_pdf_texto.py`,
+10.78). Duas correções em `compactar`, aplicadas dos DOIS lados da
+comparação (o texto procurado passa pela mesma função), então as checagens
+de presença e de ausência continuam simétricas:
+- **Hífen de quebra:** onde o Chromium quebra no `&shy;`, a extração do
+  pypdf devolve um hífen que depende da fonte: ASCII "-" com Segoe UI
+  (Windows local) e U+2010 com DejaVu Sans (Linux/Action), além de um
+  espaço onde não quebra ("Aten di ‐\nmento"). Compactar só os espaços não
+  bastava. `compactar` passou a remover também "-", U+2010 e U+00AD.
+  Nenhuma checagem de PDF dependia do hífen ASCII (conferido por grep).
+- **Ligadura "fi":** com DejaVu, o Chromium grava "fi" como a ligadura
+  U+FB01 ("Fila ﬁnal", "(ﬁnalização)"). Isso já acontecia antes deste
+  adendo e não afetava nenhum teste, mas a checagem nova de
+  "Operador (finalização)" passaria no Windows e falharia na Action.
+  `compactar` passou a normalizar em NFKC.
+- Conferido contra o PDF gerado com a DejaVu embutida: todos os cabeçalhos
+  e notas são achados.
+
+**Testes:** novo `tests/test_regressao_tempos_por_etapa.py` (21
+verificações). Cenários:
+- exemplo da gestão (5 + 25 + 15 = 45, intermediária 00:00) e o mesmo com
+  20 min entre as etapas (permanência 65, espera intermediária 20);
+- só recepção e direto na coleta (intermediária 00:00; Executor ou
+  Atendente vazio, por não se aplicar); recepção → recepção (soma no
+  atendente);
+- Banco de Sangue com as 3 colunas e a soma fechando;
+- local sem tipo (Outros);
+- "Coleta-A 01" cadastrado como recepcao → Atendente, e trocando o tipo
+  para coleta a MESMA senha vai para Executor;
+- local de coleta atendendo fila de recepção → Executor;
+- "Aguardar" (permanência maior que a soma); não finalizada (intermediária,
+  atendimento e permanência vazios); histórico com realocação (tudo vazio)
+  e sem realocação (classificado pelo `Senha.local_id`).
+
+Verificações:
+- coerência de todas as senhas;
+- classificação na visão por etapa e os mesmos segmentos do Tempo de
+  atendimento;
+- tela: 15 colunas na ordem (texto visível, sem o `&shy;`), dicas, notas e
+  cartões ("12 de 14 senhas");
+- unidade sem coleta nem Outros: 14 colunas e Executor "—";
+- quadro "Por fila";
+- CSV com o par das 8 colunas de tempo e Unidade;
+- CSV por etapa com Classificação;
+- Excel com duração nativa e Classificação;
+- PDF com as colunas da tela + Outros (mesmo sem valor), sem Unidade,
+  Espera total e Atendimento total na tabela, e com a nota;
+- sem nome do paciente na tela, no CSV, no Excel e no PDF (LGPD, 10.67).
+
+Ajustados só no formato, com os mesmos valores:
+- `test_regressao_tempos_por_senha`: linha do CSV da S2 com as colunas
+  novas (os locais desse teste não têm tipo, então o atendimento cai em
+  Outros) e a tela comparada sem o `&shy;`.
+- `test_regressao_duracao`: cabeçalho "Permanência total" no lugar do
+  "Atendimento total", que saiu da tela; resumo montado com todas as
+  chaves; tela sem o `&shy;`.
+
+**Nota de deploy:** `git pull` + restart do `gestfila` (sem migration, sem
+mudança em `requirements.txt`). O cadastro dos 7 locais citados acima
+([LAR] Coleta, [LAR] Coleta-02, [ANC] Coleta B 01/B 02 e [PER] Coleta para
+Executor; [BAN] Triagem 1/2 para Outro) já foi corrigido em produção antes
+deste deploy. Por isso o relatório já sai certo também nos meses
+anteriores.
+
+**Arquivos alterados:** `app/relatorios/queries.py` (`tempos_por_senha`,
+constantes de classificação); `app/relatorios/routes.py`
+(`TEMPOS_POR_SENHA`, `TEMPOS_NA_TELA`, `TEMPOS_NO_RESUMO`,
+`DICAS_TEMPOS`, `HIFENS_CABECALHO`/`cabecalho_hifenado`, quadro "Por fila",
+coluna Classificação, Outros condicional);
+`app/templates/relatorios/tempos_por_senha.html`; `tests/_pdf_texto.py`;
+novo `tests/test_regressao_tempos_por_etapa.py`;
+`tests/test_regressao_tempos_por_senha.py`;
+`tests/test_regressao_duracao.py`.
 
 ---
 

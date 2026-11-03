@@ -24,7 +24,7 @@ from datetime import timedelta
 from sqlalchemy import func
 
 from app.extensions import db
-from app.models import Fila, LogAtendimento, Senha, Totem, Tv
+from app.models import Fila, Local, LogAtendimento, Senha, Totem, Tv
 from app.models.senha import criada_hoje_na_clinica, senhas_abertas_de_dias_anteriores
 from app.utils.tempo import para_horario_clinica
 
@@ -568,6 +568,16 @@ ROTULOS_TIPO_ETAPA = {
     TIPO_FECHAMENTO_CONCLUSAO: "Atendimento - Conclusão",
     TIPO_FECHAMENTO_REPASSE: "Atendimento - Repasse",
 }
+# Classificação de cada segmento de ATENDIMENTO (adendo 10.83) pelo Local.tipo
+# do local do segmento: Atendente (recepção: cadastro e exames), Executor
+# (coleta) ou Outros (tipo vazio, 'outro' - ex.: Triagem do Banco de Sangue - ou
+# local desconhecido). É o Local.tipo ATUAL, sem snapshot: corrigir o cadastro
+# reclassifica o passado (mesma limitação da Área, 10.76).
+CLASSE_ATENDENTE = "atendente"
+CLASSE_EXECUTOR = "executor"
+CLASSE_OUTROS = "outros"
+CLASSE_POR_TIPO_LOCAL = {"recepcao": CLASSE_ATENDENTE, "coleta": CLASSE_EXECUTOR}
+ROTULOS_CLASSE = {CLASSE_ATENDENTE: "Atendente", CLASSE_EXECUTOR: "Executor", CLASSE_OUTROS: "Outros"}
 EVENTO_EXPIRADA = "expirada_aguardando"  # adendo 10.77
 EVENTOS_JORNADA = (
     "gerada", "realocado", "voltou_aguardar", *EVENTOS_INICIO_ATENDIMENTO, "fim_atendimento", EVENTO_EXPIRADA,
@@ -594,6 +604,16 @@ def tempos_por_senha(filtros):
       `atendimento_total` só com o atendimento FINALIZADO (sem
       'fim_atendimento' fica vazio, mesmo que haja repasses).
     - Vazio (None), nunca 0, quando não há o dado (`situacao` explica).
+    - Adendo 10.83: `atendimento_atendente`/`_executor`/`_outros` (soma dos
+      segmentos de atendimento por `CLASSE_POR_TIPO_LOCAL`, vazio quando a
+      senha não tem segmento daquele tipo; mesmas condições do
+      `atendimento_total`, e os três somam exatamente ele);
+      `espera_intermediaria` (as esperas que NÃO abrem na emissão - depois de
+      realocação ou volta à espera, os mesmos segmentos do 10.66): em senha
+      "Concluída" sem nenhuma, 0 (o dado existe e é zero); vazio só em senha
+      não concluída ou "Histórico parcial";
+      `permanencia_total` (emissão -> 'fim_atendimento', só em senha
+      "Concluída" - inclui trechos de "Aguardar" que nenhum segmento mede).
     - **Histórico parcial:** senha com log sem snapshot de fila (antes do
       10.62) E com realocação/volta a aguardar - o fallback dos agregados só
       enxerga parte da jornada, então os totais ficam vazios e só a espera
@@ -623,6 +643,11 @@ def tempos_por_senha(filtros):
         atendimentos[inicio.senha_id].append((TIPO_FECHAMENTO_REPASSE, inicio, realocado, fila_id, local_id))
 
     area_de = _area_por_fila(filtros.empresa_id)  # adendo 10.76
+    tipo_do_local = dict(Local.query.filter_by(empresa_id=filtros.empresa_id).with_entities(Local.id, Local.tipo))
+
+    def classe(local_id):  # adendo 10.83
+        return CLASSE_POR_TIPO_LOCAL.get(tipo_do_local.get(local_id), CLASSE_OUTROS)
+
     eventos = defaultdict(list)
     for log in LogAtendimento.query.filter(
         LogAtendimento.senha_id.in_([s.id for s in senhas]),
@@ -664,6 +689,12 @@ def tempos_por_senha(filtros):
         else:
             fila_inicial = None if parcial else senha.fila_id  # sem realocação, a fila nunca mudou
 
+        atendimento_ok = fim is not None and atd and not parcial
+        por_classe = defaultdict(float)
+        for seg in atd:
+            por_classe[classe(seg[4])] += segundos(seg)
+        intermediarias = [seg for seg in esp if seg[1].evento != "gerada"]
+
         if not operador or any(seg[1].usuario_id == operador for seg in atd):
             linhas.append({
                 "senha_id": senha.id,
@@ -675,7 +706,17 @@ def tempos_por_senha(filtros):
                 "area_id": area_de.get(senha.fila_id),  # área ATUAL da fila final (10.76)
                 "espera_inicial_segundos": segundos(esp[0]) if esp and esp[0][1].evento == "gerada" else None,
                 "espera_total_segundos": sum(map(segundos, esp)) if esp and not parcial else None,
-                "atendimento_total_segundos": sum(map(segundos, atd)) if fim is not None and atd and not parcial else None,
+                "atendimento_total_segundos": sum(map(segundos, atd)) if atendimento_ok else None,
+                **{f"atendimento_{c}_segundos": por_classe[c] if atendimento_ok and c in por_classe else None
+                   for c in (CLASSE_ATENDENTE, CLASSE_EXECUTOR, CLASSE_OUTROS)},
+                "espera_intermediaria_segundos": (
+                    sum(map(segundos, intermediarias), 0.0) if situacao == SITUACAO_CONCLUIDA else None
+                ),
+                # Da emissão (o mesmo 'gerada' da espera inicial) à finalização.
+                "permanencia_total_segundos": (
+                    (fim.timestamp - (gerada.timestamp if gerada else senha.criada_em)).total_seconds()
+                    if situacao == SITUACAO_CONCLUIDA else None
+                ),
                 "etapas": len(atd) if atd and not parcial else None,
                 "operador_id": fim.usuario_id if fim is not None else None,
                 "local_id": senha.local_id if fim is not None else None,
@@ -696,6 +737,7 @@ def tempos_por_senha(filtros):
                 "unidade_id": senha.unidade_id,
                 "numero": numero,
                 "tipo": tipo,
+                "classe": None if tipo == TIPO_ETAPA_ESPERA else classe(local_id),  # adendo 10.83
                 "fila_id": fila_id,
                 "area_id": area_de.get(fila_id),
                 "local_id": local_id,
