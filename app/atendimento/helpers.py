@@ -673,15 +673,17 @@ def talvez_atualizar_nome(senha, nome_form, operador, setor, emitir_tv=True, reg
     na TV da fila de origem - Realocar só move a senha para outra fila, sem chamada
     nenhuma ali; quem vai chamar (por nome ou senha) é o destino, depois.
 
-    `registrar_como_chamada=False` (usado por Realocar): grava nome_paciente/
+    `registrar_como_chamada=False` (usado por Realocar e, desde o adendo 10.82,
+    também por Finalizar e Aguardar - hoje todos os chamadores): grava nome_paciente/
     chamada_nome_em normalmente (estado da senha), mas NÃO cria o
     LogAtendimento(evento="chamada_nome") - essa edição de nome é o fechamento do
-    segmento de atendimento da fila de origem (já auditado pelo evento "realocado"
-    gravado logo em seguida por registrar_realocacao), não uma chamada nova. Se
+    segmento de atendimento (já auditado pelo evento "realocado"/"fim_atendimento"/
+    "voltou_aguardar" gravado logo em seguida), não uma chamada nova. Se
     fosse gravado, os relatórios de tempo de atendimento (_pares_inicio_realocado
     em app/relatorios/queries.py) veriam esse log como o "início" mais recente
-    (colado ao "realocado" que vem logo depois) em vez do chamada_senha genuíno
-    que de fato abriu o atendimento na origem, medindo o segmento como ~0s.
+    (colado ao evento que vem logo depois) em vez do chamada_senha genuíno
+    que de fato abriu o atendimento, medindo o segmento como ~0s (no Finalizar,
+    `_pares_inicio_fim` media o último atendimento como 0 s - adendo 10.82).
     Também evita contar essa mesma visita duas vezes em ranking_operadores()
     (volume) e no feed de ultimas_chamadas() do dashboard.
     """

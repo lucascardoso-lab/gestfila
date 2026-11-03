@@ -424,6 +424,10 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.76 | "Áreas": agrupamento cadastrável de filas para os relatórios |
 | 10.77 | Senhas abertas de dias anteriores: encerramento por dia da clínica + filtro de "hoje" em toda fila de espera |
 | 10.78 | Action vermelha desde o 10.69: testes de PDF dependiam de onde a fonte quebra as células |
+| 10.79 | Turnos e Locais de dias anteriores: a varredura do 10.77 também fecha `TurnoAtivo` e libera `local_atual_id` + "Desconectar" desativa o turno |
+| 10.80 | "Tempos por senha": coluna Situação cortada na tela (13 colunas) + PDF em A4 paisagem |
+| 10.81 | Painel de TV aberto do zero sem interação: fila de voz travada pelo autoplay do Chrome |
+| 10.82 | Nome preenchido no Finalizar/Aguardar media o último atendimento como 0 s (log `chamada_nome` colado ao fechamento) |
 
 ---
 
@@ -7988,8 +7992,98 @@ d) Reabrir o painel e esperar a 1ª chamada **sem tocar em nada**: a faixa
 
 ---
 
+## 10.82. ADENDO — Nome preenchido no Finalizar/Aguardar media o último atendimento como 0 s (log `chamada_nome` colado ao fechamento)
+
+> **Bug achado na FASE 1 do pedido "Tempos por senha" por etapa (atendente /
+> executor)** e corrigido em commit e adendo SEPARADOS da feature, a pedido do
+> cliente: ele muda números que já existem (Tempo de atendimento, Ranking,
+> Tempos por senha) e precisa ser revisado isolado.
+
+**Causa:** Finalizar e Aguardar chamavam `talvez_atualizar_nome()` sem
+`registrar_como_chamada=False`. Com o campo Nome preenchido, a função gravava
+um log `chamada_nome` na MESMA request do `fim_atendimento`/
+`voltou_aguardar`. `_pares_inicio_fim` usa a chamada MAIS RECENTE
+(`chamada_senha` ou `chamada_nome`) como início do último atendimento, então
+o segmento saía com ~0 s. É a mesma causa raiz que o Realocar já tinha
+corrigido (seção 7, "Realocar não grava mais log `chamada_nome`"). Na época,
+só o Realocar foi tratado e o Aguardar ficou de propósito com o log, por ser
+tido como "legítimo".
+
+**Evidência (banco local, com as funções reais):** 4 de 4 senhas com
+`chamada_nome` tinham o último atendimento medido como **0,0 s**. Exemplo:
+DV001, chamada às 18:27:03 e finalizada às 18:32:09 (5:06 reais).
+
+**Não existe `chamada_nome` "legítimo" no código atual.** A tela separada de
+chamada por nome da seção 5.3 foi absorvida pelo campo Nome da tela única de
+atendimento (seção 10.2). Os ÚNICOS pontos que gravavam `chamada_nome` eram
+`talvez_atualizar_nome()` chamada por Realocar, Finalizar e Aguardar, nas
+telas por fila e por Local. Depois desta correção, **nenhum ponto grava mais
+`chamada_nome`**. O valor continua no ENUM e continua sendo LIDO
+(`EVENTOS_INICIO_ATENDIMENTO`) por causa do dado já gravado.
+
+**Correção (gravação):** Finalizar e Aguardar, nas duas telas
+(`app/atendimento/chamada.py`: `finalizar`, `aguardar`, `finalizar_local`,
+`aguardar_local`), passam `registrar_como_chamada=False`. `nome_paciente` e
+`chamada_nome_em` continuam gravados na senha. O anúncio do nome na TV
+(`emitir_tv`) não mudou. Só o log deixa de existir.
+
+**Dado já gravado:** a proteção na LEITURA ficou para aprovação separada. A
+regra proposta foi medida no banco local e é descrita no relato da FASE 1.
+Até ela ser aprovada, as senhas antigas com o nome no Finalizar continuam
+medidas como 0 s.
+
+**Efeitos colaterais (deliberados, mesma lógica do Realocar no 10.62/seção 7):**
+- **Ranking (volume):** o nome digitado no Finalizar/Aguardar deixa de contar
+  como uma 2ª chamada. Uma visita "Chamar → Finalizar com nome" passa a contar
+  1, não 2. O tempo médio do Ranking também passa a usar o tempo real.
+- **Feed "Últimas chamadas"** (dashboard de relatórios) e o
+  `EVENTOS_CHAMADA` do dashboard operacional (contagem e gráfico por hora):
+  a mesma visita deixa de aparecer duas vezes. A linha em que o feed mostrava
+  o NOME do paciente (`evento == 'chamada_nome'`) deixa de surgir em dado
+  novo, e o feed mostra o código da senha.
+- **Tempo de atendimento / Tempos por senha:** o último atendimento passa a
+  medir da chamada real até a finalização.
+
+**Lacuna registrada, sem correção (seção 11):** o trecho entre a chamada e o
+"Aguardar" não é medido por nenhuma função.
+
+**Testes:** novo `tests/test_regressao_nome_no_finalizar_aguardar.py`, com
+requests HTTP reais. Finalizar com Nome (tela por fila): sem `chamada_nome`,
+nome gravado, último atendimento = 300 s (não 0 s) em `_pares_inicio_fim`,
+`tempo_atendimento`, `ranking_operadores` (volume 1) e `tempos_por_senha`.
+Aguardar com Nome (por fila): idem. Finalizar e Aguardar com Nome na tela
+por Local (rodízio): idem. Feed com 4 chamadas para 4 visitas. Confirmado
+que o teste FALHA com o código antigo de `chamada.py` (sai
+`['gerada', 'chamada_senha', 'chamada_nome', 'fim_atendimento']`).
+`tests/test_regressao_realocar_nao_conta_como_chamada.py` ajustado: o
+cenário de idas e vindas afirmava que o Aguardar "continua gravando
+`chamada_nome`". Agora não grava, e o início correto continua sendo a
+re-chamada (60 s).
+
+**Achado no caminho (documentação):** o índice 10.0 não tinha as linhas do
+10.79, do 10.80 e do 10.81. Elas foram acrescentadas junto com a deste
+adendo.
+
+**Nota de deploy:** `git pull` + restart do `gestfila` (sem migration, sem
+mudança em `requirements.txt`).
+
+**Arquivos alterados:** `app/atendimento/chamada.py`;
+`app/atendimento/helpers.py` (docstring de `talvez_atualizar_nome`); novo
+`tests/test_regressao_nome_no_finalizar_aguardar.py`;
+`tests/test_regressao_realocar_nao_conta_como_chamada.py`; seção 11.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
+- **Trecho entre a chamada e o "Aguardar" não é medido** (registrado no
+  10.82, sem correção): `_pares_inicio_fim` usa a ÚLTIMA chamada até o
+  `fim_atendimento`, e `_segmentos_intermediarios_realocacao` só fecha em
+  `realocado`. O atendimento de "Chamar → Aguardar" (chamada →
+  `voltou_aguardar`) não entra no Tempo de atendimento, no Ranking nem no
+  Tempos por senha. A espera seguinte (`voltou_aguardar` → nova chamada)
+  continua medida (10.66). Corrigir exige um pareamento novo
+  (chamada → `voltou_aguardar`).
 - **Fonte própria nos PDFs de relatório** (prioridade BAIXA, registrado no
   10.78): o `print.css` pede `system-ui, -apple-system, Segoe UI, Roboto,
   sans-serif` - em produção (Linux) isso cai em **DejaVu Sans** (confirmado

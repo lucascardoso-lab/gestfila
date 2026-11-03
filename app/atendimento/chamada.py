@@ -266,7 +266,8 @@ def finalizar_local(setor, local_id):
         flash("Nenhuma senha chamada neste Local.", "error")
         return redirect(url_for("atendimento.painel_local", setor=setor, local_id=local.id))
 
-    talvez_atualizar_nome(senha, request.form.get("nome"), current_user, setor)
+    # adendo 10.82: o nome digitado aqui não é uma chamada nova (mesmo motivo do Realocar)
+    talvez_atualizar_nome(senha, request.form.get("nome"), current_user, setor, registrar_como_chamada=False)
     registrar_fim_atendimento(senha, current_user, setor)
     flash(f"Atendimento da senha {senha.codigo} finalizado.", "info")
     return redirect(url_for("atendimento.painel_local", setor=setor, local_id=local.id))
@@ -284,7 +285,8 @@ def aguardar_local(setor, local_id):
         flash("Nenhuma senha chamada neste Local.", "error")
         return redirect(url_for("atendimento.painel_local", setor=setor, local_id=local.id))
 
-    talvez_atualizar_nome(senha, request.form.get("nome"), current_user, setor)
+    # adendo 10.82: o nome digitado aqui não é uma chamada nova (mesmo motivo do Realocar)
+    talvez_atualizar_nome(senha, request.form.get("nome"), current_user, setor, registrar_como_chamada=False)
     registrar_volta_espera(senha, current_user, setor)
     flash(f"Senha {senha.codigo} voltou para a espera.", "info")
     return redirect(url_for("atendimento.painel_local", setor=setor, local_id=local.id))
@@ -452,7 +454,8 @@ def finalizar(setor, fila_id):
         flash("Nenhuma senha chamada neste local.", "error")
         return redirect(url_for("atendimento.painel_fila", setor=setor, fila_id=fila.id))
 
-    talvez_atualizar_nome(senha, request.form.get("nome"), current_user, setor)
+    # adendo 10.82: o nome digitado aqui não é uma chamada nova (mesmo motivo do Realocar)
+    talvez_atualizar_nome(senha, request.form.get("nome"), current_user, setor, registrar_como_chamada=False)
     registrar_fim_atendimento(senha, current_user, setor)
     flash(f"Atendimento da senha {senha.codigo} finalizado.", "info")
     return redirect(url_for("atendimento.painel_fila", setor=setor, fila_id=fila.id))
@@ -473,7 +476,8 @@ def aguardar(setor, fila_id):
         flash("Nenhuma senha chamada neste local.", "error")
         return redirect(url_for("atendimento.painel_fila", setor=setor, fila_id=fila.id))
 
-    talvez_atualizar_nome(senha, request.form.get("nome"), current_user, setor)
+    # adendo 10.82: o nome digitado aqui não é uma chamada nova (mesmo motivo do Realocar)
+    talvez_atualizar_nome(senha, request.form.get("nome"), current_user, setor, registrar_como_chamada=False)
     registrar_volta_espera(senha, current_user, setor)
     flash(f"Senha {senha.codigo} voltou para a espera.", "info")
     return redirect(url_for("atendimento.painel_fila", setor=setor, fila_id=fila.id))

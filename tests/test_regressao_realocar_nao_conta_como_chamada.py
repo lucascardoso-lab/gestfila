@@ -26,10 +26,10 @@ corrigido de fato, não só a query isolada:
 2. Cenário de idas-e-vindas (Chamar -> Aguardar com Nome -> Chamar de novo ->
    Realocar com Nome de novo): confirma que a correção NÃO quebrou o
    comportamento existente de pegar a chamada mais recente antes do handoff -
-   o 'chamada_nome' do Aguardar (legítimo, não suprimido) fica mais antigo que
-   o 'chamada_senha' da re-chamada, e o 'chamada_nome' do Realocar (suprimido
-   pela correção) não aparece para competir - o início correto continua sendo
-   a re-chamada, não a primeira chamada nem o log do Aguardar.
+   nem o Aguardar nem o Realocar gravam 'chamada_nome' (o Aguardar também
+   deixou de gravar no adendo 10.82, que estendeu a correção a Finalizar/
+   Aguardar) - o início correto continua sendo a re-chamada, não a primeira
+   chamada.
 
 Os timestamps dos logs são reajustados diretamente via ORM após as chamadas
 HTTP reais (que já exercitam o código de produção) só para tornar as
@@ -239,10 +239,10 @@ ok("tempo_atendimento(): segmento da Recepção = 120s (real) e segmento da Cole
 
 
 # ---------------------------------------------------------------------------
-# 2) Cenário de idas-e-vindas: Chamar -> Aguardar (com Nome, log LEGÍTIMO,
-#    continua sendo gravado) -> Chamar de novo -> Realocar (com Nome, log
-#    SUPRIMIDO pela correção). O 'início' deve continuar sendo a RE-chamada
-#    (mais recente), não a 1ª chamada nem o chamada_nome do Aguardar.
+# 2) Cenário de idas-e-vindas: Chamar -> Aguardar (com Nome - sem log
+#    'chamada_nome' desde o adendo 10.82) -> Chamar de novo -> Realocar (com
+#    Nome, log SUPRIMIDO pela correção). O 'início' deve continuar sendo a
+#    RE-chamada (mais recente), não a 1ª chamada.
 # ---------------------------------------------------------------------------
 resp = c_recepcao.post(
     f"/atendimento/recepcao/filas/{ids['fila_recepcao']}/chamar",
@@ -260,7 +260,7 @@ with app.app_context():
     senha2_db = db.session.get(Senha, ids["senha2"])
     assert senha2_db.status == "aguardando"
     assert senha2_db.nome_paciente == "Joao Preliminar"
-ok("'Aguardar' com Nome preenchido: continua gravando nome_paciente e log 'chamada_nome' normalmente (não afetado pela correção)")
+ok("'Aguardar' com Nome preenchido: continua gravando nome_paciente normalmente")
 
 resp = c_recepcao.post(
     f"/atendimento/recepcao/filas/{ids['fila_recepcao']}/chamar",
@@ -284,12 +284,11 @@ with app.app_context():
     eventos2 = [log.evento for log in logs2]
     assert eventos2 == [
         "chamada_senha",   # 1ª chamada
-        "chamada_nome",    # Aguardar (legítimo, não suprimido)
-        "voltou_aguardar",
+        "voltou_aguardar", # Aguardar - SEM 'chamada_nome' (adendo 10.82)
         "chamada_senha",   # RE-chamada
         "realocado",       # Realocar - SEM 'chamada_nome' (suprimido pela correção)
     ], eventos2
-ok("Idas-e-vindas: 'chamada_nome' do Aguardar continua gravado; 'chamada_nome' do Realocar continua suprimido")
+ok("Idas-e-vindas: nem o Aguardar (10.82) nem o Realocar gravam 'chamada_nome'")
 
 with app.app_context():
     logs2 = (
@@ -297,11 +296,11 @@ with app.app_context():
         .order_by(LogAtendimento.id.asc())
         .all()
     )
-    # timestamps determinísticos: chamada(1a)=0s, chamada_nome(aguardar)=30s,
-    # voltou_aguardar=30s, chamada(RE-chamada)=90s, realocado=150s.
+    # timestamps determinísticos: chamada(1a)=0s, voltou_aguardar=30s,
+    # chamada(RE-chamada)=90s, realocado=150s.
     # 'início' esperado = RE-chamada (90s) -> segmento = 150-90 = 60s.
     t0 = datetime.utcnow() - timedelta(hours=1)
-    offsets = [0, 30, 30, 90, 150]
+    offsets = [0, 30, 90, 150]
     for log, offset in zip(logs2, offsets):
         log.timestamp = t0 + timedelta(seconds=offset)
     db.session.commit()
@@ -316,7 +315,7 @@ with app.app_context():
     assert local_id == ids["local_recepcao"]
     duracao = (realocado_log.timestamp - inicio.timestamp).total_seconds()
     assert duracao == 60.0, duracao
-ok("Idas-e-vindas: 'início' correto continua sendo a RE-chamada (90s), não a 1ª chamada (0s) nem o chamada_nome do Aguardar (30s) - segmento = 60s, comportamento pré-existente preservado, fila/local reais")
+ok("Idas-e-vindas: 'início' correto continua sendo a RE-chamada (90s), não a 1ª chamada (0s) - segmento = 60s, comportamento pré-existente preservado, fila/local reais")
 
 print()
 print(f"TODOS OS {len(passos)} TESTES DE 'REALOCAR NÃO CONTA COMO CHAMADA' PASSARAM")
