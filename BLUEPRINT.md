@@ -8027,10 +8027,72 @@ telas por fila e por Local. Depois desta correção, **nenhum ponto grava mais
 `chamada_nome_em` continuam gravados na senha. O anúncio do nome na TV
 (`emitir_tv`) não mudou. Só o log deixa de existir.
 
-**Dado já gravado:** a proteção na LEITURA ficou para aprovação separada. A
-regra proposta foi medida no banco local e é descrita no relato da FASE 1.
-Até ela ser aprovada, as senhas antigas com o nome no Finalizar continuam
-medidas como 0 s.
+**Dado já gravado: proteção na LEITURA (2º commit deste adendo).**
+`app/relatorios/queries.py::_descartar_nome_no_fechamento(logs)`, função
+ÚNICA, aplicada logo depois de carregar os logs. Ela descarta um
+`chamada_nome` quando o evento SEGUINTE da mesma senha cumpre três
+condições: é um `fim_atendimento`, um `voltou_aguardar` ou um `realocado`
+(`EVENTOS_FECHAMENTO_COM_NOME`); é do MESMO operador; e acontece até 2 s
+depois (`TOLERANCIA_NOME_NO_FECHAMENTO`).
+- O "seguinte" vem da jornada COMPLETA da senha, numa consulta própria feita
+  só para as senhas que têm `chamada_nome`. Não vem do subconjunto que cada
+  chamador carregou: o Ranking, por exemplo, nem carrega `fim_atendimento`.
+- Os 2 s cobrem o DATETIME sem fração do MySQL: os dois logs da mesma
+  request podem cair em segundos vizinhos.
+- É mantido (não descartado) o `chamada_nome` que acontece 3 s ou mais antes
+  do fechamento, o que é de OUTRO operador e o que é o último evento da
+  senha. O `chamada_nome` 9 s antes do fim, do teste do 10.73, continua
+  valendo como início.
+- **`realocado` entra na regra mesmo sem nenhum caso em produção**, por
+  decisão do cliente. Antes do 10.62 (seção 7), o Realocar também gravava o
+  `chamada_nome` colado. A regra protege outras instalações e bancos
+  restaurados com dado dessa época, que afeta o fallback histórico de
+  `_segmentos_intermediarios_realocacao` (o 1º segmento antes da
+  realocação).
+
+**Medição antes de implementar:**
+- **Produção** (consulta do evento seguinte, rodada pelo cliente): **37
+  `chamada_nome`**, todos colados a um fechamento do mesmo operador em até
+  2 s. São 35 seguidos de `fim_atendimento` (de 28/08/2026 14:25:27 a
+  03/11/2026 19:40:16) e 2 seguidos de `voltou_aguardar` (de 08/09/2026
+  20:04:37 a 09/10/2026 19:27:33). Nenhum fica de fora da regra, nenhum é
+  seguido de `realocado` (o dado de produção começa depois do 10.62) e
+  nenhum é o último evento da senha. **A regra cobre 100% dos casos, sem
+  nenhum legítimo pego por engano.**
+- **Banco local:** 4 de 4 colados a um `fim_atendimento`, no mesmo segundo.
+
+**Onde a função entra (6 pontos):**
+
+| Ponto | Efeito |
+|---|---|
+| `_pares_inicio_fim` | o último atendimento deixa de sair 0 s (Tempo de atendimento, tempo do Ranking, Tempos por senha) |
+| `_segmentos_intermediarios_realocacao`: a MESMA lista carregada serve o caminho com snapshot E o fallback histórico | o repasse e o 1º segmento histórico (pré-10.62) deixam de sair ~0 s |
+| `ranking_operadores`: volume | 1 chamada por visita |
+| `ultimas_chamadas`: feed | 1 linha por visita. Busca `2*limite+1` e corta em `limite` depois do descarte. Na prática sobram `limite`: um operador não chama outra senha sem finalizar (10.17) e, desde o 1º commit do 10.82, nenhum `chamada_nome` novo é gravado |
+| `core/dashboard_queries.py::calcular_kpis`: KPI "chamadas hoje" | 1 chamada por visita |
+| `core/dashboard_queries.py::chamadas_por_hora_hoje`: gráfico | 1 chamada por visita |
+
+**Fora de propósito, com teste comprovando:**
+- **`_segmentos_espera_por_senha`** (e, por ela, o tile de espera do
+  dashboard): um nome colado sempre vem DEPOIS de uma chamada da mesma
+  senha, sem nenhuma espera aberta, então nunca fecha uma espera. O caminho
+  histórico só usa `chamada_senha`.
+- **`tempos_por_senha`**: os tempos vêm das funções de segmento acima, já
+  corrigidas. O uso próprio que faz dos eventos (`foi_chamada`, histórico)
+  não muda, porque sempre existe uma `chamada_senha` antes.
+
+**Efeito nos relatórios de períodos passados depois do deploy:** os números
+antigos MUDAM, sem migração de dado. Nada é apagado do banco; só a leitura
+muda.
+- **Tempo de atendimento** e **Tempos por senha**: as senhas com o nome no
+  Finalizar ganham o tempo real do último atendimento, em vez de 0 s. A
+  média sobe: em produção são os 35 casos de 28/08 a 03/11/2026.
+- **Ranking**: o volume cai 1 por visita afetada (37 em produção) e o tempo
+  médio sobe.
+- **Feed "Últimas chamadas"**, **KPI "chamadas hoje"** e **gráfico por
+  hora**: uma linha a menos por visita afetada. Some a linha que mostrava o
+  nome do paciente no feed.
+- **Tempo de espera**: não muda.
 
 **Efeitos colaterais (deliberados, mesma lógica do Realocar no 10.62/seção 7):**
 - **Ranking (volume):** o nome digitado no Finalizar/Aguardar deixa de contar
@@ -8060,6 +8122,28 @@ cenário de idas e vindas afirmava que o Aguardar "continua gravando
 `chamada_nome`". Agora não grava, e o início correto continua sendo a
 re-chamada (60 s).
 
+**Testes da proteção da leitura:** novo
+`tests/test_regressao_nome_no_fechamento_leitura.py`. Usa logs antigos
+montados no ORM e o relógio simulado em 08/10 às 12:00 de Brasília (padrão
+do 10.74). Verifica:
+- a regra: o `chamada_nome` colado a `fim_atendimento` (0 s),
+  `voltou_aguardar` (1 s) e `realocado` (2 s, com snapshot e histórico) é
+  descartado; o que está a 3 s, o de outro operador e o que é o último
+  evento da senha são mantidos, sem erro;
+- `_pares_inicio_fim` = 300 s, não 0 s;
+- repasse com snapshot = 122 s e 1º segmento do fallback histórico = 90 s,
+  não 0 s;
+- linha histórica do Tempo de atendimento = 90 s;
+- Ranking com volume 10/3 e tempo 201 s/87 s;
+- feed com 13 linhas e o corte em `limite=3`;
+- KPI e gráfico com 13 chamadas;
+- esperas e Tempos por senha corretos sem a função (o que justifica deixar
+  os dois de fora).
+
+**Prova por mutação:** com a função neutralizada, o teste falha. Tirando a
+função de CADA um dos 6 pontos, um de cada vez, o teste falha na asserção
+daquele ponto.
+
 **Achado no caminho (documentação):** o índice 10.0 não tinha as linhas do
 10.79, do 10.80 e do 10.81. Elas foram acrescentadas junto com a deste
 adendo.
@@ -8070,7 +8154,12 @@ mudança em `requirements.txt`).
 **Arquivos alterados:** `app/atendimento/chamada.py`;
 `app/atendimento/helpers.py` (docstring de `talvez_atualizar_nome`); novo
 `tests/test_regressao_nome_no_finalizar_aguardar.py`;
-`tests/test_regressao_realocar_nao_conta_como_chamada.py`; seção 11.
+`tests/test_regressao_realocar_nao_conta_como_chamada.py`; seção 11. Proteção
+da leitura (2º commit): `app/relatorios/queries.py`
+(`_descartar_nome_no_fechamento`, `EVENTOS_FECHAMENTO_COM_NOME`,
+`TOLERANCIA_NOME_NO_FECHAMENTO` e os 4 pontos);
+`app/core/dashboard_queries.py` (KPI e gráfico); novo
+`tests/test_regressao_nome_no_fechamento_leitura.py`.
 
 ---
 

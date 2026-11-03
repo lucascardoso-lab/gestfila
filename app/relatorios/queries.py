@@ -19,6 +19,7 @@ dados, não por limitação estrutural). Os relatórios de tempo de espera (1) e
 """
 
 from collections import defaultdict
+from datetime import timedelta
 
 from sqlalchemy import func
 
@@ -51,6 +52,47 @@ TIPO_FECHAMENTO_ROTULOS = {
     TIPO_FECHAMENTO_CONCLUSAO: "Conclusão",
     TIPO_FECHAMENTO_REPASSE: "Repasse",
 }
+
+# Adendo 10.82 - 'chamada_nome' gravado pelo campo Nome no MESMO request de um
+# fechamento (Finalizar/Aguardar até o 10.82; Realocar até o 10.62). Não é uma
+# chamada: é ignorado na leitura (ver _descartar_nome_no_fechamento).
+EVENTOS_FECHAMENTO_COM_NOME = ("fim_atendimento", "voltou_aguardar", "realocado")
+TOLERANCIA_NOME_NO_FECHAMENTO = timedelta(seconds=2)
+
+
+def _descartar_nome_no_fechamento(logs):
+    """Tira de `logs` (logo depois de carregá-los) cada 'chamada_nome' cujo
+    evento SEGUINTE da mesma senha é um fechamento (`EVENTOS_FECHAMENTO_COM_NOME`)
+    do MESMO operador até 2 s depois (adendo 10.82). Esse log vinha do Nome
+    digitado no próprio botão de fechamento - tomado como "início" do segmento,
+    o atendimento saía ~0 s, e contava como uma 2ª chamada da mesma visita.
+
+    O "seguinte" é o da jornada COMPLETA da senha (consulta própria, só das
+    senhas com 'chamada_nome'), não o do subconjunto de eventos que cada
+    chamador carregou - o Ranking, por exemplo, nem carrega 'fim_atendimento'.
+    Os 2 s cobrem o arredondamento do DATETIME sem fração do MySQL (os dois logs
+    da mesma request podem cair em segundos vizinhos); um 'chamada_nome' mais
+    distante, de outro operador ou sem evento seguinte é mantido."""
+    candidatos = {log.senha_id for log in logs if log.evento == "chamada_nome"}
+    if not candidatos:
+        return logs
+
+    jornada = defaultdict(list)
+    for log in LogAtendimento.query.filter(LogAtendimento.senha_id.in_(candidatos)):
+        jornada[log.senha_id].append(log)
+
+    descartar = set()
+    for eventos in jornada.values():
+        eventos.sort(key=lambda e: (e.timestamp, e.id))
+        for atual, seguinte in zip(eventos, eventos[1:]):
+            if (
+                atual.evento == "chamada_nome"
+                and seguinte.evento in EVENTOS_FECHAMENTO_COM_NOME
+                and seguinte.usuario_id == atual.usuario_id
+                and seguinte.timestamp - atual.timestamp <= TOLERANCIA_NOME_NO_FECHAMENTO
+            ):
+                descartar.add(atual.id)
+    return [log for log in logs if log.id not in descartar]
 
 
 def _senhas_filtradas(filtros):
@@ -292,10 +334,10 @@ def _pares_inicio_fim(filtros):
     if not mapa_senha:
         return []
 
-    logs = LogAtendimento.query.filter(
+    logs = _descartar_nome_no_fechamento(LogAtendimento.query.filter(
         LogAtendimento.senha_id.in_(mapa_senha.keys()),
         LogAtendimento.evento.in_((*EVENTOS_INICIO_ATENDIMENTO, "fim_atendimento")),
-    ).all()
+    ).all())
 
     eventos_por_senha = defaultdict(list)
     for log in logs:
@@ -354,10 +396,12 @@ def _segmentos_intermediarios_realocacao(filtros):
     if not mapa_unidade:
         return []
 
-    logs = LogAtendimento.query.filter(
+    # adendo 10.82: vale para os dois caminhos abaixo (snapshot e fallback
+    # histórico - antes do 10.62 o Realocar também gravava o 'chamada_nome').
+    logs = _descartar_nome_no_fechamento(LogAtendimento.query.filter(
         LogAtendimento.senha_id.in_(mapa_unidade.keys()),
         LogAtendimento.evento.in_((*EVENTOS_INICIO_ATENDIMENTO, "realocado")),
-    ).all()
+    ).all())
 
     eventos_por_senha = defaultdict(list)
     for log in logs:
@@ -665,22 +709,21 @@ def tempos_por_senha(filtros):
 
 
 def ranking_operadores(filtros):
-    """Relatório 4: ranking de operadores por volume (chamada_senha + chamada_nome) e
-    tempo médio de atendimento (None enquanto não houver fim_atendimento gravado)."""
+    """Relatório 4: ranking de operadores por volume (chamada_senha + chamada_nome,
+    sem o 'chamada_nome' colado a um fechamento - adendo 10.82) e tempo médio de
+    atendimento (None enquanto não houver fim_atendimento gravado)."""
     mapa_senha_ids = [row.id for row in _senhas_filtradas(filtros).with_entities(Senha.id)]
     volumes = defaultdict(int)
     if mapa_senha_ids:
-        contagens = (
-            db.session.query(LogAtendimento.usuario_id, LogAtendimento.id)
-            .filter(
+        chamadas = _descartar_nome_no_fechamento(
+            LogAtendimento.query.filter(
                 LogAtendimento.senha_id.in_(mapa_senha_ids),
                 LogAtendimento.evento.in_(EVENTOS_INICIO_ATENDIMENTO),
                 LogAtendimento.usuario_id.isnot(None),
-            )
-            .all()
+            ).all()
         )
-        for usuario_id, _ in contagens:
-            volumes[usuario_id] += 1
+        for chamada in chamadas:
+            volumes[chamada.usuario_id] += 1
 
     tempos_por_operador = defaultdict(list)
     for inicio, fim, _fila_id, _local_id in _pares_inicio_fim(filtros):
@@ -758,15 +801,19 @@ def ultimas_chamadas(empresa, unidades_visiveis, limite=15):
     mais recente primeiro. logs_atendimento não tem empresa_id próprio, mas
     unidades_visiveis já é escopado à empresa resolvida (via _unidades_ids_visiveis),
     então filtrar só por unidade_id já basta - mesma premissa de tempo_medio_espera."""
-    logs = (
+    # adendo 10.82: busca 2*limite+1 e corta depois de descartar os
+    # 'chamada_nome' colados a um fechamento. Na prática sobram `limite`: um
+    # operador não chama outra senha sem finalizar (10.17) e, desde o 1º commit
+    # do 10.82, nenhum 'chamada_nome' novo é gravado.
+    logs = _descartar_nome_no_fechamento(
         LogAtendimento.query.filter(
             LogAtendimento.unidade_id.in_(unidades_visiveis),
             LogAtendimento.evento.in_(EVENTOS_INICIO_ATENDIMENTO),
         )
         .order_by(LogAtendimento.timestamp.desc())
-        .limit(limite)
+        .limit(2 * limite + 1)
         .all()
-    )
+    )[:limite]
     if not logs:
         return []
 

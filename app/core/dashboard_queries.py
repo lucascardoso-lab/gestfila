@@ -14,12 +14,13 @@ from app.admin.helpers import resolver_unidade_contexto, unidades_da_empresa
 from app.models import Fila, LogAtendimento, Senha
 from app.models.senha import criada_hoje_na_clinica
 from app.relatorios.helpers import Filtros
-from app.relatorios.queries import _segmentos_espera_por_senha
+from app.relatorios.queries import _descartar_nome_no_fechamento, _segmentos_espera_por_senha
 from app.utils.tempo import formatar_duracao, janela_dia_clinica_em_utc
 
 # Mesma definição de "chamada" já usada em relatorios/queries.py (EVENTOS_INICIO_
-# ATENDIMENTO) - 'chamada_nome' deliberadamente NÃO é gravado pelo Realocar (seção 7
-# do BLUEPRINT), então esta contagem já não duplica uma única visita como 2 chamadas.
+# ATENDIMENTO) - o 'chamada_nome' do campo Nome não é mais gravado (Realocar desde a
+# seção 7, Finalizar/Aguardar desde o 10.82) e o já gravado colado a um fechamento é
+# descartado na leitura (_descartar_nome_no_fechamento), então uma visita conta 1.
 EVENTOS_CHAMADA = ("chamada_senha", "chamada_nome")
 
 
@@ -64,12 +65,12 @@ def calcular_kpis(empresa, unidades_visiveis):
 
     inicio_hoje, fim_hoje = janela_dia_clinica_em_utc()
 
-    chamadas_hoje = LogAtendimento.query.filter(
+    chamadas_hoje = len(_descartar_nome_no_fechamento(LogAtendimento.query.filter(
         LogAtendimento.unidade_id.in_(unidades_visiveis),
         LogAtendimento.evento.in_(EVENTOS_CHAMADA),
         LogAtendimento.timestamp >= inicio_hoje,
         LogAtendimento.timestamp < fim_hoje,
-    ).count()
+    ).all()))
 
     filas_ativas = Fila.query.filter(
         Fila.empresa_id == empresa.id,
@@ -179,14 +180,12 @@ def chamadas_por_hora_hoje(unidades_visiveis):
     inicio_hoje, fim_hoje = janela_dia_clinica_em_utc()
     if not unidades_visiveis:
         return []
-    linhas = (
+    chamadas = _descartar_nome_no_fechamento(
         LogAtendimento.query.filter(
             LogAtendimento.unidade_id.in_(unidades_visiveis),
             LogAtendimento.evento.in_(EVENTOS_CHAMADA),
             LogAtendimento.timestamp >= inicio_hoje,
             LogAtendimento.timestamp < fim_hoje,
-        )
-        .with_entities(LogAtendimento.timestamp)
-        .all()
+        ).all()
     )
-    return [timestamp.isoformat() for (timestamp,) in linhas]
+    return [chamada.timestamp.isoformat() for chamada in chamadas]
