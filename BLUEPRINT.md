@@ -429,6 +429,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.81 | Painel de TV aberto do zero sem interação: fila de voz travada pelo autoplay do Chrome |
 | 10.82 | Nome preenchido no Finalizar/Aguardar media o último atendimento como 0 s (log `chamada_nome` colado ao fechamento) |
 | 10.83 | "Tempos por senha" por etapa: Atendimento atendente/executor/outros, Espera intermediária e Permanência total |
+| 10.84 | Coluna "Tipo" (tipo de senha da emissão) em "Senhas em espera" e "Senhas atendidas" - 2 telas, render inicial e /dados |
 
 ---
 
@@ -8398,6 +8399,146 @@ novo `tests/test_regressao_tempos_por_etapa.py`;
 
 ---
 
+## 10.84. ADENDO — Coluna "Tipo" (tipo de senha da emissão) em "Senhas em espera" e "Senhas atendidas"
+
+> Pedido: mostrar o tipo de senha escolhido no totem (`TipoSenha`, 10.4 - ex.:
+> "Pessoa idosa – 80 anos ou mais", "Gestante", "PCD") nas duas tabelas da
+> tela de Atendimento, nas duas telas (`painel_fila.html` e
+> `painel_local.html`). Investigação (FASE 1) relatada e forma de exibição
+> aprovada antes de implementar.
+
+**Achados da investigação:**
+
+1. **Quatro tabelas, dois caminhos cada**: as duas telas não compartilham a
+   tabela (mesma situação do 10.52). Cada tabela é montada no Jinja (render
+   inicial) e no JS (`linhaEspera`/`linhaAtendida`) a partir do JSON de
+   `/dados`, refeito a cada `fila_atualizada`. O tipo precisava entrar nos
+   dois caminhos, senão sumiria no primeiro refresh.
+2. **Quando `Senha.tipo_senha_id` é NULL**: fila sem nenhum tipo ativo (a
+   senha sai direto) e senhas anteriores à 10.4. Fila com **1** tipo **não**
+   gera NULL (o menu do totem embute o `tipo_senha_id` como hidden, 10.34). A
+   chamada por código de contingência não cria senha, então não interfere.
+   Realocar troca só `fila_id`: a senha leva o tipo para a fila nova, mesmo
+   que essa fila não tenha aquele tipo vinculado (correto, o tipo é do
+   paciente que emitiu). Banco local na investigação: 209 de 423 senhas sem
+   tipo, nenhuma órfã.
+3. **Tipo inativo/excluído**: desativar só muda `ativo`, a senha mantém o
+   vínculo e **o nome continua aparecendo** (sem marcação de "inativo").
+   Excluir um tipo com senhas já é bloqueado (`excluir_tipo_senha`), então o
+   vínculo nunca fica órfão.
+4. **Tipo ≠ prioridade (10.27)**: o badge "P" ao lado do código (de
+   `Senha.prioridade`) já existia nas duas telas e **foi mantido separado**.
+   O tipo não substitui o "P": um tipo "Preferencial" cadastrado com peso 0
+   gera senhas `prioridade=False` (era o caso do banco local), e sem a coluna
+   nova o operador não tinha como saber que eram preferenciais.
+
+**Exibição aprovada:** coluna "Tipo" logo depois de "Senha", nas 4 tabelas.
+Nome do tipo em texto normal, precedido de um marcador redondo com a `cor`
+do cadastro, mostrado sempre que houver cor (opção "a": não só para
+prioritárias). Sem tipo: "—". A cor do tipo **nunca** fica atrás de texto (é
+escolhida pelo admin e o contraste não é garantido, ainda mais no tema
+escuro, 10.56). O marcador tem um anel em `--gf-cinza-medio` (token
+presente nos dois temas), visível mesmo quando a cor do tipo coincide com o
+fundo. Mesmo princípio de borda/marcador da lista "Últimas chamadas" do
+painel de TV (`borderLeftColor`). O card central da TV usa a cor como fundo,
+com selo branco por cima, e não serviu de modelo.
+
+> **A cor exibida é a do CADASTRO, sem regra própria no código.** Na
+> investigação, os 10 tipos de produção estavam todos com a mesma cor
+> (`#880808`), então o marcador sozinho não distinguia nada. **O cadastro
+> já foi ajustado em produção** (Admin → Tipos de senha, sem deploy) com
+> uma paleta de 3 níveis:
+>
+> | Nível | Tipos | Cor |
+> |---|---|---|
+> | Normal | Normal | cinza `#95A5A6` |
+> | Prioritário | Gestante, PCD, TEA, Mobilidade reduzida, Criança de colo, Idoso 60-79, Lactante (e Preferencial, inativo) | laranja `#E65100` |
+> | Prioridade especial | Pessoa idosa – 80 anos ou mais (Lei 13.466/2017) | vermelho `#D50000` |
+>
+> O marcador separa à primeira vista **normal / prioritário / prioridade
+> especial**. Dentro de um nível, quem identifica o tipo é o **nome**. A cor
+> nunca é o único sinal, porque o nome está sempre ao lado (vale também para
+> daltonismo vermelho/laranja). Conferido nas capturas em 1366x768, temas
+> claro e escuro: as três cores ficam distintas entre si e do fundo. O cinza
+> do Normal é o mesmo valor do anel `--gf-cinza-medio` no tema claro, o que
+> só deixa a bolinha uniforme. Se o admin mudar uma cor, a tela reflete na
+> próxima request. Lembrete da 10.27: a cor do tipo também pinta o card da
+> TV, mas só quando `Senha.prioridade` é verdadeiro, então o cinza do Normal
+> (peso 0) nunca chega à TV.
+
+**Implementação:**
+
+- **`app/utils/tipo_senha.py` (novo)**: `tipo_senha_exibicao(senha)` devolve
+  `{"nome", "cor"}` ou `None`. É uma função só para os dois caminhos:
+  registrada como global Jinja em `create_app` e usada por
+  `_serializar_espera`/`_serializar_atendida` (`atendimento/chamada.py`),
+  que as versões `_local` herdam (campo `tipo` no JSON de `/dados` das duas
+  telas). `COR_RE` foi movido para cá (`admin/tipos_senha.py` importa daqui).
+  **A cor é revalidada na exibição** (`cor_valida`), não só no cadastro,
+  porque vai num atributo `style`: um valor gravado fora do formulário (SQL
+  manual, import) aparece sem marcador, nunca como CSS arbitrário.
+- **`atendimento/_tipo_senha.html` (novo)**: macro `celula_tipo_senha(s)`,
+  importado pelas duas telas (render inicial). O JS de cada tela tem
+  `htmlTipoSenha(tipo)`, que gera o mesmo markup (escapa o nome e testa o
+  regex da cor de novo). O teste executa as duas versões e compara.
+- **CSS** (`atendimento/_layout.html`, só tokens do tema): `.tipo-senha`,
+  `.tipo-senha-marcador`, `.tipo-senha-vazio`, `td.col-tipo { min-width: 8rem }`.
+- `colspan` das linhas "Nenhuma senha..." passou de 6 para 7 (espera) e de 3
+  para 4 (atendidas), no Jinja e no JS.
+
+**Largura (1366x768, nomes reais mais longos de produção):** o `main` tem
+`max-width: 960px`, então a tabela tem ~846px úteis em qualquer resolução
+maior. Medido com Playwright nos temas claro e escuro: nenhuma das 4
+tabelas estoura o card. A mais apertada é "Senhas em espera" por fila (7
+colunas, input de Observações com largura fixa): "Pessoa idosa – 80 anos ou
+mais" ocupa 3 linhas. Com `min-width: 9.5rem` (2 linhas) a tabela estourou
+21px, por isso ficou 8rem. Nas outras três tabelas o nome cabe em 1 ou 2
+linhas. Observação, fora do escopo: nessa tabela a coluna "H. Agend." está
+sempre "—" (Agendados nunca foi implementado, 10.2). Se um dia sair, libera
+a largura para Tipo/Nome.
+
+**TV/totem e LGPD:** antes deste adendo, o nome do tipo (idoso, gestante,
+PCD, mobilidade reduzida) **não aparecia em nenhuma tela de operador**: só
+o badge "P" e o prefixo dentro do código. É uma exposição nova, limitada a
+**operador autenticado**: as rotas `painel_fila`/`painel_local` e
+`dados_fila`/`dados_local` exigem login e `exigir_acesso_setor`, com o
+mesmo escopo de filas/unidades de sempre. **TV e totem não recebem o nome
+do tipo**: `_payload_chamada` (evento `chamada`) não mudou e continua
+levando só `cor`, e só quando `Senha.prioridade` é verdadeiro (10.27). O
+cupom do totem também não mostra o tipo. `fila_atualizada` continua levando
+só `{fila_id}`.
+
+**Testes:** novo `tests/test_regressao_tipo_senha_atendimento.py`, com
+senhas com tipo, sem tipo, com tipo **inativo** e com cor inválida gravada
+direto no banco, usando os nomes reais mais longos:
+- HTML das 2 tabelas × 2 telas: cabeçalho "Senha, Tipo", célula exata
+  (marcador + nome / "—"), inativo com nome e cor, cor inválida sem
+  `style`, `colspan` novos.
+- JSON de `/dados` das 2 telas: `tipo` `{nome, cor}` ou `null` nas duas
+  tabelas, e `prioridade` inalterada (badge "P" separado).
+- **Paridade Jinja × JS**: o `htmlTipoSenha()` real de cada tela, executado
+  num Chromium com o `tipo` do `/dados`, gera a mesma célula do macro, e
+  escapa nome/barra cor inválida.
+- **Largura** em 1366x768, temas claro e escuro: nenhuma tabela estoura o
+  card, e o marcador tem tamanho e anel.
+- **Payload `chamada` da TV**: chamando uma senha prioritária com tipo, só
+  as chaves de sempre (com `cor`, já existente), sem o nome do tipo. O teste
+  da 10.70 (`test_regressao_rotulos_filas_operacional.py`) continua
+  travando as chaves sem tipo.
+
+Suíte completa (83 arquivos) sem falhas.
+
+**Arquivos alterados:** novos `app/utils/tipo_senha.py`,
+`app/templates/atendimento/_tipo_senha.html` e
+`tests/test_regressao_tipo_senha_atendimento.py`; `app/__init__.py` (global
+Jinja); `app/atendimento/chamada.py` (`_serializar_espera`,
+`_serializar_atendida`); `app/admin/tipos_senha.py` (`COR_RE` importado);
+`app/templates/atendimento/_layout.html` (CSS);
+`app/templates/atendimento/painel_fila.html` e
+`app/templates/atendimento/painel_local.html`.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - **Trecho entre a chamada e o "Aguardar" não é medido** (registrado no
@@ -8538,3 +8679,13 @@ novo `tests/test_regressao_tempos_por_etapa.py`;
   SQLite local. Corrigir nomeando a constraint na migration original (ou
   documentar `db.create_all()` como o caminho suportado para SQLite) se for
   necessário validar upgrades encadeados fora de MySQL no futuro.
+- **Coluna "H. Agend." da tabela "Senhas em espera" por fila sempre "—"**
+  (registrado na 10.84, não alterado): o recurso "Agendados" nunca foi
+  implementado (ficou como pendência na 10.2), então
+  `painel_fila.html` mostra a coluna fixa em "—" no Jinja e no JS
+  (`linhaEspera`). Ela ocupa largura na tabela mais apertada da tela de
+  Atendimento: com a coluna "Tipo" da 10.84, o nome longo do tipo e o Nome
+  do paciente quebram em mais linhas em 1366x768. Pode ser removida, ou
+  implementada de fato junto com Agendados. A tela por Local nunca teve
+  essa coluna. Se for removida, ajustar o `colspan` (7 → 6) e o teste
+  `test_regressao_tipo_senha_atendimento.py`, que confere `colspan="7"`.

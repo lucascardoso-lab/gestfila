@@ -72,6 +72,12 @@ def create_app(config_name=None):
 
     app.jinja_env.globals["rotulo_fila"] = rotulo_fila
 
+    # Tipo de senha (nome + cor validada) nas tabelas da tela de Atendimento
+    # (adendo 10.84) - mesma função dos serializadores de /dados.
+    from .utils.tipo_senha import tipo_senha_exibicao
+
+    app.jinja_env.globals["tipo_senha_exibicao"] = tipo_senha_exibicao
+
     # Hora/data de coluna UTC exibida pelo servidor (adendo 10.74) - nunca
     # strftime direto num template.
     from .utils.tempo import formatar_duracao, formatar_hora_clinica

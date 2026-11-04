@@ -6,8 +6,7 @@ from app.admin import admin_bp
 from app.admin.helpers import autorizar_objeto, resolver_empresa_contexto, resolver_unidade_contexto, tipos_senha_da_empresa
 from app.extensions import db
 from app.models import Empresa, Senha, TipoSenha
-
-COR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+from app.utils.tipo_senha import COR_RE
 
 
 @admin_bp.route("/tipos-senha")

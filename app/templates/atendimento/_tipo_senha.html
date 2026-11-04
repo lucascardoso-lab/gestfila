@@ -1,0 +1,16 @@
+{#- Célula "Tipo" das tabelas da tela de Atendimento (adendo 10.84).
+    Usado por painel_fila.html e painel_local.html no render inicial; o JS de
+    cada tela (htmlTipoSenha) gera o MESMO markup a partir do JSON de /dados.
+    Cor já validada (#RRGGBB) em tipo_senha_exibicao(). -#}
+{% macro celula_tipo_senha(senha) -%}
+  {%- set t = tipo_senha_exibicao(senha) -%}
+  <td class="col-tipo">
+    {%- if t -%}
+      <span class="tipo-senha">
+        {%- if t.cor %}<span class="tipo-senha-marcador" style="background-color: {{ t.cor }}" aria-hidden="true"></span>{% endif -%}
+        {{ t.nome }}</span>
+    {%- else -%}
+      <span class="tipo-senha-vazio">—</span>
+    {%- endif -%}
+  </td>
+{%- endmacro %}

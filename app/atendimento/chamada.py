@@ -5,6 +5,7 @@ from app.extensions import db
 from app.models import Senha
 from app.models.senha import criada_hoje_na_clinica
 from app.utils.rotulos import rotulo_fila
+from app.utils.tipo_senha import tipo_senha_exibicao
 
 from . import atendimento_bp
 from .helpers import (
@@ -50,6 +51,7 @@ def _serializar_espera(senha):
         "nome_paciente": senha.nome_paciente,
         "observacoes": senha.observacoes,
         "prioridade": senha.prioridade,
+        "tipo": tipo_senha_exibicao(senha),  # adendo 10.84 - só tela de operador
     }
 
 
@@ -63,6 +65,7 @@ def _serializar_atendida(senha):
         "tempo_espera_segundos": tempo_espera_segundos,
         "chamada_em": senha.chamada_em.isoformat() if senha.chamada_em else None,
         "local": senha.local.nome_exibicao if senha.local else None,
+        "tipo": tipo_senha_exibicao(senha),  # adendo 10.84 - só tela de operador
     }
 
 

@@ -1,4 +1,5 @@
 {% extends "atendimento/_layout.html" %}
+{% from "atendimento/_tipo_senha.html" import celula_tipo_senha %}
 
 {% block titulo %}{{ local.nome_exibicao }} - {{ 'Atendente' if setor == 'recepcao' else 'Executor' }}{% endblock %}
 
@@ -72,12 +73,13 @@
     <h2 style="margin-top:0;">Senhas em espera (<span id="contagem-espera">{{ espera|length }}</span>)</h2>
     <table id="tabela-espera">
       <thead>
-        <tr><th>Senha</th><th>Fila</th><th>T. Espera</th><th>Nome</th><th>Observações</th><th>Ações</th></tr>
+        <tr><th>Senha</th><th>Tipo</th><th>Fila</th><th>T. Espera</th><th>Nome</th><th>Observações</th><th>Ações</th></tr>
       </thead>
       <tbody id="corpo-espera">
         {% for s in espera %}
           <tr data-senha-id="{{ s.id }}" data-tempo-maximo-min="{{ s.fila.tempo_espera_maximo_min if s.fila.tempo_espera_maximo_min is not none else '' }}">
             <td>{{ s.codigo }}{% if s.prioridade %} <span class="badge prioridade">P</span>{% endif %}</td>
+            {{ celula_tipo_senha(s) }}
             <td>{{ rotulo_fila(s.fila) }}</td>
             <td>
               <span class="t-espera" data-criada-em="{{ s.criada_em.isoformat() }}">00:00:00</span>
@@ -94,7 +96,7 @@
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="6">Nenhuma senha aguardando neste Local.</td></tr>
+          <tr><td colspan="7">Nenhuma senha aguardando neste Local.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -103,11 +105,12 @@
   <div class="card" style="max-width:none;">
     <h2 style="margin-top:0;">Senhas atendidas</h2>
     <table id="tabela-atendidas">
-      <thead><tr><th>Senha</th><th>Fila</th><th>Tempo de espera</th></tr></thead>
+      <thead><tr><th>Senha</th><th>Tipo</th><th>Fila</th><th>Tempo de espera</th></tr></thead>
       <tbody id="corpo-atendidas">
         {% for s in atendidas %}
           <tr data-senha-id="{{ s.id }}">
             <td>{{ s.codigo }}</td>
+            {{ celula_tipo_senha(s) }}
             <td>{{ rotulo_fila(s.fila) }}</td>
             <td>
               {{ "%02d:%02d:%02d"|format(((s.chamada_em - s.criada_em).total_seconds())//3600, (((s.chamada_em - s.criada_em).total_seconds())%3600)//60, ((s.chamada_em - s.criada_em).total_seconds())%60) }}
@@ -115,7 +118,7 @@
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="3">Nenhuma senha atendida neste Local ainda.</td></tr>
+          <tr><td colspan="4">Nenhuma senha atendida neste Local ainda.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -203,6 +206,18 @@
         }[c]));
       }
 
+      // Célula "Tipo" (adendo 10.84) - mesmo markup do macro Jinja
+      // celula_tipo_senha (atendimento/_tipo_senha.html), a partir de `s.tipo`
+      // do JSON de /dados ({nome, cor} ou null). A cor já vem validada do
+      // servidor; o teste do regex aqui é só uma segunda trava (vai num style).
+      function htmlTipoSenha(tipo) {
+        if (!tipo) return '<td class="col-tipo"><span class="tipo-senha-vazio">—</span></td>';
+        const marcador = tipo.cor && /^#[0-9A-Fa-f]{6}$/.test(tipo.cor)
+          ? `<span class="tipo-senha-marcador" style="background-color: ${tipo.cor}" aria-hidden="true"></span>`
+          : "";
+        return `<td class="col-tipo"><span class="tipo-senha">${marcador}${escapeHtml(tipo.nome)}</span></td>`;
+      }
+
       // Controle de atendimento: enquanto este operador tiver uma senha em
       // andamento (chamada/em_atendimento), "Chamar" fica bloqueado - mesma regra
       // já aplicada no servidor (app/atendimento/chamada.py::chamar_local),
@@ -243,6 +258,7 @@
         const tempoMaximoMinAttr = s.tempo_espera_maximo_min != null ? s.tempo_espera_maximo_min : "";
         return `<tr data-senha-id="${s.id}" data-tempo-maximo-min="${tempoMaximoMinAttr}">
           <td>${escapeHtml(s.codigo)}${s.prioridade ? ' <span class="badge prioridade">P</span>' : ""}</td>
+          ${htmlTipoSenha(s.tipo)}
           <td>${escapeHtml(s.fila)}</td>
           <td>
             <span class="t-espera" data-criada-em="${s.criada_em}">00:00:00</span>
@@ -267,6 +283,7 @@
           : "";
         return `<tr data-senha-id="${s.id}">
           <td>${escapeHtml(s.codigo)}</td>
+          ${htmlTipoSenha(s.tipo)}
           <td>${escapeHtml(s.fila)}</td>
           <td>${tempo}${hora}</td>
         </tr>`;
@@ -278,13 +295,13 @@
         const corpoEspera = document.getElementById("corpo-espera");
         corpoEspera.innerHTML = dados.espera.length
           ? dados.espera.map(linhaEspera).join("")
-          : '<tr><td colspan="6">Nenhuma senha aguardando neste Local.</td></tr>';
+          : '<tr><td colspan="7">Nenhuma senha aguardando neste Local.</td></tr>';
         document.getElementById("contagem-espera").textContent = dados.espera.length;
 
         const corpoAtendidas = document.getElementById("corpo-atendidas");
         corpoAtendidas.innerHTML = dados.atendidas.length
           ? dados.atendidas.map(linhaAtendida).join("")
-          : '<tr><td colspan="3">Nenhuma senha atendida neste Local ainda.</td></tr>';
+          : '<tr><td colspan="4">Nenhuma senha atendida neste Local ainda.</td></tr>';
 
         atualizarRelogios();
       }
