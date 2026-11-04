@@ -270,10 +270,17 @@ with sync_playwright() as pw:
     ok("JS htmlTipoSenha() (refresh) gera a MESMA célula que o macro Jinja, nas 2 telas; escapa nome e barra cor inválida")
 
     # 3) Largura em 1366x768, temas claro e escuro, nomes reais mais longos.
-    for tema in ("light", "dark"):
+    # A tela usa `system-ui`, que muda com o SO (Segoe UI no Windows é estreita;
+    # o Linux da CI é bem mais largo - foi a CI que pegou o estouro da 1ª versão).
+    # Além da fonte padrão, força uma fonte larga que exista nos dois ambientes
+    # (Verdana no Windows, DejaVu Sans no Linux) para não depender de qual SO roda.
+    FONTE_LARGA = "body, input, button { font-family: Verdana, 'DejaVu Sans', sans-serif !important; }"
+    for tema, fonte in (("light", None), ("dark", None), ("light", FONTE_LARGA), ("dark", FONTE_LARGA)):
         for tela, texto in htmls.items():
             pg = navegador.new_page(viewport={"width": 1366, "height": 768})
             pg.set_content(com_css_embutido(texto))
+            if fonte:
+                pg.add_style_tag(content=fonte)
             pg.evaluate(f"document.documentElement.setAttribute('data-theme', '{tema}')")
             for tabela_id in ("tabela-espera", "tabela-atendidas"):
                 medida = pg.evaluate(
@@ -283,14 +290,14 @@ with sync_playwright() as pw:
                        return {tabela: t.scrollWidth, util, pagina: document.documentElement.scrollWidth}; }""",
                     tabela_id,
                 )
-                assert medida["tabela"] <= medida["util"] + 1, (tema, tela, tabela_id, medida)
-                assert medida["pagina"] <= 1366, (tema, tela, tabela_id, medida)
+                assert medida["tabela"] <= medida["util"] + 1, (tema, bool(fonte), tela, tabela_id, medida)
+                assert medida["pagina"] <= 1366, (tema, bool(fonte), tela, tabela_id, medida)
             # marcador visível: tem tamanho e o anel em token do tema
             caixa = pg.eval_on_selector(".tipo-senha-marcador", "e => { const r = e.getBoundingClientRect(); "
                                         "return {w: r.width, h: r.height, anel: getComputedStyle(e).boxShadow}; }")
             assert caixa["w"] > 0 and caixa["h"] > 0 and caixa["anel"] != "none", (tema, tela, caixa)
             pg.close()
-    ok("1366x768, temas claro e escuro: nenhuma das 4 tabelas estoura o card com os nomes reais mais longos")
+    ok("1366x768, temas claro e escuro, fonte padrão e fonte larga: nenhuma das 4 tabelas estoura o card")
     navegador.close()
 
 # ===========================================================================

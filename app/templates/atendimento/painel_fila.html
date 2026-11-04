@@ -145,7 +145,11 @@
     .botoes-acao { margin-top: 1.5rem; display: flex; gap: .6rem; flex-wrap: wrap; }
     .hora-relogio { display: block; font-size: .78rem; color: var(--gf-texto-secundario); white-space: nowrap; }
     .inline-observacoes { display: flex; gap: .4rem; align-items: center; }
-    .inline-observacoes input[type="text"] { width: auto; flex: 1; padding: .35rem .5rem; font-size: .85rem; }
+    /* Base 8rem + min-width 0 (adendo 10.84): com `width: auto` o input tinha
+       largura intrínseca fixa (~185px) e não cedia espaço - com a coluna "Tipo"
+       a tabela estourava o card em fontes mais largas que a Segoe UI (Linux,
+       Verdana). 8rem cabe com todas as fontes medidas; 9rem já estoura. */
+    .inline-observacoes input[type="text"] { width: 8rem; min-width: 0; flex: 1 1 8rem; padding: .35rem .5rem; font-size: .85rem; }
     button.link { background: none; border: none; color: var(--gf-primaria); padding: 0; font-size: .85rem; text-decoration: underline; cursor: pointer; }
   </style>
 

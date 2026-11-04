@@ -49,9 +49,9 @@
        garantido, a cor é do admin); o anel em token do tema mantém o marcador
        visível mesmo se a cor do tipo coincidir com o fundo, nos dois temas. */
     /* min-width: nome real longo ("Pessoa idosa – 80 anos ou mais") não quebra
-       em 4 linhas na tabela mais apertada (espera por fila, 1366x768). Teto
-       medido: 9.5rem já estoura o card ali (input de Observações não encolhe) -
-       test_regressao_tipo_senha_atendimento confere a largura. */
+       em 4 linhas na tabela mais apertada (espera por fila, 1366x768). A largura
+       depende da fonte do sistema (system-ui) - test_regressao_tipo_senha_
+       atendimento confere com a fonte padrão E com uma fonte larga forçada. */
     td.col-tipo { min-width: 8rem; }
     .tipo-senha { display: inline-flex; align-items: baseline; gap: .4rem; }
     .tipo-senha-marcador {

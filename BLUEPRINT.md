@@ -8488,14 +8488,26 @@ com selo branco por cima, e não serviu de modelo.
 
 **Largura (1366x768, nomes reais mais longos de produção):** o `main` tem
 `max-width: 960px`, então a tabela tem ~846px úteis em qualquer resolução
-maior. Medido com Playwright nos temas claro e escuro: nenhuma das 4
-tabelas estoura o card. A mais apertada é "Senhas em espera" por fila (7
-colunas, input de Observações com largura fixa): "Pessoa idosa – 80 anos ou
-mais" ocupa 3 linhas. Com `min-width: 9.5rem` (2 linhas) a tabela estourou
-21px, por isso ficou 8rem. Nas outras três tabelas o nome cabe em 1 ou 2
-linhas. Observação, fora do escopo: nessa tabela a coluna "H. Agend." está
-sempre "—" (Agendados nunca foi implementado, 10.2). Se um dia sair, libera
-a largura para Tipo/Nome.
+maior. A mais apertada é "Senhas em espera" por fila (7 colunas, com o input
+de Observações).
+
+> **Achado pela CI (1º push deste adendo, Action vermelha):** a tela usa
+> `font-family: system-ui`, que muda com o sistema. No Windows (Segoe UI,
+> estreita) a tabela cabia. No Chromium do Linux da CI estourou 42px (888 de
+> 846). Não era só ambiente: reproduzido no Windows forçando Verdana (904px)
+> e Arial (854px), enquanto **sem** a coluna Tipo a tabela cabia com todas as
+> fontes. A causa era o input de Observações (`painel_fila.html`, `width:
+> auto`), com largura intrínseca fixa (~185px) que não cedia espaço.
+> **Correção:** `width: 8rem; min-width: 0; flex: 1 1 8rem` no input (128px,
+> ainda usável; o texto rola dentro do campo). Medido: cabe em system-ui,
+> Verdana e Arial; com 9rem já estoura 3px em Verdana. O teste passou a
+> medir também com uma fonte larga forçada (Verdana/DejaVu Sans), além da
+> padrão, para não depender do SO onde roda.
+
+Com a fonte do Windows, "Pessoa idosa – 80 anos ou mais" ocupa 2 a 3 linhas
+nessa tabela (`td.col-tipo { min-width: 8rem }` evita 4+). Nas outras três
+tabelas cabe em 1 ou 2 linhas. Fora do escopo: nessa tabela a coluna
+"H. Agend." está sempre "—" (ver seção 11).
 
 **TV/totem e LGPD:** antes deste adendo, o nome do tipo (idoso, gestante,
 PCD, mobilidade reduzida) **não aparecia em nenhuma tela de operador**: só
@@ -8519,8 +8531,9 @@ direto no banco, usando os nomes reais mais longos:
 - **Paridade Jinja × JS**: o `htmlTipoSenha()` real de cada tela, executado
   num Chromium com o `tipo` do `/dados`, gera a mesma célula do macro, e
   escapa nome/barra cor inválida.
-- **Largura** em 1366x768, temas claro e escuro: nenhuma tabela estoura o
-  card, e o marcador tem tamanho e anel.
+- **Largura** em 1366x768, temas claro e escuro, com a fonte padrão e com
+  uma fonte larga forçada: nenhuma tabela estoura o card, e o marcador tem
+  tamanho e anel.
 - **Payload `chamada` da TV**: chamando uma senha prioritária com tipo, só
   as chaves de sempre (com `cor`, já existente), sem o nome do tipo. O teste
   da 10.70 (`test_regressao_rotulos_filas_operacional.py`) continua
