@@ -8702,3 +8702,17 @@ Jinja); `app/atendimento/chamada.py` (`_serializar_espera`,
   implementada de fato junto com Agendados. A tela por Local nunca teve
   essa coluna. Se for removida, ajustar o `colspan` (7 → 6) e o teste
   `test_regressao_tipo_senha_atendimento.py`, que confere `colspan="7"`.
+- **Prioridade só vale no Chamar principal** (registrado em 04/11/2026):
+  pesos configurados em produção (Normal 0, prioritários 1, 80+ 2). O peso
+  e o rodízio só são aplicados pelo botão "Chamar" principal
+  (`selecionar_proxima_senha` / `selecionar_proxima_fila_e_senha`), visível
+  apenas para admin (10.16). Os operadores chamam pelo "Chamar" de cada
+  linha, que envia o `codigo` e ignora as regras, e a lista "Senhas em
+  espera" (`senhas_aguardando` / `senhas_aguardando_local`) está em ordem de
+  chegada (`criada_em`). Decisão do cliente: manter assim por enquanto, com
+  a prioridade garantida pelo operador (orientado pela coluna Tipo da
+  10.84). Opções avaliadas para o futuro: (c) liberar o Chamar principal
+  aos operadores (reverte a 10.16); (b) selo "Próxima" na linha da vez, que
+  exige uma versão só consulta da seleção, sem as travas de
+  `travar_fila`/Local. (a) reordenar a lista pela regra do Chamar
+  automático foi descartada: a linha muda de posição sob o cursor.
