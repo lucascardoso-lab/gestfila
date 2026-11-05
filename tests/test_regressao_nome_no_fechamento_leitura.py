@@ -38,7 +38,7 @@ os.environ.setdefault("SECRET_KEY", "test")
 os.environ.setdefault("FLASK_ENV", "testing")
 
 from app import create_app
-from app.core.dashboard_queries import calcular_kpis, chamadas_por_hora_hoje
+from app.core.dashboard_queries import calcular_kpis, montar_periodo
 from app.extensions import db
 from app.models import Empresa, Fila, Local, LogAtendimento, Senha, Unidade, Usuario
 from app.relatorios.helpers import Filtros
@@ -199,10 +199,13 @@ with app.app_context():
         feed = ultimas_chamadas(db.session.get(Empresa, ids["empresa"]), [ids["unidade"]])
         assert len(feed) == 13, len(feed)
         assert len(ultimas_chamadas(db.session.get(Empresa, ids["empresa"]), [ids["unidade"]], limite=3)) == 3
-        kpis = calcular_kpis(db.session.get(Empresa, ids["empresa"]), [ids["unidade"]])
-        assert kpis["chamadas_hoje"] == 13, kpis
-        assert len(chamadas_por_hora_hoje([ids["unidade"]])) == 13
-    ok("Feed (13, e o corte em limite=3), KPI 'chamadas hoje' (13) e gráfico por hora (13): 1 chamada por visita")
+        # adendo 10.86: o cartão "Chamadas hoje" e o gráfico de chamadas saíram -
+        # o Dashboard conta por SENHA ("Senhas geradas"), então a mesma visita
+        # nunca conta duas vezes, com ou sem 'chamada_nome' colado.
+        kpis = calcular_kpis(db.session.get(Empresa, ids["empresa"]), [ids["unidade"]],
+                             montar_periodo(ids["empresa"], [ids["unidade"]]), com_tempos=False)
+        assert kpis["geradas"] == Senha.query.filter_by(unidade_id=ids["unidade"]).count(), kpis
+    ok("Feed (13, e o corte em limite=3): 1 chamada por visita; Dashboard conta por senha (10.86)")
 
 print()
 print(f"TODOS OS {len(passos)} TESTES DE 'NOME NO FECHAMENTO (LEITURA)' PASSARAM")

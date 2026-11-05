@@ -244,12 +244,16 @@ ok("CSV por senha e por etapa: coluna em minutos decimais (21,80) e a mesma dura
 with patch("app.utils.tempo._instante_utc", return_value=datetime(2026, 10, 8, 15, 0, tzinfo=UTC)):
     kpis = c.get("/api/dashboard/kpis").get_json()
     dashboard = c.get("/dashboard").get_data(as_text=True)
-assert kpis["tempo_medio_espera_segundos"] == 684 and kpis["tempo_medio_espera_texto"] == "11:24", kpis
-assert '"11:24" || "—"' in dashboard and "formatarTempo" not in dashboard
+# adendo 10.86: o cartão "Tempo médio de espera" saiu; os cartões de tempo são
+# os do Tempos por senha, com o texto formatado no servidor (mesma função).
+espera = kpis["tempos"]["espera_inicial"]
+assert espera["media_segundos"] is not None and espera["media_texto"] == formatar_duracao(espera["media_segundos"]), kpis
+assert f'id="kpi-tempo-espera_inicial">{espera["media_texto"]}</div>' in dashboard and "formatarTempo" not in dashboard
+assert "tempo_medio_espera_texto" not in kpis
 with app.app_context():
-    from app.core.dashboard_queries import calcular_kpis
-    vazio = calcular_kpis(db.session.get(Empresa, ids["empresa"]), [])
-assert vazio["tempo_medio_espera_segundos"] is None and vazio["tempo_medio_espera_texto"] is None
-ok("Dashboard: /api/dashboard/kpis mantém tempo_medio_espera_segundos (684) e ganha tempo_medio_espera_texto ('11:24'); sem dado = None")
+    from app.core.dashboard_queries import calcular_kpis, montar_periodo
+    vazio = calcular_kpis(db.session.get(Empresa, ids["empresa"]), [], montar_periodo(ids["empresa"], []))
+assert vazio["tempos"]["espera_inicial"]["media_segundos"] is None and vazio["tempos"]["espera_inicial"]["media_texto"] is None
+ok("Dashboard: tempos com o texto vindo do servidor (formatar_duracao), segundos intactos no JSON; sem dado = None")
 
 print(f"\n{len(passos)} verificações OK")

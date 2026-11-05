@@ -18,10 +18,11 @@ dados, não por limitação estrutural). Os relatórios de tempo de espera (1) e
 (3) nunca dependeram disso e sempre trouxeram dados reais.
 """
 
+import statistics
 from collections import defaultdict
 from datetime import timedelta
 
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 
 from app.extensions import db
 from app.models import Fila, Local, LogAtendimento, Senha, Totem, Tv
@@ -838,23 +839,43 @@ def senhas_aguardando_por_fila(empresa, unidades_visiveis):
     return {fila_id: quantidade for fila_id, quantidade in linhas}
 
 
-def ultimas_chamadas(empresa, unidades_visiveis, limite=15):
+def ultimas_chamadas(empresa, unidades_visiveis, limite=15, data_inicio=None, data_fim_exclusivo=None,
+                     fila_ids=None, retrato_do_log=False):
     """Dashboard: feed das últimas chamadas (evento chamada_senha/chamada_nome),
     mais recente primeiro. logs_atendimento não tem empresa_id próprio, mas
     unidades_visiveis já é escopado à empresa resolvida (via _unidades_ids_visiveis),
-    então filtrar só por unidade_id já basta - mesma premissa de tempo_medio_espera."""
+    então filtrar só por unidade_id já basta - mesma premissa de tempo_medio_espera.
+
+    Parâmetros opcionais (adendo 10.86, Dashboard do core) - sem eles, o
+    comportamento é o de sempre (usado por /relatorios/dashboard):
+    - `data_inicio`/`data_fim_exclusivo`: só chamadas do período (UTC naive).
+    - `fila_ids`: só chamadas feitas nessas filas (filtro de Área) - a fila do
+      RETRATO do log (10.62), ou a fila atual da senha quando o log não tem.
+    - `retrato_do_log`: `fila_id`/`local_id` da linha vêm do log (onde a senha
+      foi chamada), com recurso à senha quando o log não tem - sem isso, uma
+      chamada feita na recepção de uma senha já realocada saía como "Coleta".
+    Sempre traz também `senha_id` (chave nova, aditiva)."""
+    query = LogAtendimento.query.filter(
+        LogAtendimento.unidade_id.in_(unidades_visiveis),
+        LogAtendimento.evento.in_(EVENTOS_INICIO_ATENDIMENTO),
+    )
+    if data_inicio is not None:
+        query = query.filter(LogAtendimento.timestamp >= data_inicio)
+    if data_fim_exclusivo is not None:
+        query = query.filter(LogAtendimento.timestamp < data_fim_exclusivo)
+    if fila_ids is not None:
+        fila_ids = list(fila_ids)
+        query = query.filter(or_(
+            LogAtendimento.fila_id.in_(fila_ids),
+            and_(LogAtendimento.fila_id.is_(None),
+                    LogAtendimento.senha_id.in_(db.session.query(Senha.id).filter(Senha.fila_id.in_(fila_ids)))),
+        ))
     # adendo 10.82: busca 2*limite+1 e corta depois de descartar os
     # 'chamada_nome' colados a um fechamento. Na prática sobram `limite`: um
     # operador não chama outra senha sem finalizar (10.17) e, desde o 1º commit
     # do 10.82, nenhum 'chamada_nome' novo é gravado.
     logs = _descartar_nome_no_fechamento(
-        LogAtendimento.query.filter(
-            LogAtendimento.unidade_id.in_(unidades_visiveis),
-            LogAtendimento.evento.in_(EVENTOS_INICIO_ATENDIMENTO),
-        )
-        .order_by(LogAtendimento.timestamp.desc())
-        .limit(2 * limite + 1)
-        .all()
+        query.order_by(LogAtendimento.timestamp.desc()).limit(2 * limite + 1).all()
     )[:limite]
     if not logs:
         return []
@@ -870,12 +891,18 @@ def ultimas_chamadas(empresa, unidades_visiveis, limite=15):
     resultado = []
     for log in logs:
         senha = senhas_por_id.get(log.senha_id)
+        fila_id = senha.fila_id if senha else None
+        local_id = senha.local_id if senha else None
+        if retrato_do_log:
+            fila_id = log.fila_id if log.fila_id is not None else fila_id
+            local_id = log.local_id if log.local_id is not None else local_id
         resultado.append(
             {
+                "senha_id": log.senha_id,
                 "timestamp": log.timestamp,
                 "evento": log.evento,
-                "fila_id": senha.fila_id if senha else None,
-                "local_id": senha.local_id if senha else None,
+                "fila_id": fila_id,
+                "local_id": local_id,
                 "codigo": senha.codigo if senha else None,
                 "nome_paciente": senha.nome_paciente if senha else None,
             }
@@ -940,3 +967,33 @@ def coletar_alertas(filas, totens, tvs, senhas_abertas_dias_anteriores=0):
         if tv.ativo and not tv.filas:
             alertas.append({"tipo": "tv_sem_filas", "mensagem": f"TV '{tv.nome}' sem filas vinculadas."})
     return alertas
+
+
+# Movidos sem mudança de relatorios/routes.py (adendo 10.86): o Dashboard
+# (core) reaproveita o MESMO resumo do Tempos por senha, sem importar de uma rota.
+TEMPOS_POR_SENHA = (
+    ("Espera inicial", "espera_inicial"),
+    ("Espera intermediária", "espera_intermediaria"),
+    ("Espera total", "espera_total"),
+    ("Atendimento atendente", "atendimento_atendente"),
+    ("Atendimento executor", "atendimento_executor"),
+    ("Outros atendimentos", "atendimento_outros"),
+    ("Atendimento total", "atendimento_total"),
+    ("Permanência total", "permanencia_total"),
+)
+
+
+def _resumo_tempos(linhas):
+    """Média, mediana e quantidade POR SENHA de cada tempo - só as senhas com o
+    dado entram (vazio fica fora da conta, não vira 0). Sobre os SEGUNDOS
+    exatos, formatados só na exibição (adendo 10.75 - antes partia do minuto
+    já arredondado a 2 casas; diferença < 1 s)."""
+    resumo = {}
+    for _rotulo, chave in TEMPOS_POR_SENHA:
+        valores = [l[f"{chave}_segundos"] for l in linhas if l[f"{chave}_segundos"] is not None]
+        resumo[chave] = {
+            "quantidade": len(valores),
+            "media": statistics.fmean(valores) if valores else None,
+            "mediana": statistics.median(valores) if valores else None,
+        }
+    return resumo

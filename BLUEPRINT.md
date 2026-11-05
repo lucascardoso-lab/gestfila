@@ -431,6 +431,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.83 | "Tempos por senha" por etapa: Atendimento atendente/executor/outros, Espera intermediária e Permanência total |
 | 10.84 | Coluna "Tipo" (tipo de senha da emissão) em "Senhas em espera" e "Senhas atendidas" - 2 telas, render inicial e /dados |
 | 10.85 | Recado "Observações" no bloco de cima da tela de Atendimento (etapa atual -> próxima), salvo com o Nome; edição por linha removida |
+| 10.86 | Dashboard por senha: filtro De/Até (até 31 dias) e Área, tempos do Tempos por senha, Prioritários x Normal, acima do tempo máximo |
 
 ---
 
@@ -1330,6 +1331,13 @@ nem mexe em usuários/empresas já existentes).
 ---
 
 ## 10.12.2. ADENDO — Dashboard operacional pós-login (KPIs, gráfico, filas, últimos atendimentos)
+
+> **Revisto pelo adendo 10.86:** os cartões passaram a contar por SENHA
+> ("Chamadas hoje", "Tempo médio de espera hoje" e "Filas ativas" saíram), com
+> filtro De/Até (até 31 dias) e Área, cartões de tempo do Tempos por senha,
+> "Aguardando acima do tempo máximo", Prioritários x Normal, gráfico de senhas
+> geradas por hora/dia e "Últimos atendimentos" com Tipo e Área. O escopo por
+> perfil (RBAC) descrito abaixo continua valendo.
 
 > Pedido do cliente (Parte 2): tela `/dashboard` com 4 KPIs, gráfico de barras
 > por hora (Chart.js), lista de filas com status colorido e tabela de últimos
@@ -8717,6 +8725,172 @@ rota `salvar_observacoes` removida; `senha_acessivel_ou_404` mantida em
 `app/templates/atendimento/painel_local.html`;
 `tests/test_regressao_fase10_2.py`; novo
 `tests/test_regressao_observacoes_recado.py`.
+
+---
+
+## 10.86. ADENDO — Dashboard por senha: período, Área, tempos do Tempos por senha, Prioritários x Normal
+
+> Pedido: melhorar o Dashboard (`/dashboard`, 10.12.2) para acompanhar a
+> operação por SENHA (não por chamada), em qualquer período de até 31 dias, por
+> Área, com os mesmos tempos do relatório "Tempos por senha". Investigação
+> (FASE 1) relatada e desenho aprovado antes de implementar.
+> `/relatorios/dashboard` fica fora do escopo, sem mudança.
+
+**Filtros** (barra no topo, para todos os perfis):
+
+- **De/Até** no padrão dos relatórios (10.54): calendário nativo, padrão
+  "hoje", dia civil da clínica (`janela_dia_clinica_em_utc`, 10.74). A data é
+  validada por `resolver_filtros` (inválida vira hoje); além disso, De > Até
+  **inverte**, e acima de **31 dias** (`LIMITE_DIAS_DASHBOARD`) recorta para os
+  31 dias que terminam em "Até", com aviso na tela.
+- **Área** igual à dos relatórios (10.76): opções das unidades do escopo
+  (inativas marcadas), validada no servidor; área de unidade fora do escopo
+  (outra unidade que a escolhida, ou de outra unidade para o atendente) é
+  descartada em silêncio. Filtra cartões, gráfico, lista de filas e últimos
+  atendimentos. Sem agrupamento novo.
+- **Unidade:** continua a do escopo do Dashboard (RBAC do 10.12.2:
+  admin/gerencial veem a empresa e podem estreitar pela barra de contexto;
+  atendente/executor só as próprias unidades, sem escapar por querystring) -
+  **nunca** o `unidade_id` validado pelos relatórios. Motivo: a barra de
+  contexto lembra a unidade na sessão e os relatórios não leem a sessão; se o
+  Dashboard usasse a dos relatórios, abriria filtrado e o "ver detalhes" sem
+  filtro, com números diferentes.
+
+**Cartões** (contagem por SENHA):
+
+| Linha | Cartão | Cálculo |
+|---|---|---|
+| 1 | Senhas geradas | `_senhas_filtradas(filtros).count()` - a mesma seleção e o mesmo total do Tempos por senha e do Volume |
+| 1 | Atendidas (das geradas) | das geradas, as que têm `fim_atendimento` - senha realocada ou chamada de novo depois de "Aguardar" conta 1; fecha com Concluída + Histórico parcial do Tempos por senha (decisão c-ii: base de emissão, não da finalização) |
+| 1 | Senhas aguardando agora | só quando o período inclui hoje |
+| 1 | Aguardando acima do tempo máximo | só quando o período inclui hoje; regra do 10.52 (nível "estourado"): espera desde a emissão >= `tempo_espera_maximo_min` da fila; fila sem limite (ou <= 0) nunca entra; cor de alerta quando > 0 |
+| 2 | Espera inicial · Atendimento executor · Permanência total | média (destaque) e mediana POR SENHA: `tempos_por_senha(filtros)` + `_resumo_tempos`, sobre os segundos exatos (10.75) - nenhum cálculo novo |
+
+- **Saíram:** "Chamadas hoje" (contava chamadas, não senhas), "Tempo médio de
+  espera hoje" (média por SEGMENTO, 10.66 - não pode haver dois números de
+  espera diferentes na mesma tela; numa senha realocada, o antigo dava 50 s
+  onde a Espera inicial dá 60 s) e "Filas ativas" (configuração, não
+  operação: virou "Filas (N ativas)" no título da lista). Removidas
+  `_tempo_medio_espera_hoje`, `chamadas_por_hora_hoje` e `EVENTOS_CHAMADA`.
+- **"ver detalhes"** abre o Tempos por senha com os MESMOS filtros explícitos
+  (datas, área, `unidade_id` quando estreitada, `empresa_id` para super
+  admin). Só para admin/gerencial (os relatórios exigem esses perfis - para
+  atendente/executor daria 403).
+- `_resumo_tempos` e `TEMPOS_POR_SENHA` foram **movidos sem mudança** de
+  `relatorios/routes.py` para `relatorios/queries.py` (o `core` não importa
+  de uma rota); `routes.py` importa os dois de lá.
+
+**Gráfico:** "Senhas geradas por hora" (período de 1 dia) ou "por dia" (mais
+de 1 dia), agrupado **no servidor**, no fuso da clínica
+(`para_horario_clinica`) - hora e dia na mesma base. Antes: chamadas por
+hora, agrupadas no JS pelo fuso do navegador. Cor pelo token `--gf-primaria`
+lido do tema (`getComputedStyle`), não mais o literal `#C0392B`; eixos com
+`--gf-texto-secundario`/`--gf-borda`.
+
+**Prioritários x Normal** (bloco ao lado da lista de filas): senhas geradas e
+espera inicial (média e mediana) de cada grupo, sobre as mesmas linhas do
+`tempos_por_senha`. **Prioritário = `Senha.prioridade`** (decisão e1), gravado
+na emissão: peso do tipo de senha > 0, ou a prioridade padrão da fila quando
+não há tipo - o mesmo do selo "P", do Chamar e do relatório de Volume (o
+"peso atual do tipo" divergiria deles e mudaria o passado quando alguém
+alterasse um peso). Nota na tela e aqui: **os pesos foram configurados em
+produção em 04/11/2026; senhas anteriores têm prioridade = 0, então períodos
+antes dessa data aparecem como Normal. Não é falta de dado prioritário.**
+
+**Últimos atendimentos** (largura total; antes era meia coluna e já ocupava
+exatamente os 472 px úteis com 5 colunas): as 15 últimas chamadas **do período
+e da Área** (antes: as 15 últimas de qualquer dia), com fila e local do
+**retrato do log** (10.62) e recurso à senha quando o log não tem - antes, a
+chamada feita na Recepção de uma senha já realocada saía como "Coleta".
+Colunas novas: **Tipo** (macro `celula_tipo_senha` do 10.84) e **Área**.
+`ultimas_chamadas` ganhou parâmetros opcionais (`data_inicio`,
+`data_fim_exclusivo`, `fila_ids`, `retrato_do_log`) e a chave `senha_id`;
+sem eles o comportamento é o de sempre (`/relatorios/dashboard`).
+
+**LGPD:** nada novo de paciente. "Últimos atendimentos" continua só com o
+primeiro nome; Observações (10.85) nunca entra na tela nem no JSON.
+
+**Polling** (`/api/dashboard/kpis`, 30 s, só quando o período inclui hoje):
+
+- Recebe os **mesmos filtros** da página, com a **unidade explícita** na URL
+  (`unidade_id`, vazio = todas) e resolvida **sem gravar a sessão**
+  (`unidades_visiveis_dashboard(persistir=False)`): antes, trocar a unidade
+  em outra aba mudava em silêncio o que esta aba buscava, e o próprio polling
+  regravaria a escolha. Atendente/executor: `unidade_id` ignorado, como na
+  página. Limitação conhecida: para super admin, `empresa_id` explícito ainda
+  passa por `resolver_empresa_contexto`, que grava a sessão (mesma empresa da
+  aba - só muda algo se o super admin tiver duas abas em empresas diferentes).
+- **Contagens sempre** (consultas de contagem, baratas). **Cartões de tempo e
+  Prioritários x Normal só quando o período é exatamente hoje**; nos demais
+  casos ficam com o valor do carregamento e a tela mostra "calculado às
+  HH:MM" (hora da clínica).
+- "Agora" e "hoje" vêm do mesmo relógio: novo `agora_utc_naive()`
+  (`app/utils/tempo.py`, lê `_instante_utc` como `agora_na_clinica`).
+
+**Desempenho medido** (FASE 1; SQLite local, 3 unidades, 600 senhas/dia, 20%
+com "Aguardar", todas com realocação; 3 rodadas):
+
+| Período | Senhas | Etapas | `tempos_por_senha` |
+|---|---|---|---|
+| 1 dia | 600 | 2.525 | 0,16 a 0,23 s |
+| 7 dias | 4.200 | 17.629 | 0,84 a 0,93 s |
+| 31 dias | 18.600 | 78.103 | 3,8 a 4,0 s |
+
+Linear (~0,13 s por 1.000 senhas). **Teto aceitável em produção: ~8 s** para
+o carregamento de 31 dias (o MySQL pela rede tende a ser mais lento que o
+SQLite local). **Se passar disso, a saída documentada é reduzir
+`LIMITE_DIAS_DASHBOARD`.** O polling de 1 dia (~0,2 s) cabe; o de vários dias
+não (por isso os tempos não entram nele).
+
+**Layout medido em 1366x768** (temas claro e escuro, fonte padrão e larga):
+ordem Filtros -> 4 cartões de volume/agora -> 3 cartões de tempo (com "ver
+detalhes") -> gráfico -> Filas | Prioritários x Normal -> Últimos
+atendimentos. Cada linha de cartões numa linha só; as duas terminam em 541 px
+(cabem na primeira tela); página com 1.626 px de altura (antes 1.724 px); sem
+rolagem horizontal; tabelas cabendo no card (o cabeçalho de Prioritários x
+Normal quebra linha com fonte larga, os números não). Cores só por tokens.
+
+**Testes:** novo `tests/test_regressao_dashboard_10_86.py` (relógio fixo em
+08/10/2026 12:00 de Brasília):
+
+- por senha: realocada e "Aguardar" contam 1 (8 geradas, 4 atendidas); os
+  cartões antigos saíram;
+- datas: senha de 07/10 23:50 de Brasília (08/10 em UTC) no dia 07/10, a de
+  08/10 00:10 no dia 08/10; período sem hoje sem cartões de "agora", sem
+  polling e com "calculado às"; inversão; recorte de 31 dias com aviso; data
+  inválida vira hoje;
+- Área: cartões, lista de filas e últimos atendimentos; área fora do escopo
+  descartada (admin estreitado, atendente);
+- RBAC: atendente só a própria unidade na página e no polling, sem "ver
+  detalhes"; gerencial vê a empresa;
+- polling: mesmos filtros; unidade explícita (outra aba trocando a unidade
+  não muda esta, e a sessão não é regravada); tempos só com período = hoje;
+- coerência pelo próprio link "ver detalhes": geradas = total do Tempos por
+  senha, atendidas = Concluída + Histórico parcial do CSV, média e mediana dos
+  3 cartões = resumo do relatório - hoje, com área, com unidade e em 2 dias;
+- acima do tempo máximo (15 min > 10; fila sem limite nunca entra);
+  Prioritários x Normal por `Senha.prioridade` com a nota de 04/11/2026 e
+  período antigo todo Normal;
+- últimos atendimentos: período, retrato do log, Tipo e Área, só o primeiro
+  nome, Observações nunca;
+- Chromium com o JS real: um ciclo de polling atualiza os cartões; cor do
+  gráfico = `--gf-primaria` nos dois temas; medidas de 1366x768 acima.
+
+Reescritos (o cartão antigo saiu): `test_regressao_dashboard_tempo_espera_hoje.py`
+(mesmos cenários - realocada, vazio, histórico - nos cartões novos, e "hoje"
+pelo dia da clínica em vez de `utcnow()`), `test_regressao_dashboard_operacional.py`,
+`test_regressao_nome_no_fechamento_leitura.py`, `test_regressao_dia_clinica_relatorios.py`,
+`test_regressao_duracao.py` e `test_regressao_senhas_dias_anteriores.py`
+(chamadas de `calcular_kpis` com o período, via `montar_periodo`).
+
+Suíte completa (85 arquivos) sem falhas.
+
+**Arquivos alterados:** `app/core/dashboard_queries.py`, `app/core/routes.py`,
+`app/templates/core/dashboard.html`; `app/relatorios/queries.py`
+(`ultimas_chamadas`, `_resumo_tempos`/`TEMPOS_POR_SENHA` movidos);
+`app/relatorios/routes.py` (import); `app/utils/tempo.py`
+(`agora_utc_naive`); testes acima e o novo
+`tests/test_regressao_dashboard_10_86.py`.
 
 ---
 

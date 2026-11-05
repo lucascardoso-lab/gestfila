@@ -57,6 +57,13 @@ def _instante_utc():
     return datetime.now(ZoneInfo("UTC"))
 
 
+def agora_utc_naive():
+    """Instante corrente em UTC NAIVE - a mesma base de `Senha.criada_em` e dos
+    logs (default=datetime.utcnow), lida do MESMO relógio de `agora_na_clinica`
+    (`_instante_utc`), para "agora" e "hoje" nunca divergirem (adendo 10.86)."""
+    return _instante_utc().replace(tzinfo=None)
+
+
 def agora_na_clinica():
     """Instante atual convertido para o fuso da clínica (aware). Use `.time()`/
     `.hour`/`.weekday()` para as comparações de relógio de parede."""

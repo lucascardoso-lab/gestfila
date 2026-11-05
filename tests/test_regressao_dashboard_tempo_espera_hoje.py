@@ -1,41 +1,41 @@
 """
-Teste de regressão: `_tempo_medio_espera_hoje` (app/core/dashboard_queries.py,
-tile "Tempo médio de espera" do dashboard operacional) tinha uma implementação
-PRÓPRIA, independente do relatório completo, com o MESMO padrão de bug
-corrigido pelo adendo 10.66 em `tempo_medio_espera`/`_segmentos_espera_por_
-senha` (`app/relatorios/queries.py`): dict que sobrescrevia em caso de
-múltiplos 'chamada_senha', e só considerava ('gerada', 'chamada_senha') -
-nunca 'chamada_nome'/'realocado'/'voltou_aguardar'.
+Teste de regressão: cartões de tempo do Dashboard (adendo 10.86), que
+substituem o cartão "Tempo médio de espera hoje".
 
-Correção (mesmo lote do 10.66): `_tempo_medio_espera_hoje` passou a
-reaproveitar `_segmentos_espera_por_senha` (não duplica mais a lógica de
-pareamento), achatando TODOS os intervalos de espera do dia numa única
-média - formato de saída não mudou (um único `int` de segundos, ou `None`).
+Histórico: o cartão antigo (`_tempo_medio_espera_hoje`) fazia a média por
+SEGMENTO de espera (adendo 10.66) - numa senha realocada, as duas esperas
+(Recepção e Coleta) entravam como dois números. O Tempos por senha (10.73/
+10.83) mede POR SENHA, e os dois números de espera diferentes na mesma tela
+confundiam. O 10.86 tirou o cartão antigo; os cartões novos ("Espera
+inicial", "Atendimento executor", "Permanência total") são `tempos_por_senha`
++ `_resumo_tempos`, sem cálculo próprio.
 
-Cobre:
-1. Senha realocada HOJE (2 estágios de espera) - a média agora inclui os
-   DOIS intervalos, não só o primeiro.
-2. Nenhuma senha com intervalo de espera fechado hoje -> None (não 0).
-3. Dado histórico simulado (sem snapshot) -> cai no fallback, sem erro.
+Cobre (mesmos cenários do teste antigo, agora nos cartões novos):
+1. Senha realocada hoje (2 esperas): "Espera inicial" é a 1ª espera da senha
+   (60 s), não a média dos dois segmentos (50 s do cartão antigo); executor e
+   permanência total da mesma senha; tudo igual ao resumo do Tempos por senha.
+2. Nenhuma senha -> None (texto None, "—" na tela), nunca 0.
+3. Dado histórico (sem snapshot de fila) -> fallback, sem erro (80 s).
 
-Chama `_tempo_medio_espera_hoje` diretamente (mesmo estilo de
-test_regressao_segmentos_espera.py) - o contrato HTTP (`/api/dashboard/kpis`)
-já é coberto por test_regressao_dashboard_operacional.py, sem necessidade de
-duplicar aqui.
+"Hoje" é o dia da CLÍNICA (`janela_dia_clinica_em_utc`) - o teste antigo
+usava `datetime.utcnow()` às 10h UTC, que depois das 21h de Brasília já é o
+dia seguinte da clínica.
 
 Execução: python -m tests.test_regressao_dashboard_tempo_espera_hoje (a
 partir da raiz do projeto, com o virtualenv ativado).
 """
 import os
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 os.environ.setdefault("SECRET_KEY", "test")
 os.environ.setdefault("FLASK_ENV", "testing")
 
 from app import create_app
-from app.core.dashboard_queries import _tempo_medio_espera_hoje
+from app.core.dashboard_queries import calcular_kpis, montar_periodo
 from app.extensions import db
-from app.models import Empresa, Fila, LogAtendimento, Senha, Unidade
+from app.models import Empresa, Fila, Local, LogAtendimento, Senha, Unidade
+from app.relatorios.queries import _resumo_tempos, tempos_por_senha
+from app.utils.tempo import janela_dia_clinica_em_utc
 
 app = create_app("testing")
 
@@ -62,6 +62,12 @@ with app.app_context():
     fila_coleta = Fila(empresa_id=empresa.id, unidade_id=unidade.id, nome="Coleta", sigla="CL")
     db.session.add_all([fila_recepcao, fila_coleta])
     db.session.commit()
+    guiche = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Guichê", nome_exibicao="Guichê",
+                   identificador_admin="Guichê D1", tipo="recepcao")
+    sala = Local(empresa_id=empresa.id, unidade_id=unidade.id, nome="Sala", nome_exibicao="Sala",
+                 identificador_admin="Sala D1", tipo="coleta")
+    db.session.add_all([guiche, sala])
+    db.session.commit()
 
     def nova_senha(fila_id, codigo, criada_em):
         s = Senha(
@@ -72,50 +78,60 @@ with app.app_context():
         db.session.commit()
         return s.id
 
-    def log(senha_id, evento, timestamp, fila_id):
+    def log(senha_id, evento, timestamp, fila_id, local_id=None):
         db.session.add(
             LogAtendimento(
                 senha_id=senha_id, evento=evento, unidade_id=unidade.id,
-                timestamp=timestamp, fila_id=fila_id,
+                timestamp=timestamp, fila_id=fila_id, local_id=local_id,
             )
         )
 
-    hoje = datetime.utcnow().replace(hour=10, minute=0, second=0, microsecond=0)
-    inicio_hoje = hoje.replace(hour=0, minute=0, second=0, microsecond=0)
-    fim_hoje = inicio_hoje + timedelta(days=1)
+    inicio_hoje, _fim = janela_dia_clinica_em_utc()
+    hoje = inicio_hoje + timedelta(hours=10)  # 10h do dia da clínica, em UTC naive
 
     # -------------------------------------------------------------------
-    # 1) Senha realocada HOJE: 2 intervalos de espera (Recepção 60s, Coleta
-    #    40s) - a média (50s) precisa incluir os DOIS, não só o primeiro.
+    # 1) Senha realocada HOJE: espera 1 (Recepção) 60 s, atendente 30 s,
+    #    espera 2 (Coleta) 40 s, executor 70 s; permanência 200 s.
     # -------------------------------------------------------------------
-    id_realocada = nova_senha(fila_recepcao.id, "D0001", criada_em=hoje)
+    id_realocada = nova_senha(fila_coleta.id, "D0001", criada_em=hoje)
+    db.session.get(Senha, id_realocada).local_id = sala.id  # finalizada mantém o Local (o atendimento final usa ele)
     log(id_realocada, "gerada", hoje, fila_recepcao.id)
-    log(id_realocada, "chamada_senha", hoje + timedelta(seconds=60), fila_recepcao.id)  # espera 1: 60s
-    log(id_realocada, "realocado", hoje + timedelta(seconds=90), fila_recepcao.id)
-    log(id_realocada, "chamada_nome", hoje + timedelta(seconds=130), fila_coleta.id)  # espera 2: 40s
-    log(id_realocada, "fim_atendimento", hoje + timedelta(seconds=200), fila_coleta.id)
-
+    log(id_realocada, "chamada_senha", hoje + timedelta(seconds=60), fila_recepcao.id, guiche.id)
+    log(id_realocada, "realocado", hoje + timedelta(seconds=90), fila_recepcao.id, guiche.id)
+    log(id_realocada, "chamada_nome", hoje + timedelta(seconds=130), fila_coleta.id, sala.id)
+    log(id_realocada, "fim_atendimento", hoje + timedelta(seconds=200), fila_coleta.id, sala.id)
     db.session.commit()
 
-    ids = dict(empresa=empresa.id, unidade=unidade.id, fila_recepcao=fila_recepcao.id, fila_coleta=fila_coleta.id)
+    ids = dict(empresa=empresa.id, unidade=unidade.id)
 
 
-def calcular():
+def kpis_de(empresa_id, unidade_id):
     with app.app_context():
-        empresa_obj = db.session.get(Empresa, ids["empresa"])
-        return _tempo_medio_espera_hoje(empresa_obj, {ids["unidade"]}, inicio_hoje, fim_hoje)
+        periodo = montar_periodo(empresa_id, [unidade_id])
+        kpis = calcular_kpis(db.session.get(Empresa, empresa_id), [unidade_id], periodo)
+        resumo = _resumo_tempos(tempos_por_senha(periodo.filtros)[0])
+        return kpis, resumo
 
 
 # ===========================================================================
-# 1) Média inclui os DOIS intervalos de espera da senha realocada hoje
-#    (60s + 40s = média 50s), não só o primeiro.
+# 1) Senha realocada: espera inicial = 1ª espera da senha (60 s), igual ao
+#    Tempos por senha; executor 70 s; permanência 200 s.
 # ===========================================================================
-media = calcular()
-assert media == 50, media
-ok("Tile do dashboard: média inclui os 2 intervalos de espera da senha realocada hoje (60s+40s=50s), não só o 1º")
+kpis, resumo = kpis_de(ids["empresa"], ids["unidade"])
+tempos = kpis["tempos"]
+assert tempos["espera_inicial"]["media_segundos"] == 60, tempos  # cartão antigo daria 50 (média dos 2 segmentos)
+assert tempos["espera_inicial"]["mediana_segundos"] == 60 and tempos["espera_inicial"]["media_texto"] == "01:00"
+assert tempos["atendimento_executor"]["media_segundos"] == 70, tempos
+assert tempos["permanencia_total"]["media_segundos"] == 200 and tempos["permanencia_total"]["media_texto"] == "03:20"
+for chave in ("espera_inicial", "atendimento_executor", "permanencia_total"):
+    assert tempos[chave]["media_segundos"] == resumo[chave]["media"], chave
+    assert tempos[chave]["mediana_segundos"] == resumo[chave]["mediana"], chave
+assert kpis["geradas"] == 1 and kpis["atendidas"] == 1, kpis
+ok("Senha realocada hoje: Espera inicial 60 s (1ª espera, não a média de 50 s dos 2 segmentos do cartão antigo), "
+   "executor 70 s, permanência 200 s - iguais ao resumo do Tempos por senha")
 
 # ===========================================================================
-# 2) Sem nenhuma senha com intervalo de espera fechado hoje -> None.
+# 2) Sem nenhuma senha -> None (o template mostra "—"), nunca 0.
 # ===========================================================================
 with app.app_context():
     empresa_vazia = Empresa(nome="Clinica Sem Senhas Hoje")
@@ -124,9 +140,12 @@ with app.app_context():
     unidade_vazia = Unidade(empresa_id=empresa_vazia.id, nome="U Vazia")
     db.session.add(unidade_vazia)
     db.session.commit()
-    resultado_vazio = _tempo_medio_espera_hoje(empresa_vazia, {unidade_vazia.id}, inicio_hoje, fim_hoje)
-    assert resultado_vazio is None
-ok("Nenhuma senha com intervalo de espera fechado hoje: retorna None, não 0")
+    ids_vazia = (empresa_vazia.id, unidade_vazia.id)
+kpis_vazio, _ = kpis_de(*ids_vazia)
+for chave, t in kpis_vazio["tempos"].items():
+    assert t["media_segundos"] is None and t["media_texto"] is None and t["quantidade"] == 0, (chave, t)
+assert kpis_vazio["geradas"] == 0 and kpis_vazio["atendidas"] == 0
+ok("Nenhuma senha: cartões de tempo None (\"—\" na tela), não 0")
 
 # ===========================================================================
 # 3) Dado histórico (sem snapshot em nenhum evento) cai no fallback, sem erro.
@@ -156,10 +175,11 @@ with app.app_context():
         timestamp=hoje + timedelta(seconds=80), fila_id=None,
     ))
     db.session.commit()
+    ids_hist = (empresa_hist.id, unidade_hist.id)
 
-    resultado_hist = _tempo_medio_espera_hoje(empresa_hist, {unidade_hist.id}, inicio_hoje, fim_hoje)
-    assert resultado_hist == 80, resultado_hist
-ok("Dado histórico (sem snapshot): cai no fallback de 1 intervalo (80s), sem erro")
+kpis_hist, _ = kpis_de(*ids_hist)
+assert kpis_hist["tempos"]["espera_inicial"]["media_segundos"] == 80, kpis_hist
+ok("Dado histórico (sem snapshot): Espera inicial cai no fallback (80 s), sem erro")
 
 print()
-print(f"TODOS OS {len(passos)} TESTES DE TEMPO MEDIO DE ESPERA (DASHBOARD, HOJE) PASSARAM")
+print(f"TODOS OS {len(passos)} TESTES DOS CARTÕES DE TEMPO DO DASHBOARD PASSARAM")

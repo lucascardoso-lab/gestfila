@@ -1,5 +1,4 @@
 import math
-import statistics
 from collections import defaultdict
 
 from flask import Response, current_app, flash, redirect, render_template, request, url_for
@@ -24,10 +23,12 @@ from .helpers import (
 from .pdf import FalhaGeracaoPdf, renderizar_pdf
 from .queries import (
     DICAS_SITUACAO,
+    TEMPOS_POR_SENHA,
     ROTULOS_CLASSE,
     ROTULOS_TIPO_ETAPA,
     SITUACAO_HISTORICO_PARCIAL,
     TIPO_FECHAMENTO_ROTULOS,
+    _resumo_tempos,
     coletar_alertas,
     contar_senhas_abertas_dias_anteriores,
     ranking_operadores,
@@ -373,20 +374,11 @@ def _duracao_excel(segundos):
     return inteiros / 86400 if inteiros is not None else None
 
 
-# (rótulo, chave) dos tempos por senha, na ordem do CSV e do Excel. A tela e o
+# TEMPOS_POR_SENHA - (rótulo, chave) dos tempos por senha, na ordem do CSV e do
+# Excel - mora em queries.py desde o 10.86 (junto com _resumo_tempos). A tela e o
 # PDF mostram um subconjunto (TEMPOS_NA_TELA, adendo 10.83 - largura): sem
 # Espera total e Atendimento total; "Outros atendimentos" na tela só quando
 # houver, no PDF sempre.
-TEMPOS_POR_SENHA = (
-    ("Espera inicial", "espera_inicial"),
-    ("Espera intermediária", "espera_intermediaria"),
-    ("Espera total", "espera_total"),
-    ("Atendimento atendente", "atendimento_atendente"),
-    ("Atendimento executor", "atendimento_executor"),
-    ("Outros atendimentos", "atendimento_outros"),
-    ("Atendimento total", "atendimento_total"),
-    ("Permanência total", "permanencia_total"),
-)
 TEMPOS_NA_TELA = ("espera_inicial", "espera_intermediaria", "atendimento_atendente", "atendimento_executor",
                   "atendimento_outros", "permanencia_total")
 # Cartões do resumo (tela e PDF) - "Outros atendimentos" fica só na tabela.
@@ -423,22 +415,6 @@ def _colunas_tempo(rotulo, segundos, formato):
     if formato == "xlsx":
         return {f"{rotulo} (h:mm:ss)": _duracao_excel(segundos)}
     return {f"{rotulo} (min)": _minutos(segundos), f"{rotulo} (mm:ss)": formatar_duracao(segundos) or None}
-
-
-def _resumo_tempos(linhas):
-    """Média, mediana e quantidade POR SENHA de cada tempo - só as senhas com o
-    dado entram (vazio fica fora da conta, não vira 0). Sobre os SEGUNDOS
-    exatos, formatados só na exibição (adendo 10.75 - antes partia do minuto
-    já arredondado a 2 casas; diferença < 1 s)."""
-    resumo = {}
-    for _rotulo, chave in TEMPOS_POR_SENHA:
-        valores = [l[f"{chave}_segundos"] for l in linhas if l[f"{chave}_segundos"] is not None]
-        resumo[chave] = {
-            "quantidade": len(valores),
-            "media": statistics.fmean(valores) if valores else None,
-            "mediana": statistics.median(valores) if valores else None,
-        }
-    return resumo
 
 
 def _resumo_por_fila(linhas, mapas):

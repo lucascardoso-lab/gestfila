@@ -1,4 +1,5 @@
 {% from "_nav_principal.html" import nav_principal with context %}
+{% from "atendimento/_tipo_senha.html" import celula_tipo_senha %}
 <!doctype html>
 <html lang="pt-br">
 <head>
@@ -37,9 +38,9 @@
     }
     .form-contexto { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; max-width: 1100px; width: 100%; }
     .form-contexto label { margin: 0; font-size: .8rem; color: var(--gf-texto-secundario); white-space: nowrap; }
-    .form-contexto select {
+    .form-contexto select, .form-contexto input[type="date"] {
       padding: .35rem .5rem; border: 1px solid var(--gf-cinza-medio); border-radius: 6px;
-      font-size: .85rem; background: var(--gf-superficie); max-width: 260px;
+      font-size: .85rem; background: var(--gf-superficie); color: var(--gf-cinza-escuro); max-width: 260px;
     }
     .form-contexto button { padding: .35rem .75rem; font-size: .8rem; }
 
@@ -54,14 +55,23 @@
     main { max-width: 1100px; margin: 2rem auto; padding: 0 1.5rem; }
     h1 { font-size: 1.5rem; margin-bottom: .25rem; }
     .subtitulo { color: var(--gf-texto-secundario); margin-bottom: 1.5rem; font-size: .9rem; }
+    .aviso-periodo { background: var(--gf-alerta-fundo); color: var(--gf-alerta); padding: .55rem .8rem; border-radius: 8px; font-size: .85rem; margin: -.75rem 0 1.25rem; }
 
     .grade-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
     .kpi { background: var(--gf-superficie); border-radius: 12px; border: 1px solid var(--gf-cinza-claro); box-shadow: 0 2px 10px rgba(0,0,0,.05); padding: 1.25rem 1.4rem; }
     .kpi-numero { font-size: 2.1rem; font-weight: 700; color: var(--gf-primaria); line-height: 1.1; }
+    .kpi-numero.alerta { color: var(--gf-alerta); }
     .kpi-label { font-size: .85rem; color: var(--gf-texto-secundario); margin-top: .3rem; }
+    .kpi-detalhe { font-size: .82rem; color: var(--gf-texto-secundario); margin-top: .15rem; }
+
+    .cabecalho-secao { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin: 0 0 .6rem; }
+    .cabecalho-secao h2 { font-size: 1.05rem; margin: 0; }
+    .cabecalho-secao .meta { font-size: .82rem; color: var(--gf-texto-secundario); }
+    .cabecalho-secao a { color: var(--gf-primaria); }
 
     .card { background: var(--gf-superficie); padding: 1.25rem; border-radius: 12px; border: 1px solid var(--gf-cinza-claro); box-shadow: 0 2px 10px rgba(0,0,0,.05); margin-bottom: 1.5rem; }
     .card h2 { font-size: 1.05rem; margin: 0 0 1rem; }
+    .nota { font-size: .8rem; color: var(--gf-texto-secundario); margin: .75rem 0 0; }
 
     .grade-duas-colunas { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; }
 
@@ -80,9 +90,21 @@
     th { color: var(--gf-texto-secundario); font-weight: 600; }
     tr:last-child td { border-bottom: none; }
     tbody tr:hover { background: var(--gf-primaria-clara); }
+    /* cabeçalho pode quebrar (fonte larga cabe na meia coluna); o número não */
+    td.numero { text-align: right; white-space: nowrap; }
+    th.numero { text-align: right; }
     .vazio { color: var(--gf-texto-secundario); font-size: .85rem; }
 
-    #grafico-chamadas-hora { max-height: 260px; }
+    /* Célula "Tipo" - mesmas classes do macro do 10.84 (atendimento/_layout.html) */
+    td.col-tipo { min-width: 8rem; }
+    .tipo-senha { display: inline-flex; align-items: baseline; gap: .4rem; }
+    .tipo-senha-marcador {
+      flex-shrink: 0; width: .65rem; height: .65rem; border-radius: 50%;
+      box-shadow: 0 0 0 1px var(--gf-cinza-medio); align-self: center;
+    }
+    .tipo-senha-vazio { color: var(--gf-texto-secundario); }
+
+    #grafico-senhas { max-height: 260px; }
   </style>
 </head>
 <body>
@@ -104,64 +126,106 @@
     {% endif %}
   {% endcall %}
 
-  {% if pode_filtrar_unidade %}
-    <div class="barra-contexto">
-      <form method="get" action="{{ request.path }}" class="form-contexto">
-        {% if current_user.is_super_admin %}
-          <label for="contexto-empresa">Empresa</label>
-          <select id="contexto-empresa" name="empresa_id" onchange="var u = document.getElementById('contexto-unidade'); if (u) { u.value = ''; } this.form.submit();">
-            {% for emp in empresas_para_contexto() %}
-              <option value="{{ emp.id }}" {{ 'selected' if emp.id == empresa.id else '' }}>{{ emp.nome }}</option>
-            {% endfor %}
-          </select>
-        {% endif %}
+  {# Filtros (adendo 10.86): Empresa (super admin), Unidade (admin/gerencial -
+     barra de contexto, 10.22), Área (10.76) e De/Até (10.54), para todos. #}
+  <div class="barra-contexto">
+    <form method="get" action="{{ request.path }}" class="form-contexto" id="form-filtros">
+      {% if current_user.is_super_admin %}
+        <label for="contexto-empresa">Empresa</label>
+        <select id="contexto-empresa" name="empresa_id" onchange="var u = document.getElementById('contexto-unidade'); if (u) { u.value = ''; } document.getElementById('area_fila_id').value = ''; this.form.submit();">
+          {% for emp in empresas_para_contexto() %}
+            <option value="{{ emp.id }}" {{ 'selected' if emp.id == empresa.id else '' }}>{{ emp.nome }}</option>
+          {% endfor %}
+        </select>
+      {% endif %}
 
+      {% if pode_filtrar_unidade %}
         <label for="contexto-unidade">Unidade</label>
-        <select id="contexto-unidade" name="unidade_id" onchange="this.form.submit()">
+        <select id="contexto-unidade" name="unidade_id" onchange="document.getElementById('area_fila_id').value = ''; this.form.submit();">
           <option value="">Todas as unidades</option>
           {% for u in unidades_do_contexto(empresa) %}
             <option value="{{ u.id }}" {{ 'selected' if unidade and u.id == unidade.id else '' }}>[{{ u.sigla_exibicao }}] {{ u.nome }}</option>
           {% endfor %}
         </select>
+      {% endif %}
 
-        <button class="botao secundario" type="submit">Aplicar</button>
-      </form>
-    </div>
-  {% endif %}
+      <label for="area_fila_id">Área</label>
+      <select id="area_fila_id" name="area_fila_id">
+        <option value="">Todas as áreas</option>
+        {% for a in areas %}
+          <option value="{{ a.id }}" {{ 'selected' if filtros.area_fila_id == a.id else '' }}>{{ rotulos_areas[a.id] }}{% if not a.ativo %} (inativa){% endif %}</option>
+        {% endfor %}
+      </select>
+
+      <label for="data_inicio">De</label>
+      <input type="date" id="data_inicio" name="data_inicio" value="{{ filtros.data_inicio_str }}">
+      <label for="data_fim">Até</label>
+      <input type="date" id="data_fim" name="data_fim" value="{{ filtros.data_fim_str }}">
+
+      <button class="botao secundario" type="submit">Aplicar</button>
+    </form>
+  </div>
 
   <main>
     <h1>Dashboard</h1>
     <p class="subtitulo">
       {{ empresa.nome }}{% if unidade %} · {{ unidade.nome }}{% else %} · Todas as unidades{% endif %}
+      {% if filtros.area_fila_id %} · {{ rotulos_areas[filtros.area_fila_id] }}{% endif %}
+      · {% if periodo.um_dia %}{{ periodo.inicio.strftime('%d/%m/%Y') }}{% else %}{{ periodo.inicio.strftime('%d/%m/%Y') }} a {{ periodo.fim.strftime('%d/%m/%Y') }}{% endif %}
     </p>
+    {% if periodo.aviso %}<p class="aviso-periodo" id="aviso-periodo">{{ periodo.aviso }}</p>{% endif %}
 
-    <div class="grade-kpis">
+    {# Linha 1: volume (por SENHA, não por chamada) e situação de agora #}
+    <div class="grade-kpis" id="kpis-volume">
       <div class="kpi">
-        <div class="kpi-numero" id="kpi-aguardando">{{ kpis.aguardando }}</div>
-        <div class="kpi-label">Senhas aguardando agora</div>
+        <div class="kpi-numero" id="kpi-geradas">{{ kpis.geradas }}</div>
+        <div class="kpi-label">Senhas geradas</div>
       </div>
       <div class="kpi">
-        <div class="kpi-numero" id="kpi-chamadas-hoje">{{ kpis.chamadas_hoje }}</div>
-        <div class="kpi-label">Chamadas hoje</div>
+        <div class="kpi-numero" id="kpi-atendidas">{{ kpis.atendidas }}</div>
+        <div class="kpi-label" title="Das senhas geradas no período, as que foram finalizadas. Senha realocada ou chamada de novo conta 1.">Atendidas (das geradas)</div>
       </div>
-      <div class="kpi">
-        <div class="kpi-numero" id="kpi-tempo-espera">—</div>
-        <div class="kpi-label">Tempo médio de espera hoje</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-numero" id="kpi-filas-ativas">{{ kpis.filas_ativas }}</div>
-        <div class="kpi-label">Filas ativas</div>
-      </div>
+      {% if periodo.inclui_hoje %}
+        <div class="kpi">
+          <div class="kpi-numero" id="kpi-aguardando">{{ kpis.aguardando }}</div>
+          <div class="kpi-label">Senhas aguardando agora</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-numero{{ ' alerta' if kpis.acima_maximo else '' }}" id="kpi-acima-maximo">{{ kpis.acima_maximo }}</div>
+          <div class="kpi-label" title="Senhas aguardando agora há mais tempo que o tempo máximo de espera configurado na fila.">Aguardando acima do tempo máximo</div>
+        </div>
+      {% endif %}
+    </div>
+
+    {# Linha 2: tempos POR SENHA - os mesmos números do Tempos por senha no mesmo filtro #}
+    <div class="cabecalho-secao">
+      <h2>Tempos por senha <span class="meta">(média · mediana)</span></h2>
+      <span class="meta">
+        {% if not periodo.exatamente_hoje %}<span id="tempos-calculado-em">calculado às {{ kpis.calculado_em }}</span>{% endif %}
+        {% if pode_ver_relatorios %}
+          {% if not periodo.exatamente_hoje %} · {% endif %}<a id="link-tempos-detalhes" href="{{ url_for('relatorios.tempos_por_senha_view', **querystring_relatorio) }}">ver detalhes</a>
+        {% endif %}
+      </span>
+    </div>
+    <div class="grade-kpis" id="kpis-tempos">
+      {% for chave, rotulo in tempos_dashboard %}
+        {% set t = kpis.tempos[chave] %}
+        <div class="kpi">
+          <div class="kpi-numero" id="kpi-tempo-{{ chave }}">{{ t.media_texto or '—' }}</div>
+          <div class="kpi-detalhe">mediana <span id="kpi-tempo-{{ chave }}-mediana">{{ t.mediana_texto or '—' }}</span></div>
+          <div class="kpi-label">{{ rotulo }}</div>
+        </div>
+      {% endfor %}
     </div>
 
     <div class="card">
-      <h2>Chamadas por hora (hoje)</h2>
-      <canvas id="grafico-chamadas-hora"></canvas>
+      <h2 id="titulo-grafico">{{ grafico.titulo }}</h2>
+      <canvas id="grafico-senhas"></canvas>
     </div>
 
     <div class="grade-duas-colunas">
       <div class="card">
-        <h2>Filas</h2>
+        <h2>Filas ({{ filas_ativas }} ativa{{ 's' if filas_ativas != 1 else '' }})</h2>
         {% if not filas_status %}
           <p class="vazio">Nenhuma fila cadastrada nesta unidade/empresa ainda.</p>
         {% else %}
@@ -169,7 +233,7 @@
             {% for item in filas_status %}
               <div class="linha-fila">
                 <span class="nome-fila">{{ item.rotulo }}</span>
-                <span class="aguardando-fila">{{ item.aguardando }} aguardando</span>
+                {% if periodo.inclui_hoje %}<span class="aguardando-fila">{{ item.aguardando }} aguardando</span>{% endif %}
                 <span class="badge {{ item.status }}">
                   {{ {'ativa': 'Ativa', 'fora_horario': 'Fora do horário', 'inativa': 'Inativa'}[item.status] }}
                 </span>
@@ -180,103 +244,133 @@
       </div>
 
       <div class="card">
-        <h2>Últimos atendimentos</h2>
-        {% if not chamadas %}
-          <p class="vazio">Nenhuma chamada registrada ainda.</p>
-        {% else %}
-          <table>
-            <thead><tr><th>Senha</th><th>Fila</th><th>Local</th><th>Nome</th><th>Quando</th></tr></thead>
-            <tbody>
-              {% for chamada in chamadas %}
-                <tr>
-                  <td>{{ chamada.codigo }}</td>
-                  <td>{{ chamada.fila }}</td>
-                  <td>{{ chamada.local }}</td>
-                  <td>{{ chamada.nome_paciente or '—' }}</td>
-                  <td><span class="hora-relogio" data-hora-de="{{ chamada.timestamp.isoformat() }}">—</span></td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        {% endif %}
+        <h2>Prioritários x Normal</h2>
+        <table id="tabela-prioritarios">
+          <thead><tr><th>Grupo</th><th class="numero">Senhas geradas</th><th class="numero">Espera inicial (média)</th><th class="numero">Mediana</th></tr></thead>
+          <tbody>
+            {% for grupo, rotulo in (("prioritario", "Prioritários"), ("normal", "Normal")) %}
+              {% set p = kpis.prioritarios[grupo] %}
+              <tr>
+                <td>{{ rotulo }}</td>
+                <td class="numero" id="prio-{{ grupo }}-geradas">{{ p.geradas }}</td>
+                <td class="numero" id="prio-{{ grupo }}-media">{{ p.media_texto or '—' }}</td>
+                <td class="numero" id="prio-{{ grupo }}-mediana">{{ p.mediana_texto or '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="nota" id="nota-prioridade">
+          Prioritária é a senha emitida com prioridade (tipo de senha com peso, ou fila com prioridade padrão) - a
+          mesma do selo "P" e do relatório de Volume. Os pesos foram configurados em produção em 04/11/2026: senhas
+          anteriores aparecem como Normal. Não é falta de dado prioritário.
+        </p>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Últimos atendimentos</h2>
+      {% if not chamadas %}
+        <p class="vazio">Nenhuma chamada registrada no período.</p>
+      {% else %}
+        <table id="tabela-ultimos">
+          <thead><tr><th>Senha</th><th>Tipo</th><th>Fila</th><th>Área</th><th>Local</th><th>Nome</th><th>Quando</th></tr></thead>
+          <tbody>
+            {% for chamada in chamadas %}
+              <tr>
+                <td>{{ chamada.codigo }}</td>
+                {% if chamada.senha %}{{ celula_tipo_senha(chamada.senha) }}{% else %}<td class="col-tipo"><span class="tipo-senha-vazio">—</span></td>{% endif %}
+                <td>{{ chamada.fila }}</td>
+                <td>{{ chamada.area }}</td>
+                <td>{{ chamada.local }}</td>
+                <td>{{ chamada.nome_paciente or '—' }}</td>
+                <td><span class="hora-relogio" data-hora-de="{{ chamada.timestamp.isoformat() }}">—</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
     </div>
   </main>
 
   <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
   <script>
     (function () {
-      const URL_KPIS = {{ url_for('core.api_dashboard_kpis') | tojson }};
-      const TIMESTAMPS_CHAMADAS_HOJE = {{ timestamps_chamadas_hoje | tojson }};
+      const URL_KPIS = {{ url_for('core.api_dashboard_kpis', **querystring_polling) | tojson }};
+      const GRAFICO = {{ grafico | tojson }};
+      const UM_DIA = {{ 'true' if periodo.um_dia else 'false' }};
+      // Polling só quando o período inclui hoje; os tempos e Prioritários x
+      // Normal só voltam no JSON quando o período é exatamente hoje (10.86).
+      const INCLUI_HOJE = {{ 'true' if periodo.inclui_hoje else 'false' }};
+      const TEMPOS = {{ tempos_dashboard | map('first') | list | tojson }};
       const POLLING_MS = 30000;
 
       // Timestamps do servidor são UTC "naive" (datetime.utcnow()) - o "Z" força o
       // navegador a interpretar como UTC e converter pro fuso local dele mesmo (mesmo
       // padrão já usado em toda a tela de Atendimento - nunca formatar hora no
-      // servidor).
-      function formatarHoraLocal(isoUtc) {
-        return new Date(isoUtc + "Z").toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      // servidor). Período de vários dias: data junto da hora.
+      function formatarQuando(isoUtc) {
+        const d = new Date(isoUtc + "Z");
+        const hora = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        return UM_DIA ? hora : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) + " " + hora;
       }
       document.querySelectorAll(".hora-relogio[data-hora-de]").forEach((el) => {
-        el.textContent = formatarHoraLocal(el.dataset.horaDe);
+        el.textContent = formatarQuando(el.dataset.horaDe);
       });
 
-      // Tempo médio de espera já formatado pelo servidor ("mm:ss", adendo
-      // 10.75 - mesma função Python dos relatórios); o JS só exibe.
-      const elTempoEspera = document.getElementById("kpi-tempo-espera");
-      elTempoEspera.textContent = {{ kpis.tempo_medio_espera_texto | tojson }} || "—";
-
-      // Gráfico de barras (Chart.js) - "chamadas por hora" agrupado no fuso LOCAL do
-      // navegador de quem está vendo o dashboard (getHours(), não getUTCHours()) -
-      // mesma convenção de nunca calcular hora-de-parede no servidor.
-      const contagemPorHora = new Array(24).fill(0);
-      TIMESTAMPS_CHAMADAS_HOJE.forEach((iso) => {
-        const hora = new Date(iso + "Z").getHours();
-        contagemPorHora[hora] += 1;
-      });
-      const rotulosHora = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, "0") + "h");
-
-      // "#C0392B" repete --gf-primaria (gestfila.css) como literal de propósito -
-      // Chart.js não lê CSS custom properties de um <link>/<style>, então JS não
-      // tem como referenciar var(--gf-primaria) diretamente aqui (precisaria de
-      // getComputedStyle no elemento raiz). Fora do escopo desta consolidação
-      // MECÂNICA de CSS (troca de valor, não de comportamento) - fica registrado
-      // pra etapa 2 (dark mode em si), quando esta cor pode precisar reagir ao
-      // tema em runtime.
-      new Chart(document.getElementById("grafico-chamadas-hora"), {
+      // Gráfico (Chart.js): agrupado no SERVIDOR, no fuso da clínica (10.86).
+      // Cor pelo token do tema - Chart.js não lê CSS custom properties sozinho.
+      const corPrimaria = getComputedStyle(document.documentElement).getPropertyValue("--gf-primaria").trim();
+      const corTexto = getComputedStyle(document.documentElement).getPropertyValue("--gf-texto-secundario").trim();
+      const corGrade = getComputedStyle(document.documentElement).getPropertyValue("--gf-borda").trim();
+      new Chart(document.getElementById("grafico-senhas"), {
         type: "bar",
         data: {
-          labels: rotulosHora,
-          datasets: [{
-            label: "Chamadas",
-            data: contagemPorHora,
-            backgroundColor: "#C0392B",
-            borderRadius: 4,
-          }],
+          labels: GRAFICO.rotulos,
+          datasets: [{ label: "Senhas geradas", data: GRAFICO.valores, backgroundColor: corPrimaria, borderRadius: 4 }],
         },
         options: {
           responsive: true,
           plugins: { legend: { display: false } },
-          scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+          scales: {
+            x: { ticks: { color: corTexto }, grid: { color: corGrade } },
+            y: { beginAtZero: true, ticks: { precision: 0, color: corTexto }, grid: { color: corGrade } },
+          },
         },
       });
 
-      // Polling dos 4 KPIs a cada 30s (item 3 do pedido) - só os cartões do topo,
-      // não a página inteira (gráfico/lista de filas/tabela continuam do render
-      // inicial - recarregar tudo a cada 30s seria mais pesado que o necessário).
+      function texto(id, valor) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = valor == null ? "—" : valor;
+      }
+
       function atualizarKpis() {
         fetch(URL_KPIS)
           .then((r) => (r.ok ? r.json() : null))
           .then((dados) => {
             if (!dados) return;
-            document.getElementById("kpi-aguardando").textContent = dados.aguardando;
-            document.getElementById("kpi-chamadas-hoje").textContent = dados.chamadas_hoje;
-            document.getElementById("kpi-tempo-espera").textContent = dados.tempo_medio_espera_texto || "—";
-            document.getElementById("kpi-filas-ativas").textContent = dados.filas_ativas;
+            texto("kpi-geradas", dados.geradas);
+            texto("kpi-atendidas", dados.atendidas);
+            texto("kpi-aguardando", dados.aguardando);
+            texto("kpi-acima-maximo", dados.acima_maximo);
+            const elAcima = document.getElementById("kpi-acima-maximo");
+            if (elAcima) elAcima.classList.toggle("alerta", !!dados.acima_maximo);
+            if (dados.tempos) {
+              TEMPOS.forEach((chave) => {
+                texto("kpi-tempo-" + chave, dados.tempos[chave].media_texto);
+                texto("kpi-tempo-" + chave + "-mediana", dados.tempos[chave].mediana_texto);
+              });
+              ["prioritario", "normal"].forEach((grupo) => {
+                const p = dados.prioritarios[grupo];
+                texto("prio-" + grupo + "-geradas", p.geradas);
+                texto("prio-" + grupo + "-media", p.media_texto);
+                texto("prio-" + grupo + "-mediana", p.mediana_texto);
+              });
+            }
           })
           .catch(() => {}); // rede instável não deve quebrar a tela - só tenta de novo no próximo ciclo
       }
-      setInterval(atualizarKpis, POLLING_MS);
+      if (INCLUI_HOJE) setInterval(atualizarKpis, POLLING_MS);
+      window.__atualizarKpisDashboard = atualizarKpis;  // testes disparam um ciclo sem esperar 30 s
     })();
   </script>
 </body>

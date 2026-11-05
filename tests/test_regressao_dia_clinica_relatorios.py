@@ -31,7 +31,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from app import create_app
-from app.core.dashboard_queries import calcular_kpis, chamadas_por_hora_hoje
+from app.core.dashboard_queries import calcular_kpis, montar_periodo, senhas_geradas_no_periodo
 from app.extensions import db
 from app.models import Empresa, Fila, Local, LogAtendimento, Perfil, Senha, Unidade, Usuario
 from app.utils.tempo import formatar_hora_clinica, para_horario_clinica
@@ -134,13 +134,16 @@ ok("Tempo médio de espera: esperas abertas às 21h50 e 12h00 no dia 08/10 (méd
 # ===========================================================================
 with app.app_context(), relogio_22h_brasilia():
     empresa = db.session.get(Empresa, ids["empresa"])
-    kpis = calcular_kpis(empresa, [ids["unidade"]])
-    horas = chamadas_por_hora_hoje([ids["unidade"]])
-assert kpis["chamadas_hoje"] == 2, kpis  # A e B; a chamada de C foi 23h40 de 07/10
-assert kpis["tempo_medio_espera_segundos"] == 450, kpis
-assert sorted(horas) == ["2026-10-08T15:10:00", "2026-10-09T00:55:00"], horas
-ok("KPIs às 22h: 'hoje' = 08/10 da clínica (2 chamadas, espera média 450 s); não zera às 21h")
-ok("Gráfico por hora do dashboard recebe as chamadas do dia da clínica (inclusive a das 21h55)")
+    periodo = montar_periodo(empresa.id, [ids["unidade"]])  # "hoje" = dia da clínica
+    kpis = calcular_kpis(empresa, [ids["unidade"]], periodo)
+    grafico = senhas_geradas_no_periodo(periodo)
+assert periodo.inicio == periodo.fim == date(2026, 10, 8), periodo
+assert kpis["geradas"] == 2, kpis  # A e B; C foi gerada em 07/10 (23h30)
+assert kpis["tempos"]["espera_inicial"]["media_segundos"] == 450, kpis
+ok("KPIs às 22h: 'hoje' = 08/10 da clínica (2 senhas geradas, espera inicial média 450 s); não zera às 21h")
+assert grafico["titulo"] == "Senhas geradas por hora" and sum(grafico["valores"]) == 2, grafico
+assert grafico["valores"][21] == 1 and grafico["valores"][12] == 1, grafico  # hora da CLÍNICA, não UTC
+ok("Gráfico por hora do Dashboard (10.86): senhas do dia da clínica, na hora da clínica (21h50 -> 21h, 12h -> 12h)")
 
 # ===========================================================================
 # 4) Filtro Jinja hora_clinica + as duas telas que formatavam hora UTC no

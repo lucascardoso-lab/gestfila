@@ -7,8 +7,10 @@ Cobre:
 1. Login de admin/gerencial/super admin redireciona pra /dashboard (não mais
    core.index) - perfil puramente operacional (atendente) continua indo pra
    'Iniciar Turno', sem mudança (seção 10.19/10.23).
-2. Os 4 KPIs (aguardando, chamadas hoje, tempo médio de espera hoje, filas
-   ativas) calculados corretamente.
+2. Os cartões (aguardando agora, senhas geradas - por SENHA, adendo 10.86 -
+   e "Filas (N ativas)" no título da lista) calculados corretamente. O fluxo
+   completo do 10.86 (período, área, tempos, prioritários, polling) fica em
+   test_regressao_dashboard_10_86.py.
 3. Escopo por perfil: admin/gerencial veem a empresa INTEIRA (mesmo restritos a
    uma única unidade em Usuario.unidades - diferente do resto de relatorios/,
    decisão de produto específica desta tela); atendente vê só as próprias
@@ -175,11 +177,11 @@ texto = resp.data.decode("utf-8")
 assert '<div class="kpi-numero" id="kpi-aguardando">1</div>' in texto
 ok("KPI 'Aguardando': 1 senha aguardando na Matriz (admin vê a empresa inteira)")
 
-assert '<div class="kpi-numero" id="kpi-chamadas-hoje">2</div>' in texto
-ok("KPI 'Chamadas hoje': 2 (uma na Matriz, uma no Anexo - admin vê as duas unidades)")
+assert '<div class="kpi-numero" id="kpi-geradas">3</div>' in texto
+ok("KPI 'Senhas geradas': 3 (duas na Matriz, uma no Anexo - admin vê as duas unidades)")
 
-assert '<div class="kpi-numero" id="kpi-filas-ativas">2</div>' in texto
-ok("KPI 'Filas ativas': 2 (fila_matriz_aberta + fila_anexo_fechada - fila_matriz_inativa não conta)")
+assert "<h2>Filas (2 ativas)</h2>" in texto and 'id="kpi-filas-ativas"' not in texto
+ok("'Filas (2 ativas)' no título da lista (fila_matriz_inativa não conta); o cartão 'Filas ativas' saiu (10.86)")
 
 ok("Página /dashboard renderiza com status 200 pra admin")
 
@@ -213,7 +215,7 @@ ok("Tabela de últimos atendimentos mostra só o primeiro nome do paciente ('Ful
 resp = c_gerencial.get("/dashboard")
 assert resp.status_code == 200
 texto_gerencial = resp.data.decode("utf-8")
-assert '<div class="kpi-numero" id="kpi-chamadas-hoje">2</div>' in texto_gerencial
+assert '<div class="kpi-numero" id="kpi-geradas">3</div>' in texto_gerencial
 assert "Recepção Anexo" in texto_gerencial  # unidade que NÃO está em Usuario.unidades dele
 ok("Gerencial vê a empresa inteira no dashboard (Anexo incluso), mesmo restrito só à Matriz em Usuario.unidades")
 
@@ -224,7 +226,7 @@ ok("Gerencial vê a empresa inteira no dashboard (Anexo incluso), mesmo restrito
 resp = c_atendente.get("/dashboard")
 assert resp.status_code == 200
 texto_atendente = resp.data.decode("utf-8")
-assert '<div class="kpi-numero" id="kpi-chamadas-hoje">1</div>' in texto_atendente  # só a chamada da Matriz
+assert '<div class="kpi-numero" id="kpi-geradas">2</div>' in texto_atendente  # só as senhas da Matriz
 assert "Recepção Anexo" not in texto_atendente
 assert "Recepção Matriz" in texto_atendente
 assert 'id="contexto-unidade"' not in texto_atendente  # sem seletor de unidade pra esse perfil
@@ -234,7 +236,7 @@ resp = c_atendente.get(f"/dashboard?unidade_id={ids['anexo']}")
 assert resp.status_code == 200
 texto_atendente_tentativa = resp.data.decode("utf-8")
 assert "Recepção Anexo" not in texto_atendente_tentativa
-assert '<div class="kpi-numero" id="kpi-chamadas-hoje">1</div>' in texto_atendente_tentativa
+assert '<div class="kpi-numero" id="kpi-geradas">2</div>' in texto_atendente_tentativa
 ok("Atendente manipulando unidade_id=Anexo na URL não consegue ver a unidade fora do seu escopo")
 
 # ===========================================================================
@@ -244,7 +246,7 @@ ok("Atendente manipulando unidade_id=Anexo na URL não consegue ver a unidade fo
 resp = c_admin.get(f"/dashboard?unidade_id={ids['anexo']}")
 assert resp.status_code == 200
 texto_estreitado = resp.data.decode("utf-8")
-assert '<div class="kpi-numero" id="kpi-chamadas-hoje">1</div>' in texto_estreitado  # só a do Anexo agora
+assert '<div class="kpi-numero" id="kpi-geradas">1</div>' in texto_estreitado  # só a do Anexo agora
 assert "Recepção Matriz" not in texto_estreitado
 ok("Admin consegue estreitar o dashboard pra uma única unidade via barra de contexto")
 
@@ -253,7 +255,7 @@ ok("Admin consegue estreitar o dashboard pra uma única unidade via barra de con
 # seção 10.22) antes de seguir com os próximos passos.
 resp = c_admin.get("/dashboard?unidade_id=")
 assert resp.status_code == 200
-assert '<div class="kpi-numero" id="kpi-chamadas-hoje">2</div>' in resp.data.decode("utf-8")
+assert '<div class="kpi-numero" id="kpi-geradas">3</div>' in resp.data.decode("utf-8")
 ok("Escolher 'Todas as unidades' de volta limpa o filtro estreitado da sessão")
 
 # ===========================================================================
@@ -287,15 +289,15 @@ resp = c_admin.get("/api/dashboard/kpis")
 assert resp.status_code == 200
 dados = resp.get_json()
 assert dados["aguardando"] == 1
-assert dados["chamadas_hoje"] == 2
-assert dados["filas_ativas"] == 2
-assert dados["tempo_medio_espera_segundos"] is not None
+assert dados["geradas"] == 3 and dados["atendidas"] == 0
+assert "chamadas_hoje" not in dados and "filas_ativas" not in dados and "tempo_medio_espera_segundos" not in dados
+assert dados["tempos"]["espera_inicial"]["quantidade"] == 2  # RM002 e RA001 já chamadas (período = hoje)
 ok("/api/dashboard/kpis retorna os mesmos números da página, em JSON, pro polling de 30s")
 
 resp = c_atendente.get("/api/dashboard/kpis")
 assert resp.status_code == 200
 dados_atendente = resp.get_json()
-assert dados_atendente["chamadas_hoje"] == 1
+assert dados_atendente["geradas"] == 2
 ok("/api/dashboard/kpis também respeita o escopo por perfil (atendente só vê a própria unidade)")
 
 print()

@@ -32,7 +32,7 @@ from app.atendimento.helpers import (
     senhas_aguardando,
     senhas_aguardando_local,
 )
-from app.core.dashboard_queries import calcular_kpis, filas_com_status
+from app.core.dashboard_queries import calcular_kpis, filas_com_status, montar_periodo
 from app.extensions import db
 from app.middleware import encerramento
 from app.models import Empresa, Fila, Local, LocalRodizioFila, LogAtendimento, Perfil, Senha, Unidade, Usuario
@@ -210,7 +210,7 @@ with relogio(*HOJE_7H), app.test_request_context():
     db.session.rollback()
     ok("Chamar automático (FIFO, rodízio de prioridade e rodízio por Local): chama a 1ª de HOJE, nunca a de ontem")
 
-    kpis = calcular_kpis(emp, {ids["unidade"]})
+    kpis = calcular_kpis(emp, {ids["unidade"]}, montar_periodo(emp.id, {ids["unidade"]}), com_tempos=False)  # 10.86
     assert kpis["aguardando"] == 2, kpis
     contagem_status = {item["fila"].id: item["aguardando"] for item in filas_com_status(emp, {ids["unidade"]})}
     assert contagem_status == {ids["fila"]: 2}, contagem_status
