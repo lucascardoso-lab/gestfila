@@ -430,6 +430,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.82 | Nome preenchido no Finalizar/Aguardar media o último atendimento como 0 s (log `chamada_nome` colado ao fechamento) |
 | 10.83 | "Tempos por senha" por etapa: Atendimento atendente/executor/outros, Espera intermediária e Permanência total |
 | 10.84 | Coluna "Tipo" (tipo de senha da emissão) em "Senhas em espera" e "Senhas atendidas" - 2 telas, render inicial e /dados |
+| 10.85 | Recado "Observações" no bloco de cima da tela de Atendimento (etapa atual -> próxima), salvo com o Nome; edição por linha removida |
 
 ---
 
@@ -568,6 +569,11 @@ em tempo real:
    - **Nome** — preenchido apenas se o operador já tiver registrado nesta tela
    - **Observações** — texto livre opcional por senha (campo novo; adicionar
      `observacoes` em `senhas`, nullable)
+     > **Superado em parte pelo adendo 10.85:** a edição inline por linha
+     > (campo + "Salvar" na tela por fila, rota `salvar_observacoes`) foi
+     > removida. O recado agora é escrito no bloco de cima (campo
+     > "Observações", ao lado do Nome) e salvo no Realocar/Finalizar/Aguardar;
+     > esta coluna passou a só exibir, nas duas telas.
    - **Ações** — botão "Chamar" individual por linha, que chama *aquela* senha
      específica diretamente (atalho equivalente a preencher o campo Código
      e clicar Chamar)
@@ -8552,6 +8558,168 @@ Jinja); `app/atendimento/chamada.py` (`_serializar_espera`,
 
 ---
 
+## 10.85. ADENDO — Recado "Observações" no bloco de cima da tela de Atendimento
+
+> Pedido: um campo "Observações" no bloco de cima da tela de Atendimento, ao
+> lado do Nome, para a etapa atual deixar um recado para a próxima (ex.:
+> recepção -> coleta: "em jejum", "pedido incompleto"). Antes, a coluna
+> Observações da tela por Local só exibia, e só a tela por fila tinha edição
+> (um campo por linha da espera, que ninguém usava). Investigação (FASE 1)
+> relatada e desenho aprovado antes de implementar.
+
+**Desenho aprovado:**
+
+1. Campo "Observações (recado para a próxima etapa)" no bloco de cima, numa
+   linha própria de largura total abaixo de Código/Nome, nas duas telas
+   (`painel_local.html` e `painel_fila.html`), para todos os perfis
+   operacionais (os mesmos de `exigir_acesso_setor`). `input type="text"`,
+   Enter bloqueado como no Nome, `maxlength` = `LIMITE_OBSERVACOES` (300),
+   passado pelas rotas `painel_fila`/`painel_local` para os dois valores não
+   divergirem.
+2. Com senha chamada, o campo vem preenchido com o `Senha.observacoes` atual
+   (o recado da etapa anterior aparece para quem atende agora). Sem senha
+   chamada, fica vazio e desabilitado.
+3. Salvo junto com o Nome no Realocar, Finalizar e Aguardar: o campo está
+   dentro do `#form-acoes`, então vai na mesma request, sem rota nova e sem
+   botão "Salvar" próprio. Tocar e Chamar não leem o campo.
+4. Não cria `LogAtendimento` nem chamada (lição do 10.82), não emite nada
+   para a TV e não muda status nem timestamps. Realocar continua preservando
+   o recado (`registrar_realocacao` não mexe em `observacoes`).
+5. Na lista "Senhas em espera", a coluna Observações continua mostrando o
+   recado nas duas telas, agora só exibição. É assim que a coleta vê o
+   recado antes de chamar.
+
+**Implementação:**
+
+- `aplicar_observacoes_do_form(senha, form)` (`app/atendimento/helpers.py`),
+  chamada nas 6 rotas (`realocar`/`finalizar`/`aguardar` e as variantes
+  `_local`) logo antes de `talvez_atualizar_nome`. Só altera o atributo, sem
+  commit: quem grava é o `registrar_*` seguinte, na mesma transação da ação.
+  `talvez_atualizar_nome` não foi reaproveitada de propósito: ela grava
+  `chamada_nome_em`, anuncia o nome na TV (Finalizar/Aguardar) e ignora
+  campo vazio, três coisas que o recado não pode fazer.
+- **"Não enviado" ≠ "enviado vazio":** campo ausente do form (POST de outro
+  lugar, teste antigo, campo `disabled`, que o navegador não envia) mantém o
+  recado. Campo enviado vazio (ou só com espaços) apaga (`None`). O texto é
+  gravado sem espaços nas pontas.
+- **Limite no servidor:** `LIMITE_OBSERVACOES = 300`. Acima disso o helper
+  retorna `False` sem alterar nada, e a rota recusa a ação inteira com
+  mensagem de erro e volta para a tela, antes de qualquer gravação (inclusive
+  antes do commit de `talvez_atualizar_nome`): nem nome, nem recado, nem
+  status, nem log. A coluna no banco continua `Text`.
+- `_serializar_senha_atual` ganhou `observacoes`, para o JS preencher o campo
+  no refresh via `/dados`. `_payload_chamada` (TV) não mudou.
+- **Removido (decisão d da FASE 1):** o campo por linha da espera da tela por
+  fila (input + "Salvar", Jinja e JS), o CSS `.inline-observacoes` (incluindo
+  a correção de largura do 10.84, que era desse input), a constante JS
+  `URL_OBSERVACOES_BASE` e a rota `salvar_observacoes`. Motivos: dois jeitos
+  de editar o mesmo recado, e qualquer operador do setor podia reescrever o
+  recado de uma senha que não estava atendendo.
+- **Coluna Observações da espera** (`td.col-observacoes`, Jinja e JS, nas duas
+  telas): `overflow-wrap: anywhere; min-width: 8rem`. Achado pelo teste de
+  largura: um recado de 300 caracteres sem espaço (ex.: código colado)
+  esticava a página para ~3400px em 1366x768. A tela por Local já tinha esse
+  risco antes (até 255 caracteres, vindos da tela por fila).
+- Campo desabilitado com tokens do tema (`--gf-borda` de fundo,
+  `--gf-texto-secundario` no texto), claro e escuro.
+
+> **⚠️ Achado do 10.85 (valia também para o Nome, corrigido):** o refresh do
+> bloco de cima (`renderizarSenhaAtual`) só preenchia o Nome quando o campo
+> **não** estava em foco, sem olhar QUAL senha estava chamada. Se a senha
+> chamada mudasse com o cursor no Nome (ex.: o operador finalizou e chamou em
+> outra aba, ou o refresh chegou enquanto digitava), o texto digitado para o
+> paciente anterior ficava no campo e era gravado na senha seguinte no
+> próximo Finalizar/Aguardar/Realocar. Com o recado, o risco seria o mesmo
+> (ex.: "em jejum" de um paciente indo para outro). **Correção:** as duas
+> telas guardam o id da senha cujos dados estão nos campos
+> (`senhaIdNosCampos`). Se a senha chamada **mudar**, Nome e Observações são
+> sobrescritos mesmo com o cursor neles. Com a **mesma** senha, o campo em
+> foco é respeitado (o operador está digitando). Sem senha chamada,
+> Observações é limpo e desabilitado; o Nome mantém o comportamento de antes
+> (fica habilitado). Verificado: com a proteção desligada, o teste falha
+> exatamente no caso do Nome.
+
+> **⚠️ 2º achado do 10.85 (mesma família, sentido inverso; valia também para
+> o Nome, corrigido):** com a mesma senha, o refresh sobrescrevia o campo
+> sempre que ele **não** estava em foco. No fluxo real o operador digita Nome
+> e Observações e depois clica na busca do Redirecionar (os campos perdem o
+> foco). Qualquer `fila_atualizada` nesse intervalo (ex.: senha nova no
+> totem) redesenhava o bloco com o valor do banco, ainda vazio, e **apagava**
+> o que foi digitado. O Realocar seguia sem nome e sem recado, sem aviso.
+> **Correção:** cada campo é marcado como "editado" no evento `input`
+> (`camposEditados`, nas duas telas). O refresh só sobrescreve quando (a) a
+> senha chamada mudou, ou (b) o campo não foi editado e não está em foco. Ao
+> mudar de senha (ou ficar sem senha), as marcas são limpas. Campo não
+> editado continua acompanhando o banco. Verificado: sem a marca (só a regra
+> do foco), o teste falha com o Nome digitado voltando vazio.
+
+**LGPD:** o recado é texto livre e pode acabar com dado de saúde ("em jejum",
+"gestante", medicação). Fica **só nas telas de operador autenticado**:
+`painel_fila`/`painel_local` e `dados_fila`/`dados_local` exigem login e
+`exigir_acesso_setor`, com o escopo de empresa/unidade de sempre. **Nunca vai
+para TV, totem, cupom ou relatório:** `_payload_chamada` e o histórico da TV
+não levam o campo, `fila_atualizada` leva só `{fila_id}`, o cupom
+(`totem/senha_gerada.html`) não mostra e, no momento da emissão, o recado nem
+existe; nenhum relatório ou exportação lê `Senha.observacoes` (a coluna
+"Observação" do "Tempos por senha" é "Histórico parcial", outra coisa).
+Retenção: ver seção 11 (mesma pendência do `nome_paciente`, seção 8).
+
+**Layout medido em 1366x768** (fonte padrão, tema claro, com senha chamada):
+o campo ocupa 846px (largura útil do card); o card do bloco de cima ficou com
+566px de altura na tela por Local e 584px na tela por fila. Sem rolagem
+horizontal nos temas claro e escuro, com a fonte padrão e com fonte larga,
+mesmo com recados de 300 caracteres (com e sem espaço) na espera.
+
+**Testes:** novo `tests/test_regressao_observacoes_recado.py`:
+
+- Fluxo combinado: a recepção escreve o recado e realoca (só o log
+  `realocado`) -> o recado aparece na espera da coleta na tela por Local
+  (HTML e `/dados`) -> o executor chama e o campo vem preenchido -> finaliza
+  (recado mantido, só o log `fim_atendimento`, sem `chamada_nome`).
+- Nas duas telas: enviado vazio ou só espaços apaga; campo ausente mantém
+  (inclusive POST só com o Nome).
+- 301 caracteres: Realocar/Finalizar/Aguardar recusados nas duas telas, sem
+  gravar nome, recado, status, local, timestamps ou log, e sem evento para
+  a TV; 300 aceito.
+- TV: nenhum dos eventos recebidos nas salas das filas durante o teste leva
+  o recado; payload `chamada` com as chaves de sempre.
+- Escape: HTML/script no recado escapado no Jinja (célula da espera e
+  `value` do campo) e no JS (refresh via `/dados`: vira texto, nenhum
+  elemento injetado).
+- Achado do foco, no JS real das duas telas num Chromium (Playwright, cada
+  requisição respondida pelo Flask e socket.io trocado por stub): mesma
+  senha respeita o que está sendo digitado; troca A -> B e B -> (nenhuma) ->
+  C com o cursor em Nome ou em Observações sobrescreve; o Finalizar real
+  pela tela grava os dados da senha certa.
+- 2º achado, no mesmo Chromium: digita Nome e Observações, leva o foco para
+  a busca do Redirecionar, chegam dois refreshes da mesma senha (senhas
+  novas na espera, banco ainda sem nome/recado) e os dois campos mantêm o
+  texto; o Realocar real pela tela grava nome e recado. Senha nova
+  sobrescreve os dois mesmo editados; campo não editado segue o banco.
+- Estrutura e layout: rota inline removida, `maxlength` = `LIMITE_OBSERVACOES`
+  (passado para o template como `limite_observacoes`, sem valor fixo no HTML),
+  campo dentro do `#form-acoes`; medidas de 1366x768 descritas acima;
+  desabilitado usa `--gf-borda`.
+
+`tests/test_regressao_fase10_2.py`: a seção 8 (rota inline) passou a
+conferir que a rota não existe mais, e as checagens de empresa (admin de
+outra empresa) e de unidade (Fila Z) foram movidas para Aguardar/Finalizar/
+Realocar com o campo `observacoes`: 404 e recado intacto.
+
+Suíte completa (84 arquivos) sem falhas.
+
+**Arquivos alterados:** `app/atendimento/helpers.py` (`LIMITE_OBSERVACOES`,
+`aplicar_observacoes_do_form`); `app/atendimento/chamada.py` (6 rotas,
+`_serializar_senha_atual`, `limite_observacoes` em `painel_fila`/`painel_local`,
+rota `salvar_observacoes` removida; `senha_acessivel_ou_404` mantida em
+`helpers.py`, sem uso por ora - checagem de acesso para senha avulsa);
+`app/templates/atendimento/painel_fila.html` e
+`app/templates/atendimento/painel_local.html`;
+`tests/test_regressao_fase10_2.py`; novo
+`tests/test_regressao_observacoes_recado.py`.
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - **Trecho entre a chamada e o "Aguardar" não é medido** (registrado no
@@ -8716,3 +8884,10 @@ Jinja); `app/atendimento/chamada.py` (`_serializar_espera`,
   exige uma versão só consulta da seleção, sem as travas de
   `travar_fila`/Local. (a) reordenar a lista pela regra do Chamar
   automático foi descartada: a linha muda de posição sob o cursor.
+- **Retenção/expurgo do recado "Observações"** (registrado no 10.85): o
+  `Senha.observacoes` é texto livre e pode conter dado de saúde ("em jejum",
+  "gestante", medicação). Como o `nome_paciente` (seção 8, LGPD), precisa
+  entrar numa política de retenção/expurgo (ex.: limpar os dois campos após
+  X dias, mantendo a senha e os logs para os relatórios). Hoje nenhum dos
+  dois é expurgado. Até lá, o recado fica restrito às telas de operador
+  autenticado (nunca TV, totem, cupom ou relatório).

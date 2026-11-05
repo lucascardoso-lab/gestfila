@@ -18,6 +18,11 @@ PERFIS_POR_SETOR = {
 
 CHAVE_SESSAO_LOCAL = "atendimento_local_id"
 
+# adendo 10.85: limite do recado "Observações" do bloco de cima - o mesmo valor
+# vai no maxlength dos dois templates (painel_fila/painel_local); o servidor
+# valida de novo porque o maxlength do navegador não é garantia.
+LIMITE_OBSERVACOES = 300
+
 
 def exigir_acesso_setor(setor):
     """RBAC das telas de chamada: as chaves deste dict ('recepcao'/'coleta') são o
@@ -703,6 +708,32 @@ def talvez_atualizar_nome(senha, nome_form, operador, setor, emitir_tv=True, reg
     db.session.commit()
     if emitir_tv:
         emitir_chamada(senha.fila, {"tipo": "nome", "local": _nome_local(senha), "nome_paciente": nome})
+
+
+def aplicar_observacoes_do_form(senha, form):
+    """Recado "Observações" do bloco de cima da tela de Atendimento (adendo 10.85):
+    a etapa atual deixa um recado para a próxima (ex.: recepção -> coleta), salvo
+    junto com o Nome no Realocar/Finalizar/Aguardar - chamado nas 6 rotas logo
+    ANTES de talvez_atualizar_nome.
+
+    - Campo AUSENTE do form (POST de outro lugar, teste antigo, campo desabilitado
+      - o navegador não envia campo `disabled`): não mexe no recado.
+    - Campo ENVIADO vazio (só espaços conta como vazio): apaga (None).
+    - Acima de LIMITE_OBSERVACOES: retorna False SEM alterar nada - a rota recusa
+      a ação inteira antes de qualquer gravação (inclusive antes do commit que
+      talvez_atualizar_nome faz).
+
+    Só altera o atributo, SEM commit: quem grava é o registrar_* chamado logo
+    depois, na mesma transação da ação. Não cria LogAtendimento nem chamada
+    (lição do 10.82), não emite nada para a TV e não toca em status/timestamps -
+    o recado nunca sai das telas de operador autenticado (LGPD, adendo 10.85)."""
+    if "observacoes" not in form:
+        return True
+    texto = (form.get("observacoes") or "").strip()
+    if len(texto) > LIMITE_OBSERVACOES:
+        return False
+    senha.observacoes = texto or None
+    return True
 
 
 def registrar_chamada_senha(senha, local, operador, setor):

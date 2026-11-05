@@ -46,6 +46,12 @@
         </div>
       </div>
 
+      {# adendo 10.85: recado da etapa atual para a próxima, salvo junto com o Nome no Realocar/Finalizar/Aguardar #}
+      <div class="campo-observacoes">
+        <label for="observacoes">Observações (recado para a próxima etapa)</label>
+        <input type="text" id="observacoes" name="observacoes" value="{{ (senha_atual.observacoes if senha_atual else '') or '' }}" placeholder="ex.: em jejum, pedido incompleto" maxlength="{{ limite_observacoes }}" {{ '' if senha_atual else 'disabled' }} onkeydown="if (event.key === 'Enter') event.preventDefault();">
+      </div>
+
       <div class="bloco-redirecionar" id="bloco-redirecionar">
         <label for="busca-redirecionar" style="margin-top:0;">Redirecionar</label>
         {% if not filas_destino %}
@@ -86,7 +92,7 @@
               <span class="hora-relogio" data-hora-de="{{ s.criada_em.isoformat() }}" title="Horário em que a senha foi gerada"></span>
             </td>
             <td>{{ s.nome_paciente or '' }}</td>
-            <td>{{ s.observacoes or '' }}</td>
+            <td class="col-observacoes">{{ s.observacoes or '' }}</td>
             <td class="acoes">
               <form class="inline" method="post" action="{{ url_for('atendimento.chamar_local', setor=setor, local_id=local.id) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -134,6 +140,10 @@
     .bloco-redirecionar { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--gf-borda); }
     .botoes-acao { margin-top: 1.5rem; display: flex; gap: .6rem; flex-wrap: wrap; }
     .hora-relogio { display: block; font-size: .78rem; color: var(--gf-texto-secundario); white-space: nowrap; }
+    /* adendo 10.85: recado de até 300 caracteres sem espaço (ex.: código colado)
+       estourava a página - quebra em qualquer ponto, sem esticar a tabela. */
+    td.col-observacoes { overflow-wrap: anywhere; min-width: 8rem; }
+    .campo-observacoes input:disabled { background: var(--gf-borda); color: var(--gf-texto-secundario); cursor: not-allowed; }
   </style>
 
   <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
@@ -236,21 +246,59 @@
         if (elAviso) elAviso.hidden = !bloqueado;
       }
 
+      // Adendo 10.85: id da senha cujos dados estão hoje nos campos Nome e
+      // Observações. Se a senha chamada MUDAR, os dois campos são sobrescritos
+      // mesmo com o cursor neles - senão o texto digitado para o paciente
+      // anterior seria gravado na senha seguinte no próximo Finalizar/Aguardar/
+      // Realocar (1º achado do 10.85, valia também para o Nome).
+      let senhaIdNosCampos = {{ senha_atual.id if senha_atual else 'null' }};
+
+      // 2º achado do 10.85: com a MESMA senha, campo que o operador já editou
+      // nunca é sobrescrito pelo refresh, mesmo fora de foco - senão, ao clicar
+      // na busca do Redirecionar depois de digitar, qualquer 'fila_atualizada'
+      // (ex.: senha nova no totem) trazia o valor do banco (ainda vazio) e
+      // apagava o que foi digitado, e o Realocar seguia sem nome e sem recado.
+      // A marca é limpa quando a senha chamada muda (ou some).
+      const camposEditados = new Set();
+      ["nome", "observacoes"].forEach((id) => {
+        document.getElementById(id).addEventListener("input", () => camposEditados.add(id));
+      });
+
+      function sincronizarCampo(el, valor, senhaMudou) {
+        if (senhaMudou) {
+          camposEditados.delete(el.id);
+          el.value = valor || "";
+        } else if (!camposEditados.has(el.id) && !el.matches(":focus")) {
+          el.value = valor || "";
+        }
+      }
+
       function renderizarSenhaAtual(senha) {
         const elDisplay = document.getElementById("senha-chamada-display");
         const elNome = document.getElementById("nome");
+        const elObservacoes = document.getElementById("observacoes");
         aplicarBloqueio(!!senha);
         if (!senha) {
+          senhaIdNosCampos = null;
+          camposEditados.clear();
           elDisplay.classList.remove("em-atendimento");
           elDisplay.innerHTML = '<span class="vazio">—</span>';
+          // sem senha chamada não há o que salvar: limpa e desabilita (campo
+          // desabilitado nem é enviado no POST, então nunca apaga recado)
+          elObservacoes.value = "";
+          elObservacoes.disabled = true;
           return;
         }
+        const senhaMudou = senha.id !== senhaIdNosCampos;
+        senhaIdNosCampos = senha.id;
         elDisplay.classList.add("em-atendimento");
         elDisplay.innerHTML = `<span><strong>${escapeHtml(senha.codigo)}</strong>` +
           (senha.nome_paciente ? ` — ${escapeHtml(senha.nome_paciente)}` : "") +
           `</span><span id="senha-chamada-fila" class="subtitulo" style="margin:0;">${escapeHtml(senha.fila)}</span>` +
           '<span class="badge em-atendimento">Em atendimento</span>';
-        if (!elNome.matches(":focus")) elNome.value = senha.nome_paciente || "";
+        sincronizarCampo(elNome, senha.nome_paciente, senhaMudou);
+        elObservacoes.disabled = false;
+        sincronizarCampo(elObservacoes, senha.observacoes, senhaMudou);
       }
 
       function linhaEspera(s) {
@@ -265,7 +313,7 @@
             <span class="hora-relogio" data-hora-de="${s.criada_em}" title="Horário em que a senha foi gerada"></span>
           </td>
           <td>${escapeHtml(s.nome_paciente || "")}</td>
-          <td>${escapeHtml(s.observacoes || "")}</td>
+          <td class="col-observacoes">${escapeHtml(s.observacoes || "")}</td>
           <td class="acoes">
             <form class="inline" method="post" action="${URL_CHAMAR}">
               <input type="hidden" name="csrf_token" value="${CSRF}">

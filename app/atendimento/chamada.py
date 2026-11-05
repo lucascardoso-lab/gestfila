@@ -1,7 +1,6 @@
 from flask import flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user
 
-from app.extensions import db
 from app.models import Senha
 from app.models.senha import criada_hoje_na_clinica
 from app.utils.rotulos import rotulo_fila
@@ -9,7 +8,8 @@ from app.utils.tipo_senha import tipo_senha_exibicao
 
 from . import atendimento_bp
 from .helpers import (
-    emitir_atualizacao_fila,
+    LIMITE_OBSERVACOES,
+    aplicar_observacoes_do_form,
     exigir_acesso_setor,
     fila_acessivel_ou_404,
     fila_ids_do_local,
@@ -23,7 +23,6 @@ from .helpers import (
     registrar_volta_espera,
     selecionar_proxima_fila_e_senha,
     selecionar_proxima_senha,
-    senha_acessivel_ou_404,
     senha_atual_no_local,
     senhas_aguardando,
     senhas_aguardando_local,
@@ -31,6 +30,11 @@ from .helpers import (
     talvez_atualizar_nome,
     travar_fila,
 )
+
+
+# adendo 10.85: recado acima de LIMITE_OBSERVACOES recusa a ação inteira, antes
+# de qualquer gravação (nem nome, nem recado, nem status).
+MENSAGEM_OBSERVACOES_LONGAS = f"Observações com mais de {LIMITE_OBSERVACOES} caracteres. Nada foi salvo; encurte o texto."
 
 
 def _exigir_local_ou_redirecionar(proximo_endpoint, **proximo_valores):
@@ -76,6 +80,9 @@ def _serializar_senha_atual(senha):
         "id": senha.id,
         "codigo": senha.codigo,
         "nome_paciente": senha.nome_paciente,
+        # adendo 10.85: recado da etapa anterior, preenche o campo "Observações"
+        # do bloco de cima no refresh - só tela de operador, nunca TV
+        "observacoes": senha.observacoes,
         "local": senha.local.nome_exibicao if senha.local else None,
         "chamada_em": senha.chamada_em.isoformat() if senha.chamada_em else None,
     }
@@ -146,6 +153,7 @@ def painel_local(setor, local_id):
         espera=senhas_aguardando_local(local, current_user),
         atendidas=senhas_atendidas_no_local(local),
         fila_ids=fila_ids_do_local(local, current_user),
+        limite_observacoes=LIMITE_OBSERVACOES,  # adendo 10.85 - maxlength do campo
     )
 
 
@@ -249,6 +257,9 @@ def realocar_local(setor, local_id):
         flash("Selecione uma fila de destino válida em Redirecionar.", "error")
         return redirect(url_for("atendimento.painel_local", setor=setor, local_id=local.id))
 
+    if not aplicar_observacoes_do_form(senha, request.form):
+        flash(MENSAGEM_OBSERVACOES_LONGAS, "error")
+        return redirect(url_for("atendimento.painel_local", setor=setor, local_id=local.id))
     talvez_atualizar_nome(
         senha, request.form.get("nome"), current_user, setor, emitir_tv=False, registrar_como_chamada=False
     )
@@ -269,6 +280,9 @@ def finalizar_local(setor, local_id):
         flash("Nenhuma senha chamada neste Local.", "error")
         return redirect(url_for("atendimento.painel_local", setor=setor, local_id=local.id))
 
+    if not aplicar_observacoes_do_form(senha, request.form):
+        flash(MENSAGEM_OBSERVACOES_LONGAS, "error")
+        return redirect(url_for("atendimento.painel_local", setor=setor, local_id=local.id))
     # adendo 10.82: o nome digitado aqui não é uma chamada nova (mesmo motivo do Realocar)
     talvez_atualizar_nome(senha, request.form.get("nome"), current_user, setor, registrar_como_chamada=False)
     registrar_fim_atendimento(senha, current_user, setor)
@@ -288,6 +302,9 @@ def aguardar_local(setor, local_id):
         flash("Nenhuma senha chamada neste Local.", "error")
         return redirect(url_for("atendimento.painel_local", setor=setor, local_id=local.id))
 
+    if not aplicar_observacoes_do_form(senha, request.form):
+        flash(MENSAGEM_OBSERVACOES_LONGAS, "error")
+        return redirect(url_for("atendimento.painel_local", setor=setor, local_id=local.id))
     # adendo 10.82: o nome digitado aqui não é uma chamada nova (mesmo motivo do Realocar)
     talvez_atualizar_nome(senha, request.form.get("nome"), current_user, setor, registrar_como_chamada=False)
     registrar_volta_espera(senha, current_user, setor)
@@ -316,6 +333,7 @@ def painel_fila(setor, fila_id):
         filas_destino=filas_destino_atual,
         espera=senhas_aguardando(fila),
         atendidas=senhas_atendidas_no_local(local, [fila.id]),
+        limite_observacoes=LIMITE_OBSERVACOES,  # adendo 10.85 - maxlength do campo
     )
 
 
@@ -434,6 +452,9 @@ def realocar(setor, fila_id):
         flash("Selecione uma fila de destino válida em Redirecionar.", "error")
         return redirect(url_for("atendimento.painel_fila", setor=setor, fila_id=fila.id))
 
+    if not aplicar_observacoes_do_form(senha, request.form):
+        flash(MENSAGEM_OBSERVACOES_LONGAS, "error")
+        return redirect(url_for("atendimento.painel_fila", setor=setor, fila_id=fila.id))
     talvez_atualizar_nome(
         senha, request.form.get("nome"), current_user, setor, emitir_tv=False, registrar_como_chamada=False
     )
@@ -457,6 +478,9 @@ def finalizar(setor, fila_id):
         flash("Nenhuma senha chamada neste local.", "error")
         return redirect(url_for("atendimento.painel_fila", setor=setor, fila_id=fila.id))
 
+    if not aplicar_observacoes_do_form(senha, request.form):
+        flash(MENSAGEM_OBSERVACOES_LONGAS, "error")
+        return redirect(url_for("atendimento.painel_fila", setor=setor, fila_id=fila.id))
     # adendo 10.82: o nome digitado aqui não é uma chamada nova (mesmo motivo do Realocar)
     talvez_atualizar_nome(senha, request.form.get("nome"), current_user, setor, registrar_como_chamada=False)
     registrar_fim_atendimento(senha, current_user, setor)
@@ -479,25 +503,11 @@ def aguardar(setor, fila_id):
         flash("Nenhuma senha chamada neste local.", "error")
         return redirect(url_for("atendimento.painel_fila", setor=setor, fila_id=fila.id))
 
+    if not aplicar_observacoes_do_form(senha, request.form):
+        flash(MENSAGEM_OBSERVACOES_LONGAS, "error")
+        return redirect(url_for("atendimento.painel_fila", setor=setor, fila_id=fila.id))
     # adendo 10.82: o nome digitado aqui não é uma chamada nova (mesmo motivo do Realocar)
     talvez_atualizar_nome(senha, request.form.get("nome"), current_user, setor, registrar_como_chamada=False)
     registrar_volta_espera(senha, current_user, setor)
     flash(f"Senha {senha.codigo} voltou para a espera.", "info")
     return redirect(url_for("atendimento.painel_fila", setor=setor, fila_id=fila.id))
-
-
-@atendimento_bp.route(
-    "/<any(recepcao,coleta):setor>/senhas/<int:senha_id>/observacoes", methods=["POST"]
-)
-def salvar_observacoes(setor, senha_id):
-    """Edição inline da coluna Observações na tabela 'Senhas em espera' (seção 10.2) -
-    ação independente dos 5 botões principais, sem mudar status nem emitir 'chamada'."""
-    exigir_acesso_setor(setor)
-    senha = senha_acessivel_ou_404(senha_id)
-
-    senha.observacoes = (request.form.get("observacoes") or "").strip() or None
-    db.session.commit()
-    emitir_atualizacao_fila(senha.fila_id)
-
-    flash(f"Observações da senha {senha.codigo} salvas.", "info")
-    return redirect(url_for("atendimento.painel_fila", setor=setor, fila_id=senha.fila_id))

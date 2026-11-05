@@ -1,7 +1,9 @@
 """
 Teste de regressão da seção 10.2 do BLUEPRINT (tela unificada de Atendimento):
 cobre os 5 botões de ação (Chamar, Tocar, Realocar, Finalizar, Aguardar), o botão
-"Chamar" individual da tabela "Senhas em espera", a coluna Observações, o endpoint
+"Chamar" individual da tabela "Senhas em espera", o isolamento do recado
+"Observações" (adendo 10.85 - o fluxo completo do recado fica em
+test_regressao_observacoes_recado.py), o endpoint
 JSON /dados (usado pelo front-end para re-sincronizar as tabelas) e a emissão
 correta de WebSocket ('chamada' para a TV, 'fila_atualizada' para a própria tela)
 em cada ação relevante - além do RBAC e isolamento multi-tenant já estabelecidos.
@@ -410,30 +412,32 @@ assert "Nenhuma senha chamada neste local".encode("utf-8") in resp.data
 ok("'Finalizar' em local sem nenhuma senha chamada mostra erro amigável")
 
 # ---------------------------------------------------------------------------
-# 8) Observações: edição inline na tabela de espera.
+# 8) Observações (adendo 10.85): a edição inline por linha da espera e a rota
+#    salvar_observacoes foram REMOVIDAS - o recado agora vai no bloco de cima,
+#    junto com o Nome, no Realocar/Finalizar/Aguardar. As checagens de
+#    empresa/permissão que existiam para a rota removida passam para o caminho
+#    novo (aqui e na seção 11).
 # ---------------------------------------------------------------------------
 resp = c.post(
     f"/atendimento/recepcao/senhas/{ids['x1']}/observacoes",
     data={"observacoes": "Paciente prefere ser chamado por apelido"},
-    follow_redirects=True,
 )
-assert resp.status_code == 200
-senha1_obs = db_get(Senha, ids["x1"])
-assert senha1_obs.observacoes == "Paciente prefere ser chamado por apelido"
-ok("Observações da senha são salvas via edição inline")
+assert resp.status_code == 404, resp.status_code
+assert db_get(Senha, ids["x1"]).observacoes is None
+ok("Rota de edição inline de Observações removida (adendo 10.85): 404, nada gravado")
 
-recebidos = ws.get_received(NAMESPACE)
-assert any(ev["name"] == "fila_atualizada" for ev in recebidos)
-ok("Salvar Observações emite 'fila_atualizada' para re-sincronizar a tabela")
-
-# isolamento: admin de outra empresa não acessa/edita observações de senha da empresa A
-resp = c_admin_b.post(
-    f"/atendimento/recepcao/senhas/{ids['x1']}/observacoes", data={"observacoes": "hack"}
-)
-assert resp.status_code == 404
+# isolamento: admin de outra empresa não grava recado em senha da empresa A pelos
+# botões do bloco de cima (fila da empresa A -> 404 antes de qualquer gravação)
+for sufixo, dados_post in [
+    ("aguardar", {"observacoes": "hack"}),
+    ("finalizar", {"observacoes": "hack"}),
+    ("realocar", {"observacoes": "hack", "fila_destino_id": str(ids["fila_y"])}),
+]:
+    resp = c_admin_b.post(f"{URL_FILA_X}/{sufixo}", data=dados_post)
+    assert resp.status_code == 404, (sufixo, resp.status_code)
 senha1_obs_intacta = db_get(Senha, ids["x1"])
-assert senha1_obs_intacta.observacoes == "Paciente prefere ser chamado por apelido"
-ok("Isolamento: admin de outra empresa recebe 404 ao tentar editar observações de senha da empresa A")
+assert senha1_obs_intacta.observacoes is None and senha1_obs_intacta.status == "chamada"
+ok("Isolamento: admin de outra empresa recebe 404 ao tentar gravar Observações (Aguardar/Finalizar/Realocar) na empresa A")
 
 # ---------------------------------------------------------------------------
 # 9) Isolamento multi-tenant nos 5 botões e no /dados, todos via fila de outra empresa.
@@ -475,8 +479,9 @@ assert c.get(f"{URL_FILA_Z}/dados").status_code == 404
 ok("Isolamento por unidade: GET /dados na Fila Z (unidade A2) -> 404")
 
 for sufixo, dados_post in [
-    ("chamar", {}), ("tocar", {}), ("aguardar", {}),
-    ("finalizar", {}), ("realocar", {"fila_destino_id": str(ids["fila_x"])}),
+    ("chamar", {}), ("tocar", {}), ("aguardar", {"observacoes": "hack"}),
+    ("finalizar", {"observacoes": "hack"}),
+    ("realocar", {"fila_destino_id": str(ids["fila_x"]), "observacoes": "hack"}),
 ]:
     resp = c.post(f"{URL_FILA_Z}/{sufixo}", data=dados_post)
     assert resp.status_code == 404, (sufixo, resp.status_code)
@@ -487,11 +492,9 @@ with app.app_context():
     assert senha_z_intacta.status == "aguardando"
 ok("Isolamento por unidade: nenhuma das tentativas acima mudou o estado da senha Z001")
 
-resp = c.post(f"/atendimento/recepcao/senhas/{ids['z1']}/observacoes", data={"observacoes": "hack"})
-assert resp.status_code == 404
 with app.app_context():
     assert db.session.get(Senha, ids["z1"]).observacoes is None
-ok("Isolamento por unidade: senha_acessivel_ou_404 bloqueia edição de Observações da senha Z001 (404)")
+ok("Isolamento por unidade: Aguardar/Finalizar/Realocar com Observações na Fila Z -> 404, recado de Z001 intacto (adendo 10.85)")
 
 # ---------------------------------------------------------------------------
 # 12) Cruzamento de SETOR (gap identificado na auditoria de IDOR): perfil 'atendente'
