@@ -296,8 +296,9 @@ assert df["Espera inicial (min)"].dtype == float and df["Atendimento total (min)
 linha_s2 = bruto.splitlines()[[l.split(";")[0] for l in bruto.splitlines()].index("S2")]
 # Minutos decimais + o mesmo tempo em texto (adendo 10.75); etapas como inteiro ("3", não "3,00").
 # Adendo 10.83: espera inicial 3, intermediária 12, total 15; atendente e executor
-# vazios (locais sem tipo), outros 14, total 14; permanência 29 (= 15 + 14).
-assert ";3,00;03:00;12,00;12:00;15,00;15:00;;;;;14,00;14:00;14,00;14:00;29,00;29:00;3;" in linha_s2, linha_s2
+# 0 (locais sem tipo: etapa não ocorrida em senha concluída = 00:00 desde o
+# 10.87, antes vazio), outros 14, total 14; permanência 29 (= 15 + 14).
+assert ";3,00;03:00;12,00;12:00;15,00;15:00;0,00;00:00;0,00;00:00;14,00;14:00;14,00;14:00;29,00;29:00;3;" in linha_s2, linha_s2
 assert df.set_index("Senha").loc["S3"].isna()["Espera inicial (min)"]
 assert "Etapas de atendimento" in df.columns
 ok("CSV por senha: UTF-8 com BOM, padrão pt-BR (';' e ','), minutos com 2 casas como número; sem dado = vazio; sem nome")

@@ -432,6 +432,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.84 | Coluna "Tipo" (tipo de senha da emissão) em "Senhas em espera" e "Senhas atendidas" - 2 telas, render inicial e /dados |
 | 10.85 | Recado "Observações" no bloco de cima da tela de Atendimento (etapa atual -> próxima), salvo com o Nome; edição por linha removida |
 | 10.86 | Dashboard por senha: filtro De/Até (até 31 dias) e Área, tempos do Tempos por senha, Prioritários x Normal, acima do tempo máximo |
+| 10.87 | Tempos por senha: etapa não ocorrida em senha concluída = 00:00:00 (Atendente/Executor/Outros), só na apresentação |
 
 ---
 
@@ -6921,6 +6922,9 @@ totem sem `<main>`/`.container`, cupom sem `<a>`, PDF sem `gestfila.css`;
   "Concluída", "Histórico parcial", "Aguardando (nunca chamada)", "Cancelada
   (encerramento automático)", "Chamada, não finalizada". Sem dado = VAZIO
   ("—" na tela, célula vazia na exportação), nunca 0.
+  > **Nota (10.87):** o 10.87 não muda esta regra. O zero vale só para "não
+  > se aplica" (Atendimento atendente/executor/Outros da etapa que não
+  > ocorreu) em senha concluída.
 - **Histórico parcial:** senha com log sem snapshot E com realocação/volta a
   aguardar - espera inicial preenchida (exata também no fallback), totais e
   etapas vazios. Histórico SEM realocação é exato e fica "Concluída".
@@ -8262,6 +8266,8 @@ segmentos de `_segmentos_espera_por_senha`, `_pares_inicio_fim` e
   deliberada. Nessas colunas, o vazio quer dizer "não se aplica" (a senha
   não passou por aquele tipo de etapa). Na Espera intermediária, a senha
   concluída sempre tem o dado: se não esperou entre as etapas, esperou zero.
+  > **Revisto pelo 10.87:** em senha Concluída, 00:00. Vazio só em senha
+  > sem dado.
 - **Histórico sem snapshot:** com realocação, fica "Histórico parcial" e as
   colunas novas ficam vazias; sem realocação, é classificado pelo
   `Senha.local_id`.
@@ -8891,6 +8897,161 @@ Suíte completa (85 arquivos) sem falhas.
 `app/relatorios/routes.py` (import); `app/utils/tempo.py`
 (`agora_utc_naive`); testes acima e o novo
 `tests/test_regressao_dashboard_10_86.py`.
+
+---
+
+## 10.87. ADENDO — Tempos por senha: etapa não ocorrida em senha concluída = 00:00:00 (Atendente/Executor/Outros)
+
+> Pedido da gestão das unidades: no relatório "Tempos por senha", as colunas
+> de atendimento que saíam VAZIAS quando a etapa não aconteceu passam a sair
+> 00:00:00. Motivo: na planilha, a mistura de vazio e 00:00:00 confundia a
+> conferência. Decisões aprovadas pelo cliente antes de implementar; as
+> premissas foram conferidas no código (só leitura) antes da mudança.
+
+**Decisões (aprovadas, com o porquê):**
+
+1. **Escopo do zero, opção (a):** só **Atendimento atendente**, **Atendimento
+   executor** e **Outros atendimentos**, e só em senha com Situação
+   **"Concluída"** (`SITUACAO_CONCLUIDA`). A etapa que não ocorreu passa de
+   vazio para 0 s: só recepção → Executor 00:00 (e Outros 00:00); direto na
+   coleta → Atendente 00:00.
+   - **Continuam vazios** (sem dado, não é zero), em TODAS as colunas:
+     "Histórico parcial", "Aguardando (nunca chamada)", "Chamada, não
+     finalizada", "Cancelada" e "Expirada (...)". Mostrar 00:00:00 numa senha
+     nunca atendida seria um dado falso.
+   - As demais colunas (Espera inicial, Espera intermediária, Espera total,
+     Atendimento total, Permanência total, Etapas) **não mudam**. A Espera
+     intermediária já era 00:00 em senha concluída desde o 10.83.
+   - A regra do 10.73 ("Sem dado = VAZIO, nunca 0") continua valendo: o zero
+     aqui não é "sem dado", é "não se aplica" numa senha que tem o dado
+     completo.
+   - **A SOMA não muda:** Atendente + Executor + Outros = Atendimento total
+     (coerência do 10.83), agora sem vazio nenhum na soma.
+   - **Proteção defensiva (aprovada pelo cliente):** além da Situação
+     "Concluída", o zero só é aplicado quando o Atendimento total existe. Sem
+     total não há soma para fechar, e 00:00 nas três colunas seria um dado
+     inventado. Hoje toda senha Concluída tem Atendimento total (concluída =
+     com `fim_atendimento` e fora do histórico parcial, e o `fim_atendimento`
+     sempre fecha um par em `_pares_inicio_fim`), então a checagem não muda
+     nenhum resultado - só impede que um log inconsistente gere zeros.
+2. **Semântica das médias, opção (i):** o resumo do topo (média, mediana,
+   "N de M senhas"), o quadro "Por fila" (10.76) e o cartão "Atendimento
+   executor" do Dashboard (10.86) continuam calculando **só sobre as senhas
+   que passaram pela etapa**. Os números deles não mudam.
+   - Consequência: o zero é de **APRESENTAÇÃO**. `tempos_por_senha()` e
+     `_resumo_tempos` (`app/relatorios/queries.py`) **não mudam** e continuam
+     devolvendo `None`.
+   - O preenchimento é feito na rota (`app/relatorios/routes.py`) por um
+     helper ÚNICO, `zerar_atendimento_nao_aplicavel(linha)`, com as 3 chaves
+     na constante `ATENDIMENTO_ZERO_SE_NAO_OCORREU`. Ele devolve uma CÓPIA da
+     linha (a original fica com `None`) e só zera quando a situação é
+     "Concluída" e o Atendimento total existe (proteção defensiva da decisão
+     1). As linhas apresentadas (`linhas_apresentadas`) alimentam
+     a tela, o PDF, o CSV e o Excel; o resumo, o "Por fila" e a coluna Outros
+     condicional seguem sobre `linhas` (cruas). Nada da regra no template nem
+     no export.
+   - **A MÉDIA do Excel inclui os zeros:** quem tirar a média da coluna
+     direto na planilha obtém um número menor que o do resumo (que segue
+     "N de M"). Explicado numa nota nova da tela e do PDF.
+3. **Formatos: todos.**
+   - Tela/PDF: o filtro `duracao` com 0 dá "00:00" (no lugar de "—").
+   - Excel (aba "Por senha"): duração nativa 0, formato `[h]:mm:ss` (exibe
+     0:00:00), célula NUMÉRICA - não texto nem vazia.
+   - CSV por senha: par "(min)" = "0,00" e "(mm:ss)" = "00:00".
+   - A visão **"Por etapa"** (aba do Excel e CSV por etapa) **não muda**: ela
+     só lista as etapas que existiram.
+
+**Cuidados atendidos:**
+
+- **Coluna "Outros atendimentos" da tela** (10.83: só aparece quando o
+  resultado filtrado tem algum valor): a condição continua avaliada sobre o
+  dado CRU (`None` x valor), antes do zero. Sem isso a coluna apareceria
+  sempre. No PDF ela já aparecia sempre.
+- **Testes de coerência do 10.86** (cartões do Dashboard = resumo do Tempos
+  por senha via "ver detalhes"): passam SEM alteração.
+- **Textos** (tela e PDF, o mesmo template):
+  - A nota do 10.83 "Em unidades sem etapa de coleta no sistema, Atendimento
+    executor fica vazio - está correto" virou: "Em senha concluída, a etapa
+    que não aconteceu aparece como 00:00 (ex.: sem coleta, Atendimento
+    executor = 00:00). Senhas não concluídas ficam em branco."
+  - Nota nova: "As médias do resumo consideram só as senhas que passaram pela
+    etapa (N de M). No Excel, a MÉDIA da coluna inclui os 00:00 e por isso
+    pode ser menor."
+  - Dicas (`DICAS_TEMPOS`) das 3 colunas: acrescentado "00:00 em senha
+    concluída que não passou por essa etapa" (Executor: "...pela coleta").
+- Cor/tema: nada novo, só texto.
+- LGPD: nada muda (sem nome do paciente, sem Observações).
+
+**Testes:** novo `tests/test_regressao_tempos_zero_nao_se_aplica.py` (13
+verificações). Cenário: R1 (só recepção), C1 (direto na coleta), RC
+(recepção → coleta), T1 (só um local do tipo 'outro', em outra unidade) e,
+sem dado, NF (não finalizada), CA (cancelada), EX (expirada), AG (aguardando)
+e HP (histórico parcial).
+- `tempos_por_senha()` continua devolvendo `None` na etapa não ocorrida.
+- Concluídas com 00:00 e sem dado com vazio, nas 3 colunas, na tela
+  ("00:00"/"—"), no PDF real (Chromium, `tests/_pdf_texto.py`: sequência das
+  6 colunas de tempo de cada linha e nenhum "—" seguido de "00:00"), no CSV
+  ("0,00"/"00:00" e vazio) e no Excel (célula numérica no XML cru, valor 0,
+  `[h]:mm:ss`; vazia nas sem dado).
+- Visão por etapa sem linha de 00:00.
+- Soma Atendente + Executor + Outros = Atendimento total nas concluídas.
+- Resumo ("2 de 8 senhas", média e mediana de Atendente/Executor/Atendimento
+  total), quadro "Por fila" (Executor da Recepção continua "—") e JSON/cartão
+  do Dashboard (Executor 2 senhas, 17:30) iguais ao resumo cru.
+- Coluna Outros da tela ausente na unidade sem Outros real (mesmo com os
+  zeros), presente quando há.
+- Notas e dicas novas na tela e no PDF.
+- **Prova por mutação:** com o helper neutralizado (identidade) e com o zero
+  aplicado também às não concluídas, a verificação falha em CADA um dos 4
+  formatos. Uma resposta que nem chega (ex.: PDF que falhou e redirecionou)
+  levanta `RuntimeError`, não `AssertionError`, para não contar como
+  "mutação pega".
+- **3 PDFs no teste, não 5:** um PDF só com todos os cenários (as 9 senhas
+  das 2 unidades), reaproveitado para as notas, e os 2 da prova por mutação,
+  que precisam de PDFs próprios porque a mutação muda o conteúdo.
+- **Causa visível se o PDF falhar:** o 302 de um PDF é o caminho do
+  `FalhaGeracaoPdf` em `_exportar_relatorio`. O teste guarda os logs de erro
+  do app e, num status diferente de 200, a mensagem traz o flash ("Não foi
+  possível gerar o PDF agora...") e o traceback registrado por
+  `logger.exception`. Conferido forçando uma `FalhaGeracaoPdf`. Sem timeout
+  maior e sem retry.
+- Na execução isolada de `test_regressao_duracao.py` durante o
+  desenvolvimento, o PDF voltou 302 uma vez. Não se repetiu na execução
+  seguinte nem na suíte completa, e aquele teste não guarda o log da falha,
+  então a causa não foi capturada. Registrado aqui; não investigado além
+  disso.
+
+Suíte completa local (Windows): 86 arquivos, 0 falhas, em duas execuções
+(antes e depois de reduzir os PDFs do teste novo), sem nenhum 302 de PDF.
+A Action (Linux/DejaVu, 10.78) é conferida depois do push.
+
+Ajustados só no formato, sem perder cobertura:
+- `test_regressao_tempos_por_etapa.py`:
+  - dicas da tela conferidas pelo início do texto novo (com o "00:00 em
+    senha concluída");
+  - nota "...Atendimento executor fica vazio" trocada pela nota nova;
+  - Anápolis (só recepção, concluída): Executor "00:00" no lugar de "—";
+  - CSV da G1: Outros "0,00"/"00:00" no lugar de vazio, e a checagem de
+    vazio passou para a NF (não finalizada);
+  - Excel da G1: Outros = duração 0 no lugar de vazio, e o vazio conferido
+    na NF.
+  - As asserções da consulta (`minutos(...)` com `None`) não mudaram.
+- `test_regressao_tempos_por_senha.py`: linha do CSV da S2 com Atendente e
+  Executor "0,00;00:00" no lugar de ";;" (locais sem tipo: o atendimento cai
+  em Outros).
+- `test_regressao_duracao.py`: sem alteração (não conferia essas colunas).
+
+**Nota de deploy:** `git pull` + restart do `gestfila` (sem migration, sem
+mudança em `requirements.txt`).
+
+**Arquivos alterados:** `app/relatorios/routes.py`
+(`ATENDIMENTO_ZERO_SE_NAO_OCORREU`, `zerar_atendimento_nao_aplicavel`,
+`linhas_apresentadas` na tela/PDF/CSV/Excel, `DICAS_TEMPOS`);
+`app/templates/relatorios/tempos_por_senha.html` (notas); novo
+`tests/test_regressao_tempos_zero_nao_se_aplica.py`;
+`tests/test_regressao_tempos_por_etapa.py`;
+`tests/test_regressao_tempos_por_senha.py`; `BLUEPRINT.md` (este adendo,
+índice e notas cruzadas no 10.73 e no 10.83).
 
 ---
 

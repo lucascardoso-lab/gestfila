@@ -282,10 +282,11 @@ assert cabecalhos(tela) == [
     "Atendimento atendente (mm:ss)", "Atendimento executor (mm:ss)", "Outros atendimentos (mm:ss)",
     "Permanência total (mm:ss)", "Etapas de atendimento", "Operador (finalização)", "Local (finalização)", "Situação",
 ], cabecalhos(tela)
-assert 'title="Tempo com o atendente: cadastro e inclusão dos exames."' in tela
-assert 'title="Tempo na coleta, do início à finalização do procedimento."' in tela
+# Adendo 10.87: dicas e nota passaram a citar o 00:00 da etapa que não ocorreu.
+assert 'title="Tempo com o atendente: cadastro e inclusão dos exames. 00:00 em senha concluída' in tela
+assert 'title="Tempo na coleta, do início à finalização do procedimento. 00:00 em senha concluída' in tela
 assert "A permanência é o tempo real na clínica, da emissão da senha à finalização." in tela
-assert "Em unidades sem etapa de coleta no sistema, Atendimento executor fica vazio" in tela
+assert "Em senha concluída, a etapa que não aconteceu aparece como 00:00" in tela
 assert NOME not in tela
 ok("Tela: 15 colunas (sem Unidade, Espera total e Atendimento total; com Outros, que tem valor), dicas, notas, sem nome")
 
@@ -297,8 +298,9 @@ ok("Resumo: cartões novos com média, mediana e '12 de 14 senhas' (sem o dado f
 
 tela_ana = html.unescape(get(f"{URL}&unidade_id={ids['ana']}").get_data(as_text=True))
 assert "Outros atendimentos (mm:ss)" not in cabecalhos(tela_ana) and len(cabecalhos(tela_ana)) == 14
-assert re.search(r"<td>08:00</td>\s*<td>—</td>\s*<td>11:00</td>", tela_ana), "Anápolis: Atendente 08:00, Executor —, permanência 11:00"
-ok("Unidade sem coleta nem Outros: coluna Outros some da tela (14 colunas) e Executor fica '—'")
+# Adendo 10.87: senha concluída sem coleta -> Executor 00:00 (antes "—").
+assert re.search(r"<td>08:00</td>\s*<td>00:00</td>\s*<td>11:00</td>", tela_ana), "Anápolis: Atendente 08:00, Executor 00:00, permanência 11:00"
+ok("Unidade sem coleta nem Outros: coluna Outros some da tela (14 colunas) e Executor fica 00:00 (10.87)")
 
 tela_area = html.unescape(get(f"{URL}&area_fila_id={ids['area']}").get_data(as_text=True))
 assert "<th>Permanência total - média</th>" in tela_area and "<th>Atendimento executor - mediana</th>" in tela_area
@@ -323,9 +325,13 @@ assert "Unidade" in df.columns
 g1 = df.loc["G1"]
 assert (g1["Atendimento atendente (min)"], g1["Atendimento atendente (mm:ss)"]) == (25.0, "25:00")
 assert (g1["Atendimento executor (mm:ss)"], g1["Permanência total (mm:ss)"]) == ("15:00", "45:00")
-assert pd.isna(g1["Outros atendimentos (min)"]) and df.loc["BS"]["Outros atendimentos (mm:ss)"] == "08:00"
+# Adendo 10.87: G1 concluída sem Outros -> 0,00 / 00:00 (antes vazio); NF segue vazio.
+assert (g1["Outros atendimentos (min)"], g1["Outros atendimentos (mm:ss)"]) == (0.0, "00:00")
+assert df.loc["BS"]["Outros atendimentos (mm:ss)"] == "08:00"
+assert pd.isna(df.loc["NF"]["Outros atendimentos (min)"]) and pd.isna(df.loc["NF"]["Outros atendimentos (mm:ss)"])
 assert NOME not in bruto
-ok("CSV: par (min) + (mm:ss) das 8 colunas de tempo (Outros sempre), Unidade, valores do exemplo, vazio sem dado, sem nome")
+ok("CSV: par (min) + (mm:ss) das 8 colunas de tempo (Outros sempre), Unidade, valores do exemplo, 00:00 na etapa não "
+   "ocorrida da concluída, vazio sem dado, sem nome")
 
 etapas_csv = pd.read_csv(io.StringIO(baixar("csv_etapas").decode("utf-8-sig")), sep=";", decimal=",")
 bs = etapas_csv[etapas_csv["Senha"] == "BS"]
@@ -339,12 +345,15 @@ linhas_xlsx = {r[0].value: r for r in aba.iter_rows(min_row=2)}
 celula = linhas_xlsx["G1"][col["Permanência total (h:mm:ss)"]]
 assert celula.value == timedelta(minutes=45) and celula.number_format == "[h]:mm:ss", (celula.value, celula.number_format)
 assert linhas_xlsx["G1"][col["Atendimento atendente (h:mm:ss)"]].value == timedelta(minutes=25)
-assert linhas_xlsx["G1"][col["Outros atendimentos (h:mm:ss)"]].value is None
+# Adendo 10.87: G1 concluída sem Outros -> duração 0 (antes vazio); NF segue vazio.
+assert linhas_xlsx["G1"][col["Outros atendimentos (h:mm:ss)"]].value == timedelta(0)
+assert linhas_xlsx["NF"][col["Outros atendimentos (h:mm:ss)"]].value is None
 assert "Classificação" in [cel.value for cel in livro["Por etapa"][1]]
 for nome_aba in livro.sheetnames:
     for linha in livro[nome_aba].iter_rows(values_only=True):
         assert NOME not in [str(v) for v in linha], nome_aba
-ok("Excel: duração nativa [h]:mm:ss nas colunas novas (45:00, 25:00, vazio), Classificação na aba Por etapa, sem nome")
+ok("Excel: duração nativa [h]:mm:ss nas colunas novas (45:00, 25:00, 0:00:00 na etapa não ocorrida, vazio sem dado), "
+   "Classificação na aba Por etapa, sem nome")
 
 # PDF = colunas da tela + "Outros atendimentos" SEMPRE (Anápolis não tem Outros:
 # na tela a coluna some, no PDF fica). Cabeçalhos com &shy; - o helper

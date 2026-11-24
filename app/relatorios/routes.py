@@ -26,6 +26,7 @@ from .queries import (
     TEMPOS_POR_SENHA,
     ROTULOS_CLASSE,
     ROTULOS_TIPO_ETAPA,
+    SITUACAO_CONCLUIDA,
     SITUACAO_HISTORICO_PARCIAL,
     TIPO_FECHAMENTO_ROTULOS,
     _resumo_tempos,
@@ -385,9 +386,12 @@ TEMPOS_NA_TELA = ("espera_inicial", "espera_intermediaria", "atendimento_atenden
 TEMPOS_NO_RESUMO = ("espera_inicial", "espera_intermediaria", "espera_total", "atendimento_atendente",
                     "atendimento_executor", "atendimento_total", "permanencia_total")
 DICAS_TEMPOS = {
-    "atendimento_atendente": "Tempo com o atendente: cadastro e inclusão dos exames.",
-    "atendimento_executor": "Tempo na coleta, do início à finalização do procedimento.",
-    "atendimento_outros": "Etapa sem tipo de local (ou do tipo Outro) no cadastro - ex.: Triagem.",
+    "atendimento_atendente": ("Tempo com o atendente: cadastro e inclusão dos exames. "
+                              "00:00 em senha concluída que não passou por essa etapa."),
+    "atendimento_executor": ("Tempo na coleta, do início à finalização do procedimento. "
+                             "00:00 em senha concluída que não passou pela coleta."),
+    "atendimento_outros": ("Etapa sem tipo de local (ou do tipo Outro) no cadastro - ex.: Triagem. "
+                           "00:00 em senha concluída que não passou por essa etapa."),
     "espera_intermediaria": "Esperas entre as etapas: depois de uma realocação ou de \"Aguardar\".",
     "permanencia_total": "Tempo real na clínica, da emissão da senha à finalização.",
 }
@@ -415,6 +419,30 @@ def _colunas_tempo(rotulo, segundos, formato):
     if formato == "xlsx":
         return {f"{rotulo} (h:mm:ss)": _duracao_excel(segundos)}
     return {f"{rotulo} (min)": _minutos(segundos), f"{rotulo} (mm:ss)": formatar_duracao(segundos) or None}
+
+
+# Adendo 10.87: colunas de atendimento em que a etapa que NÃO aconteceu numa
+# senha concluída sai 00:00 (e não vazio) na tela, no PDF, no CSV e no Excel.
+ATENDIMENTO_ZERO_SE_NAO_OCORREU = (
+    "atendimento_atendente_segundos", "atendimento_executor_segundos", "atendimento_outros_segundos",
+)
+
+
+def zerar_atendimento_nao_aplicavel(linha):
+    """Cópia da linha para APRESENTAÇÃO (adendo 10.87): em senha "Concluída",
+    Atendente/Executor/Outros sem segmento daquele tipo viram 0 s - "não se
+    aplica" na conferência da planilha, e a soma das três continua igual ao
+    Atendimento total. Senha sem dado (não concluída, histórico parcial,
+    cancelada, expirada) fica intacta: vazio, nunca 0 (regra do 10.73).
+
+    NÃO altera a linha original: `tempos_por_senha()`, `_resumo_tempos`, o
+    quadro "Por fila", a coluna "Outros" condicional da tela e o Dashboard
+    (10.86) seguem sobre o dado cru (None), e as médias continuam só sobre as
+    senhas que passaram pela etapa ("N de M"). Única fonte da regra para os
+    quatro formatos - nada de repeti-la no template ou na exportação."""
+    if linha["situacao"] != SITUACAO_CONCLUIDA or linha["atendimento_total_segundos"] is None:
+        return linha
+    return {**linha, **{chave: 0.0 for chave in ATENDIMENTO_ZERO_SE_NAO_OCORREU if linha[chave] is None}}
 
 
 def _resumo_por_fila(linhas, mapas):
@@ -459,9 +487,14 @@ def tempos_por_senha_view():
         l["dica_situacao"] = DICAS_SITUACAO[l["situacao"]]
         l["area"] = rotulo_area(mapas, l["area_id"])
 
+    # Adendo 10.87: as linhas MOSTRADAS (tela, PDF, CSV, Excel) têm 00:00 na
+    # etapa que não ocorreu em senha concluída; resumo, "Por fila" e a coluna
+    # Outros condicional continuam sobre `linhas` (dado cru, None).
+    linhas_apresentadas = [zerar_atendimento_nao_aplicavel(l) for l in linhas]
+
     def colunas_por_senha(formato):
         colunas = []
-        for l in linhas:
+        for l in linhas_apresentadas:
             linha = {"Senha": l["codigo"], "Emissão": l["emissao"], "Unidade": l["unidade"],
                      "Fila inicial": mapas.filas_nome.get(l["fila_inicial_id"]),
                      "Fila final": mapas.filas_nome.get(l["fila_final_id"]),
@@ -502,7 +535,8 @@ def tempos_por_senha_view():
     pdf_omitido = len(linhas) > LIMITE_LINHAS_PDF
     # Adendo 10.83: na tela, "Outros atendimentos" só aparece quando o resultado
     # FILTRADO (não só a página) tiver algum valor; no PDF (colunas da tela +
-    # Outros), no CSV e no Excel, sempre.
+    # Outros), no CSV e no Excel, sempre. Avaliado sobre o dado CRU, antes do
+    # zero do 10.87 - senão a coluna apareceria sempre.
     mostrar_outros = any(l["atendimento_outros_segundos"] is not None for l in linhas)
     nomes = dict((chave, rotulo) for rotulo, chave in TEMPOS_POR_SENHA)
 
@@ -529,7 +563,7 @@ def tempos_por_senha_view():
         abas_excel={"Por senha": colunas_por_senha("xlsx"), "Por etapa": colunas_por_etapa("xlsx")},
         csv_pt_br=True, colunas_duracao=colunas_duracao, colunas_inteiras=("Etapas de atendimento", "Etapa"),
         csvs_extras={"csv_etapas": (colunas_por_etapa("csv"), "tempos_por_etapa", "tempos_por_senha_etapas")},
-        contexto_pdf={**contexto, "linhas_exibidas": [] if pdf_omitido else linhas},
+        contexto_pdf={**contexto, "linhas_exibidas": [] if pdf_omitido else linhas_apresentadas},
     )
     if resposta_exportacao is not None:
         return resposta_exportacao
@@ -537,6 +571,6 @@ def tempos_por_senha_view():
     inicio = (pagina - 1) * LINHAS_POR_PAGINA
     return render_template(
         "relatorios/tempos_por_senha.html", empresa=empresa, filtros=filtros, linhas=linhas,
-        linhas_exibidas=linhas[inicio:inicio + LINHAS_POR_PAGINA], opcoes=opcoes,
+        linhas_exibidas=linhas_apresentadas[inicio:inicio + LINHAS_POR_PAGINA], opcoes=opcoes,
         querystring=filtros_para_querystring(filtros, empresa), **contexto,
     )

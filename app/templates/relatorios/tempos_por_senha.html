@@ -12,7 +12,10 @@
 
 {# Relatório por senha (adendo 10.73). Tempos em mm:ss / h:mm:ss pelo filtro
    `duracao` (adendo 10.75); sem dado = "—" na tela e célula vazia na
-   exportação, nunca 00:00. Sem nome do paciente (LGPD, mesmo critério do 10.67). #}
+   exportação, nunca 00:00. Exceção do 10.87 (feita na rota, por
+   `zerar_atendimento_nao_aplicavel`, não aqui): em senha concluída, a etapa de
+   atendimento que não ocorreu chega como 0 e sai 00:00. Sem nome do paciente
+   (LGPD, mesmo critério do 10.67). #}
 
 {% block conteudo %}
   <h1>Tempos por senha</h1>
@@ -55,7 +58,13 @@
       Cada etapa de atendimento é classificada pelo Tipo do local no cadastro de Locais: Atendente
       (cadastro e inclusão dos exames), Executor (coleta) ou, sem tipo ou do tipo Outro (ex.: Triagem),
       Outros atendimentos. É o tipo ATUAL do local: corrigir o cadastro muda também os períodos passados.
-      Em unidades sem etapa de coleta no sistema, Atendimento executor fica vazio - está correto.
+      Em senha concluída, a etapa que não aconteceu aparece como 00:00 (ex.: sem coleta, Atendimento
+      executor = 00:00). Senhas não concluídas ficam em branco.
+    </p>
+    {# Adendo 10.87 - o 00:00 é só de apresentação; o resumo segue "N de M". #}
+    <p class="aviso">
+      As médias do resumo consideram só as senhas que passaram pela etapa (N de M). No Excel, a MÉDIA da
+      coluna inclui os 00:00 e por isso pode ser menor.
     </p>
     {% if filtros.area_fila_id %}
       {# Semântica do filtro de Área (adendo 10.76) - igual à do filtro de Fila. #}
