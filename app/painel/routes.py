@@ -1,9 +1,10 @@
-from flask import redirect, render_template, url_for
+from flask import abort, jsonify, redirect, render_template, url_for
 
 from app.extensions import limiter
 from app.models import Tv
 
 from . import painel_bp
+from .tempo_espera import texto_espera_tv
 
 
 @painel_bp.route("/tv/<int:tv_id>")
@@ -29,3 +30,19 @@ def exibir_tv(slug):
         return render_template("painel/indisponivel.html", tv=tv)
 
     return render_template("painel/tv.html", tv=tv, empresa=tv.empresa)
+
+
+@painel_bp.route("/tv/<slug>/espera")
+@limiter.limit("60 per minute")
+def tempo_espera_tv(slug):
+    """Tempo de espera do rodapé da TV (adendo 10.88) - público como a própria
+    TV, consultado por fetch a cada 2 min (sem Socket.IO). Responde só
+    {"texto": "~15 min"} ou {"texto": null}: nenhum código, nome, fila ou N.
+    TV inexistente ou inativa -> 404; opção desligada -> null. 60/min por IP:
+    as TVs de uma clínica saem pelo mesmo IP (NAT)."""
+    tv = Tv.query.filter_by(slug=slug).first()
+    if tv is None or not tv.ativo:
+        abort(404)
+    resposta = jsonify({"texto": texto_espera_tv(tv)})
+    resposta.headers["Cache-Control"] = "no-store"
+    return resposta

@@ -54,6 +54,14 @@
       <input type="number" id="volume" name="volume" min="0" max="100"
              value="{{ valores.volume if valores is not none and valores.volume is not none else (tv.volume if tv else 100) }}">
 
+      {# Adendo 10.88 #}
+      {% set tempo_espera_sel = valores.mostra_tempo_espera if valores else (tv.mostra_tempo_espera if tv else False) %}
+      <label>
+        <input type="checkbox" name="mostra_tempo_espera" {{ 'checked' if tempo_espera_sel else '' }}>
+        Mostrar tempo de espera no rodapé
+      </label>
+      <p class="subtitulo" style="margin:.35rem 0 .5rem;">Mediana da espera até a 1ª chamada na última hora, nas filas desta TV (some quando há poucas senhas chamadas na hora). Com a opção ligada, o rodapé desta TV deixa de mostrar "N chamadas hoje" (a espera ocupa o lugar dele). Não ligue em TV que exibe só filas alimentadas por realocação (ex.: só Coleta/Triagem) - ali nunca haverá número.</p>
+
       <label>Filas exibidas nesta TV</label>
       <div class="checkboxes">
         {% for fila in filas %}

@@ -433,6 +433,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.85 | Recado "Observações" no bloco de cima da tela de Atendimento (etapa atual -> próxima), salvo com o Nome; edição por linha removida |
 | 10.86 | Dashboard por senha: filtro De/Até (até 31 dias) e Área, tempos do Tempos por senha, Prioritários x Normal, acima do tempo máximo |
 | 10.87 | Tempos por senha: etapa não ocorrida em senha concluída = 00:00:00 (Atendente/Executor/Outros), só na apresentação |
+| 10.88 | Tempo de espera no rodapé do painel de TV: mediana da Espera inicial da última hora, opção por TV (desligada por padrão) |
 
 ---
 
@@ -9055,6 +9056,209 @@ mudança em `requirements.txt`).
 
 ---
 
+## 10.88. ADENDO — Tempo de espera no rodapé do painel de TV (mediana da Espera inicial da última hora, opção por TV)
+
+> Pedido: mostrar ao paciente, no painel de TV, o tempo de espera - o
+> "rodapé com indicadores (ex.: tempo médio de espera)" previsto na seção 6
+> desde o início. Decidido pelo cliente: ESPERA, não tempo de atendimento
+> (é o que o paciente sentado diante da TV quer saber). Investigação (FASE 1)
+> relatada e desenho aprovado antes de implementar.
+
+**Métrica: Espera inicial** (emissão -> 1ª chamada), a MESMA da coluna do
+Tempos por senha (10.73) e do cartão do Dashboard (10.86):
+
+- A Coleta não tem TV própria - usa a mesma TV da Recepção. A espera por
+  SEGMENTO (10.66) misturaria a espera da Recepção com a da Coleta num número
+  sem significado claro, e dois números não cabem no rodapé.
+- Os segmentos são os de `_segmentos_espera_por_senha`, sem pareamento novo:
+  só os que abrem em 'gerada' (= a Espera inicial de `tempos_por_senha`, que é
+  sempre o 1º segmento da senha). Não chama `tempos_por_senha` inteiro, que
+  custa 5 a 7 vezes mais (FASE 1, SQLite local: 12-18 ms x 80-106 ms com 515
+  senhas/dia; 79-135 ms x ~590 ms com 3.075).
+- **Fila do segmento, não a fila atual:** o filtro de Fila dos relatórios
+  (`_senhas_filtradas`) usa a fila ATUAL da senha - uma senha emitida na
+  Recepção e realocada para a Coleta cairia na TV da Coleta. Aqui conta a
+  fila do segmento (snapshot da chamada = onde o paciente esperou). Filas da
+  TV = `tv.filas` (`tv_filas`, o mesmo que a TV usa para as chamadas), nunca
+  `Fila.tv_id`; sempre filtrado por `tv.empresa_id`.
+- Consequência: fila alimentada só por realocação (ex.: Coleta, Triagem) não
+  tem Espera inicial. TV que exibe só filas assim nunca teria número - por
+  isso a opção é por TV e desligada por padrão.
+
+**Diferença em relação ao cartão do Dashboard:** mesma métrica e mesmos
+segundos; a janela é outra - o Dashboard mostra média e mediana do período
+filtrado (dia inteiro ou mais); a TV mostra a mediana da última hora.
+
+**Janela: mediana da última hora.** Segmentos FECHADOS (chamada) em
+[max(agora - 60 min, início do dia da clínica), agora], só de senhas emitidas
+hoje no dia da clínica (`janela_dia_clinica_em_utc`/`agora_utc_naive`, 10.74) -
+a senha da noite anterior não entra. Comparação da FASE 1 (dia simulado com
+as funções reais; Recepção + Resultado; minutos):
+
+| Hora | (a) média do dia | (b) média 1h | (c) mediana 1h | N 1h |
+|---|---|---|---|---|
+| 07:30 (abertura) | 0,0 | 0,0 | 0,0 | 17 |
+| 10:00 (pico) | 6,3 | 12,6 | 14,2 | 67 |
+| 11:00 | 9,2 | 15,9 | 17,4 | 74 |
+| 13:00 (calmo) | 8,1 | 0,0 | 0,0 | 19 |
+| 17:00 | 6,1 | 8,1 | 0,0 | 26 |
+| 18:00 (fim) | 5,9 | 0,1 | 0,0 | 12 |
+
+(a) arrasta o dia inteiro (no fim do dia mostra ~6 min com a espera real em
+zero; no banco local uma senha chamada 20 dias depois levou a média do dia de
+uma TV a 6.928 min); (b) acompanha o momento, mas uma senha esquecida 140 min
+levou as 17h de 0,0 para 9,5 min; (c) acompanha e não se mexe com o extremo.
+Limitação das três: só contam senhas JÁ chamadas (quem está esperando agora
+ainda não entra).
+
+**N mínimo:** `MINIMO_ESPERAS_TV = 5` (`app/painel/tempo_espera.py`) - com
+menos esperas na janela, nenhum número (escondido). Com 5 valores, um extremo
+não move a mediana. A constante fica no topo do módulo para calibrar com os
+dados de produção (Q4 da FASE 1, `docs/consultas-producao/espera_tv_fase1.sql`,
+fora do repositório).
+
+**Texto** (`texto_tempo_espera`, a partir dos segundos inteiros de
+`segundos_arredondados`, meio para cima como nos relatórios - 10.75):
+abaixo de 5:00 "menos de 5 min"; de 5:00 a 60:00 "~N min" com N no múltiplo
+de 5 mais próximo, meio para cima (7:29 -> "~5 min", 7:30 -> "~10 min",
+60:00 -> "~60 min"); acima de 60:00 "mais de 1 hora". Na TV: "Espera:
+~15 min" / "Espera: menos de 5 min" / "Espera: mais de 1 hora" (rótulo
+neutro e curto: o número é mediana, não média; ver o layout abaixo).
+
+**Cadastro:** coluna nova `tvs.mostra_tempo_espera` (BOOLEAN NOT NULL,
+`server_default '0'`, migration `f6c1d8e3a2b9`, com downgrade; ciclo
+upgrade/downgrade/upgrade testado no MySQL local, as 11 TVs preservadas;
+`flask db check` sem diferença entre model e banco). Checkbox "Mostrar tempo
+de espera no rodapé" no formulário de TV, com a ajuda "mediana da espera até
+a 1ª chamada na última hora, nas filas desta TV; com a opção ligada, o
+rodapé deixa de mostrar 'N chamadas hoje'; não ligar em TV que exibe só
+filas alimentadas por realocação".
+
+**Endpoint** `GET /painel/tv/<slug>/espera` (`painel.tempo_espera_tv`), sem
+login como a própria TV:
+
+- Resposta só `{"texto": "~15 min"}` ou `{"texto": null}` (sem amostra ou
+  opção desligada), `Cache-Control: no-store`. TV inexistente ou inativa ->
+  404.
+- Rate limit **60/min por IP** (Flask-Limiter, 10.25): as TVs de uma clínica
+  saem pelo mesmo IP (NAT); a página da TV continua com 30/min.
+- **Cache em memória de 60 s** por escopo (empresa + unidades das filas da TV
+  + dia), recortado por TV: várias TVs da mesma unidade calculam uma vez por
+  minuto. Vale por processo: com mais de 1 worker, cada um tem o seu (só
+  recalcula mais vezes; o número é o mesmo). O contador do rate limit também
+  é em memória (seção 11).
+
+**Painel** (`painel/tv.html`, `painel/_layout.html`):
+
+- **Com a opção ligada, "Espera: ..." SUBSTITUI o contador "N chamadas
+  hoje"**: rodapé com 3 itens (frase | Espera | Última atualização). O
+  `<span id="tempo-espera" hidden>` tem regra própria
+  `#tempo-espera[hidden] { display: none; }` (padrão 10.53), herda a fonte
+  `clamp()` (10.30) e a cor `--painel-texto-secundario` do rodapé (10.56) -
+  nenhum estilo novo. Enquanto a espera está escondida (null, menos de 5
+  esperas, 10 min sem resposta), o rodapé fica com 2 itens: o contador NÃO
+  volta, para o item não ficar alternando.
+- O JS do contador tem guarda de null (`if (elContador)`): a contagem
+  (`totalChamadas`) continua sendo mantida e decide a mensagem da lista
+  vazia do 10.27 ("Aguardando chamadas…" x "Nenhuma chamada anterior
+  hoje.") com ou sem o contador na tela.
+- **Opção desligada: rodapé idêntico ao de antes**, com o contador; nem o
+  elemento nem o fetch existem no HTML.
+- fetch ao abrir e a cada 2 min (timeout de 30 s); texto via `textContent`;
+  `{"texto": null}` esconde; mais de 10 min sem resposta válida esconde.
+- **Sem evento novo de Socket.IO** (houve "Too many packets in payload" na
+  reconexão em massa depois de um restart): o payload de `chamada`/`entrou`
+  e o histórico não mudam (10.13/10.27/10.70/10.84), nem o áudio/fila de voz
+  (10.58/10.81). `painel/indisponivel.html` não muda (não tem rodapé).
+- **Layout medido no Chromium** - folga livre do rodapé (largura que sobra
+  depois dos itens), pior caso ("8888 chamadas hoje", o texto de espera mais
+  largo e "Última atualização: 18:58:58"), temas claro e escuro (mesma
+  largura), fonte padrão e fonte larga forçada (Verdana no Windows/DejaVu
+  Sans no Linux, como no 10.84):
+
+  | Rodapé | 1366 padrão | 1366 larga | 1920 padrão | 1920 larga |
+  |---|---|---|---|---|
+  | Antes do 10.88 (3 itens, com contador) | 354 px | 183 px | 748 px | 547 px |
+  | 1ª versão: 4º item "Tempo de espera: ..." (*) | 23 px | não medida | 361 px | não medida |
+  | 2ª versão: 4º item "Espera: ..." | 125 px | **quebra linha** | 480 px | 232 px |
+  | **Final: "Espera: ..." no lugar do contador** | **323 px** | **143 px** | **712 px** | **501 px** |
+
+  (*) medida com "1234 chamadas hoje" e "Última atualização: 14:32:05", só
+  com a fonte padrão; com a fonte larga não foi medida (o "Espera:", mais
+  curto, já quebrava).
+
+  **Motivo das trocas** (lição do 10.84 - fonte larga): com o rótulo
+  "Tempo de espera:" sobravam 23 px em 1366x768, pouco para a variação de
+  fonte/zoom das TVs; com "Espera:" e 4 itens, a fonte larga quebrava o
+  rodapé em duas linhas em 1366x768 (52 -> 79 px de altura). Com o item no
+  lugar do contador, a **folga mínima é 143 px** (1366x768, fonte larga) -
+  o teste exige pelo menos 40 px em todas as combinações. Contraste 7,1:1
+  (escuro) e 5,5:1 (claro), a mesma cor dos outros itens.
+
+**LGPD:** só um agregado arredondado da TV; nenhum código, nome, fila ou N
+sai do servidor. O slug não é controle de acesso (`app/utils/slug.py`) - quem
+o tem vê o mesmo que a própria TV já mostra em público.
+
+**Testes:** novo `tests/test_regressao_tempo_espera_tv.py` (relógio simulado
+em 08/10/2026, Brasília):
+
+- texto e limites (4:59, 5:00, 7:29, 7:30, 60:00, 60:01; 299,5 s -> "~5 min");
+- 00:30: senha emitida às 23:50 da noite anterior (02:50 UTC, mesmo dia UTC)
+  fora, as 5 de hoje dentro; 10:00 (pico) com 10 esperas e mediana 25:00;
+  13:00 com 4 esperas esconde, 13:15 com 5 mostra; 19:00 sem chamadas na
+  hora -> None;
+- extremo de 140 min não move a mediana;
+- as mesmas 24 esperas da coluna Espera inicial do Tempos por senha no dia;
+  senha realocada REC -> COL conta na REC (fila inicial), e a TV só da Coleta
+  fica sem número;
+- isolamento entre empresas (inclusive fila de outra empresa pendurada numa
+  TV), opção desligada -> None; endpoint só com a chave "texto", null, 404 de
+  TV inativa e slug inexistente; HTML sem elemento nem fetch com a opção
+  desligada e em `indisponivel.html`; opção ligada sem o contador no HTML e
+  opção desligada com o rodapé idêntico ao de antes (literal);
+- cache: 3 TVs do mesmo escopo = 1 cálculo, reaproveitado aos 59 s,
+  recalculado aos 61 s, outra empresa com escopo próprio;
+- payload de `entrou` (4 chaves, mesmo histórico) igual com a opção ligada e
+  desligada; `_payload_chamada` com as chaves de sempre;
+- **prova por mutação:** filtrar pela fila atual da senha e trocar mediana por
+  média derrubam o teste;
+- Chromium: fetch ao abrir e a cada 2 min, null esconde, falhas mantêm o
+  último valor até 10 min e escondem depois (relógio do navegador
+  controlado); sem fetch com a opção desligada; chamadas ao vivo pelo
+  WebSocket atualizam card, lista e "Aguardando chamadas…"/"Nenhuma chamada
+  anterior hoje." sem erro de JS, sem o contador (opção ligada) e com ele
+  (desligada, "2 chamadas hoje"); layout com folga >= 40 px em 1366x768 e
+  1920x1080, claro e escuro, fonte padrão e larga;
+- admin: checkbox no formulário, editar liga/desliga, nova TV grava;
+- rate limit: 60 aceitas, a 61ª recebe 429.
+
+`tests/test_regressao_hidden_display_sweep.py` ganhou a verificação de
+`#tempo-espera[hidden] { display: none; }` no painel de TV.
+
+Suíte completa local (Windows): 87 arquivos, 0 falhas, nenhum 302 de PDF -
+rodada antes e de novo depois da troca do contador pelo "Espera:" (sem
+nenhum ajuste em `test_regressao_painel_tv_redesign.py` ou
+`test_regressao_tv_historico.py`). A Action (Linux) é conferida depois do
+push.
+
+**Nota de deploy:** `git pull`, `flask db upgrade` (migration nova
+`f6c1d8e3a2b9`), restart do `gestfila`; depois ligar a opção pelo admin
+(Editar TV) só nas TVs escolhidas - TV que exibe só filas alimentadas por
+realocação fica desligada.
+
+**Arquivos alterados:** `app/models/tv.py`;
+`migrations/versions/f6c1d8e3a2b9_tv_mostra_tempo_espera.py`; novo
+`app/painel/tempo_espera.py`; `app/painel/routes.py` (endpoint);
+`app/admin/tvs.py` e `app/templates/admin/tvs/form.html` (checkbox);
+`app/templates/painel/tv.html` (span no lugar do contador, guarda de
+null do contador e fetch) e
+`app/templates/painel/_layout.html` (`[hidden]`); novo
+`tests/test_regressao_tempo_espera_tv.py`;
+`tests/test_regressao_hidden_display_sweep.py`; `BLUEPRINT.md` (este adendo,
+índice e seção 11).
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - **Trecho entre a chamada e o "Aguardar" não é medido** (registrado no
@@ -9226,3 +9430,20 @@ mudança em `requirements.txt`).
   X dias, mantendo a senha e os logs para os relatórios). Hoje nenhum dos
   dois é expurgado. Até lá, o recado fica restrito às telas de operador
   autenticado (nunca TV, totem, cupom ou relatório).
+- **Botão de tema cobre "Última atualização" no painel de TV** (registrado
+  no 10.88, sem correção): o alternador flutuante de tema
+  (`_alternador_tema.html`, `flutuante=True`, canto inferior direito) fica
+  por cima do fim do texto "Última atualização" do rodapé em 1366x768 e
+  1920x1080, nos dois temas (prints do Chromium da FASE 1).
+- **"GEST" do logo invisível no tema claro da TV** (registrado no 10.88, sem
+  correção): o cabeçalho do painel usa `gf-logo--claro` (texto branco),
+  pensado para o fundo escuro; no tema claro (`--painel-fundo-header`
+  branco) só o "FILA" aparece.
+- **Fila com `tv_id` preenchido e ausente de `tv_filas`** (registrado no
+  10.88, sem correção): no banco local, "DR Rodrigo Brum" tem `tv_id` da TV
+  Térreo mas não está em `tv_filas` (Q1c da FASE 1) - a TV não a exibe,
+  embora o atalho de cadastro diga que sim. Verificar se o cadastro de Fila
+  (`_sincronizar_tv_atalho`, `app/admin/filas.py`, 10.1) deixa de
+  sincronizar `tv_filas` em algum caminho (ex.: a edição da TV pelo
+  formulário de TV regrava `tv.filas` sem olhar `Fila.tv_id`) e rodar a Q1c
+  em produção.

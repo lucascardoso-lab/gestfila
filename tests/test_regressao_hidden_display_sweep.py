@@ -163,5 +163,22 @@ for nome_tela, texto_tela in [("painel_fila", texto_fila), ("painel_local", text
     assert "display: none" in regra, nome_tela
     ok(f"{nome_tela}: regra própria '.selecionado-redirecionar[hidden]' (display: none) presente (widget de busca incluído nas duas telas)")
 
+# ===========================================================================
+# 3) #tempo-espera[hidden] { display: none; } no painel de TV (adendo 10.88) -
+#    o 4º item do rodapé começa escondido e o JS só alterna `hidden`.
+# ===========================================================================
+from app.models import Tv  # noqa: E402
+
+with app.app_context():
+    db.session.add(Tv(empresa_id=ids["empresa"], unidade_id=ids["unidade"], nome="TV Sweep",
+                      slug="tv-sweep", mostra_tempo_espera=True))
+    db.session.commit()
+
+texto_tv = app.test_client().get("/painel/tv/tv-sweep").get_data(as_text=True)
+assert '<span id="tempo-espera" hidden>' in texto_tv
+regra = corpo_da_regra_css(texto_tv, "#tempo-espera[hidden]")
+assert "display: none" in regra
+ok("painel/_layout.html: regra própria '#tempo-espera[hidden] { display: none; }' presente (tempo de espera no rodapé da TV)")
+
 print()
 print(f"TODOS OS {len(passos)} TESTES DA VARREDURA DE HIDDEN/DISPLAY PASSARAM")

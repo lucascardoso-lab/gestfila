@@ -30,6 +30,12 @@ class Tv(db.Model):
     # (não global) de propósito: TVs mais novas não precisam do fallback.
     usa_audio_pregravado = db.Column(db.Boolean, default=False, nullable=False)
 
+    # Adendo 10.88: "Tempo de espera" no rodapé (mediana da Espera inicial da
+    # última hora, app/painel/tempo_espera.py). Desligado por padrão - o admin
+    # liga só nas TVs cujas filas recebem senhas pela emissão (numa TV só de
+    # filas alimentadas por realocação nunca haveria número).
+    mostra_tempo_espera = db.Column(db.Boolean, default=False, nullable=False)
+
     empresa = db.relationship("Empresa")
     unidade = db.relationship("Unidade")
     filas = db.relationship("Fila", secondary=tv_filas, back_populates="tvs")

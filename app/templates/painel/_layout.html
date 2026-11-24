@@ -130,6 +130,10 @@
       color: var(--painel-texto-secundario); flex-shrink: 0; border-top: 1px solid var(--painel-fundo-elemento);
     }
     .rodape-mensagem { font-style: italic; }
+    /* Adendo 10.88: "Espera: ..." no rodapé (no lugar do contador), só nas TVs com a
+       opção ligada - herda a fonte clamp() e a cor --painel-texto-secundario
+       do rodapé (10.30/10.56). [hidden] próprio (padrão 10.53). */
+    #tempo-espera[hidden] { display: none; }
 
     .centro {
       flex: 1; display: flex; align-items: center; justify-content: center; text-align: center;

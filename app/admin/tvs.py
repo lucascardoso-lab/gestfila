@@ -67,6 +67,7 @@ def nova_tv():
             som_ativo=dados["som_ativo"],
             volume=dados["volume"],
             usa_audio_pregravado=dados["usa_audio_pregravado"],
+            mostra_tempo_espera=dados["mostra_tempo_espera"],
             slug=slug,
         )
         # nunca confiar no id de fila vindo direto do formulário - filtra contra a lista pré-carregada,
@@ -107,6 +108,7 @@ def editar_tv(tv_id):
         tv.som_ativo = dados["som_ativo"]
         tv.volume = dados["volume"]
         tv.usa_audio_pregravado = dados["usa_audio_pregravado"]
+        tv.mostra_tempo_espera = dados["mostra_tempo_espera"]
         tv.filas = [f for f in filas if f.id in dados["fila_ids"]]
         db.session.commit()
         flash("TV atualizada.", "info")
@@ -161,6 +163,7 @@ def _ler_formulario():
         "som_ativo": request.form.get("som_ativo") == "on",
         "volume": request.form.get("volume", type=int),
         "usa_audio_pregravado": request.form.get("usa_audio_pregravado") == "on",
+        "mostra_tempo_espera": request.form.get("mostra_tempo_espera") == "on",  # adendo 10.88
     }
 
 

@@ -44,7 +44,17 @@
 
     <footer>
       <span class="rodape-mensagem">Tenha em mãos seu documento e sua carteirinha.</span>
-      <span id="contador-chamadas">0 chamadas hoje</span>
+      {# Adendo 10.88: com a opção da TV ligada, "Espera: ..." SUBSTITUI o
+         contador "N chamadas hoje" (com fonte larga em 1366x768 os 4 itens
+         quebravam linha). Começa escondido; o JS mostra quando o endpoint
+         devolve um texto - escondido, o rodapé fica com 2 itens (o contador
+         não volta, para o item não ficar alternando). Desligada: rodapé de
+         sempre, sem o elemento nem o fetch. #}
+      {% if tv.mostra_tempo_espera %}
+        <span id="tempo-espera" hidden></span>
+      {% else %}
+        <span id="contador-chamadas">0 chamadas hoje</span>
+      {% endif %}
       <span id="ultima-atualizacao">Última atualização: —</span>
     </footer>
   </div>
@@ -225,6 +235,8 @@
       const elChamadaLocal = document.getElementById("chamada-local");
       const elListaUltimas = document.getElementById("lista-ultimas");
       const elVazio = document.getElementById("mensagem-vazio");
+      // null nas TVs com "Espera" no rodapé (adendo 10.88) - a contagem
+      // (totalChamadas) continua valendo para a mensagem da lista vazia.
       const elContador = document.getElementById("contador-chamadas");
       const elAtualizacao = document.getElementById("ultima-atualizacao");
 
@@ -1039,7 +1051,7 @@
         dispararAnimacaoDestaque();
 
         totalChamadas += 1;
-        elContador.textContent = `${totalChamadas} chamada${totalChamadas === 1 ? "" : "s"} hoje`;
+        if (elContador) elContador.textContent = `${totalChamadas} chamada${totalChamadas === 1 ? "" : "s"} hoje`;
         elAtualizacao.textContent = `Última atualização: ${new Date().toLocaleTimeString("pt-BR")}`;
         atualizarMensagemListaVazia();
       }
@@ -1067,7 +1079,7 @@
         }
 
         totalChamadas = (dados && dados.total_hoje) || 0;
-        elContador.textContent = `${totalChamadas} chamada${totalChamadas === 1 ? "" : "s"} hoje`;
+        if (elContador) elContador.textContent = `${totalChamadas} chamada${totalChamadas === 1 ? "" : "s"} hoje`;
         atualizarMensagemListaVazia();
 
         // Correção do Bloco 0 (causa raiz diferente da regressão presumida -
@@ -1246,6 +1258,51 @@
         logarOverlayDebugVoz("[TTS] evento 'chamada' recebido do servidor: " + JSON.stringify(dados));
         enfileirarChamada(dados);
       });
+
+      {% if tv.mostra_tempo_espera %}
+      // Adendo 10.88: "Espera: ~15 min" no rodapé - fetch ao abrir e a cada
+      // 2 min (sem Socket.IO: o payload de chamada/entrou não muda). Resposta
+      // {"texto": null} esconde; mais de 10 min sem resposta válida esconde.
+      (function () {
+        const elTempoEspera = document.getElementById("tempo-espera");
+        const URL_TEMPO_ESPERA = {{ url_for('painel.tempo_espera_tv', slug=tv.slug) | tojson }};
+        const TEMPO_ESPERA_INTERVALO_MS = 2 * 60 * 1000;
+        const TEMPO_ESPERA_VALIDADE_MS = 10 * 60 * 1000;
+        const TEMPO_ESPERA_TIMEOUT_MS = 30 * 1000;
+        let ultimaRespostaValida = 0;
+
+        function esconderSeVencido() {
+          if (Date.now() - ultimaRespostaValida > TEMPO_ESPERA_VALIDADE_MS) elTempoEspera.hidden = true;
+        }
+
+        async function atualizarTempoEspera() {
+          esconderSeVencido();
+          const controle = new AbortController();
+          const limite = setTimeout(() => controle.abort(), TEMPO_ESPERA_TIMEOUT_MS);
+          try {
+            const resp = await fetch(URL_TEMPO_ESPERA, { cache: "no-store", signal: controle.signal });
+            if (!resp.ok) return;
+            const dados = await resp.json();
+            if (!dados || !Object.prototype.hasOwnProperty.call(dados, "texto")) return;
+            ultimaRespostaValida = Date.now();
+            if (typeof dados.texto === "string" && dados.texto) {
+              elTempoEspera.textContent = "Espera: " + dados.texto;
+              elTempoEspera.hidden = false;
+            } else {
+              elTempoEspera.hidden = true;
+            }
+          } catch (erro) {
+            // rede/timeout: mantém o último valor até vencer os 10 min
+          } finally {
+            clearTimeout(limite);
+            esconderSeVencido();
+          }
+        }
+
+        atualizarTempoEspera();
+        setInterval(atualizarTempoEspera, TEMPO_ESPERA_INTERVALO_MS);
+      })();
+      {% endif %}
 
       // Smart TVs ficam com o navegador aberto por dias - recarregar 1x/dia evita
       // memory leak acumulado na sessão do navegador (seção 8 do BLUEPRINT).
