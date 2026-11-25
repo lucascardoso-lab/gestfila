@@ -28,6 +28,14 @@ def create_app(config_name=None):
     limiter.init_app(app)
     socketio.init_app(app)
 
+    # Adendo 10.89: diagnóstico do POST do long-polling (sid, tela e eventos de
+    # um POST com pacotes demais), por fora do middleware do Flask-SocketIO.
+    from .middleware.diagnostico_socketio import DiagnosticoPostSocketIO
+
+    app.wsgi_app = DiagnosticoPostSocketIO(
+        app.wsgi_app, app.logger, max_bytes=socketio.server.eio.max_http_buffer_size,
+    )
+
     login_manager.login_view = "auth.login"
     login_manager.login_message = "Faça login para continuar."
     login_manager.login_message_category = "info"

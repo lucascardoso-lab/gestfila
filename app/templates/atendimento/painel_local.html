@@ -364,12 +364,15 @@
       const socket = io("/painel", { reconnection: true, reconnectionDelay: 1000, reconnectionDelayMax: 10000 });
       window.__socketAtendimento = socket;
 
-      // Entra em UMA sala por fila do rodízio (mesmo handler entrar_fila da tela
-      // por-fila, chamado várias vezes na mesma conexão) - cada sala é distinta, então
-      // eventos de filas diferentes nunca se duplicam; mesmo duas chegando quase juntas
-      // só disparam dois refetches idempotentes do mesmo JSON agregado (Fase 10.8-E).
+      // Entra em UMA sala por fila do rodízio - cada sala é distinta, então eventos
+      // de filas diferentes nunca se duplicam; mesmo duas chegando quase juntas só
+      // disparam dois refetches idempotentes do mesmo JSON agregado (Fase 10.8-E).
+      // Adendo 10.89: UM 'entrar_filas' com a lista (não N 'entrar_fila') - no
+      // long-polling o 1º emit saía sozinho e os outros N-1 iam juntos no POST
+      // seguinte; com 18 filas ou mais o servidor recusava esse POST em silêncio. A cada 'connect' (inclusive
+      // reconexão), porque o servidor esquece as salas de uma conexão encerrada.
       socket.on("connect", () => {
-        FILA_IDS.forEach((filaId) => socket.emit("entrar_fila", { fila_id: filaId }));
+        socket.emit("entrar_filas", { fila_ids: FILA_IDS });
       });
       socket.on("fila_atualizada", () => atualizarDados());
     })();

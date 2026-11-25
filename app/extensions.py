@@ -23,3 +23,16 @@ limiter = Limiter(key_func=get_remote_address)
 # sendo feito só no entrypoint real do servidor (run.py), nunca aqui.
 _ASYNC_MODE = "eventlet" if sys.platform != "win32" else "threading"
 socketio = SocketIO(async_mode=_ASYNC_MODE)
+
+# Adendo 10.89: limite de pacotes por POST do long-polling. O python-engineio
+# (4.13.x) recusa um POST com mais de 16 pacotes ("Too many packets in
+# payload"), engole o erro e responde 200 - os pacotes somem em silêncio. Não é
+# parâmetro do SocketIO/engineio.Server: é atributo de classe de `Payload`, por
+# isso é ajustado aqui, junto da criação do SocketIO. 64 cobre com folga a tela
+# por Local com o código antigo (1 + N-1 entrar_fila; até 22 filas em produção)
+# enquanto abas abertas antes do deploy não recarregam; o tamanho do POST
+# continua limitado por max_http_buffer_size (1 MB).
+from engineio.payload import Payload  # noqa: E402
+
+MAX_PACOTES_POR_POST = 64
+Payload.max_decode_packets = MAX_PACOTES_POR_POST

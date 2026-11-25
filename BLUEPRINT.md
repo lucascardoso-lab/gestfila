@@ -434,6 +434,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.86 | Dashboard por senha: filtro De/Até (até 31 dias) e Área, tempos do Tempos por senha, Prioritários x Normal, acima do tempo máximo |
 | 10.87 | Tempos por senha: etapa não ocorrida em senha concluída = 00:00:00 (Atendente/Executor/Outros), só na apresentação |
 | 10.88 | Tempo de espera no rodapé do painel de TV: mediana da Espera inicial da última hora, opção por TV (desligada por padrão) |
+| 10.89 | "Too many packets in payload": tela por Local com 18+ filas perdia as salas - entrar_filas (1 pacote), limite de 64 pacotes por POST e middleware de diagnóstico |
 
 ---
 
@@ -9256,6 +9257,173 @@ null do contador e fetch) e
 `tests/test_regressao_tempo_espera_tv.py`;
 `tests/test_regressao_hidden_display_sweep.py`; `BLUEPRINT.md` (este adendo,
 índice e seção 11).
+
+---
+
+## 10.89. ADENDO — "Too many packets in payload": tela por Local com muitas filas perdia as salas (entrar_filas, limite de pacotes e diagnóstico)
+
+> Problema em produção (python-engineio 4.13.5, Gunicorn + eventlet, 1
+> worker, atrás do Apache): o journal mostrava "ValueError: Too many packets
+> in payload" de 100 a 180 vezes por hora durante todo o expediente - 472 só
+> em 25/11/2026 até 9h50. O engineio trata o erro no `except` genérico ("post
+> request handler error") e responde 200: os pacotes daquele POST são
+> DESCARTADOS em silêncio e o navegador acha que deu certo. Investigação
+> (FASE 1) relatada e correção aprovada antes de implementar.
+
+**Dados de produção:**
+
+- Cruzando, por segundo, o horário de cada erro com o access log do Apache,
+  todos os `POST /socket.io/` envolvidos vinham da tela por Local (Referer
+  `/atendimento/recepcao/local/<id>`), de dezenas de IPs; nenhum de TV.
+- `local_rodizio_filas` vazia: toda tela por Local usa o `filas_config` do
+  `TurnoAtivo` (10.19). Turnos de 25/11: 9 operadores com 16 a 22 filas
+  (Locais 66, 70 e 71 = 22; 63 = 21; 60, 2 e 62 = 17; 64 e 57 = 16), 1 com 14
+  (Local 55) e o resto com 8 ou menos.
+- Locais com mais erros no cruzamento (24/11) x filas no turno (25/11): 66 =
+  22 filas (12 erros), 71 = 22 (8), 62 = 17 (9), 55 = 14 (9); também 24 = 3
+  filas (9), 93 e 94 (Coleta) = 1 fila (8 e 6). Ressalvas: erros de um dia e
+  turnos do outro, e o cruzamento por segundo gera falsos positivos (telas
+  com muitos POSTs, como as da Coleta).
+- O upgrade para WebSocket funciona em produção (1.980 respostas 101 em
+  `transport=websocket` em 25/11).
+
+**Causa (reproduzida):** a tela por Local emitia um `entrar_fila` por fila a
+cada `connect` (`painel_local.html`). Os emits do `connect` saem pelo
+long-polling, porque o upgrade para WebSocket ainda não terminou. O 1º sai
+sozinho num POST; os outros N-1 se acumulam enquanto ele está em andamento e
+vão juntos no POST seguinte. O python-engineio recusa POST com mais de 16
+pacotes. Com 18 filas ou mais, os N-1 são descartados: a tela fica só na sala
+da 1ª fila e a "Senhas em espera" das outras não atualiza sozinha (só no
+próximo recarregamento). Como Chamar/Finalizar/etc. são formulários com
+redirect, cada ação recarrega a página e repete os N emits - por isso o erro
+aparece o dia inteiro, não só no restart.
+
+**Reprodução (FASE 1):** app real em eventlet + Chromium (Playwright) +
+cliente Socket.IO 4.7.5, contando os pacotes de cada POST no servidor:
+
+| Condição | Como saem os N emits | Limite |
+|---|---|---|
+| Normal, upgrade lento (1,5 s) ou só long-polling | 1º sozinho, N-1 no POST seguinte | 17 filas passa, **18 quebra** (1 de N salas) |
+| Resposta do POST atrasada (300 ms) + upgrade lento | os N num POST só | 16 passa, **17 quebra** (0 de N salas) |
+
+Com o upgrade funcionando em produção, vale o 1º padrão: 17 filas passa, 18
+quebra - explica os Locais de 21 e 22 filas. **H2 (acúmulo na reconexão) não
+se confirmou:** telas com 1, 3 e 14 filas, quedas de rede de 5 s e 60 s (além
+do ping timeout), restart do servidor e aba em segundo plano 70 s, com
+chamadas acontecendo - cada reconexão reemite exatamente N, sem acúmulo
+(maior POST: 13 pacotes com 14 filas). Nenhum padrão reproduzido explica os
+Locais de 16 filas ou menos; o diagnóstico abaixo vai dizer de onde vêm.
+
+**Por que `max_decode_packets` não é parâmetro do SocketIO:** no
+python-engineio 4.13.x (conferido na 4.13.3 local e no pacote da 4.13.5 de
+produção) o limite é o atributo de classe `engineio.payload.Payload.
+max_decode_packets = 16`; nem `engineio.Server` nem o Flask-SocketIO o
+recebem. Só se ajusta atribuindo o atributo na inicialização.
+
+**Correção (as três juntas):**
+
+1. **Limite 64** (`app/extensions.py`, junto da criação do SocketIO:
+   `Payload.max_decode_packets = MAX_PACOTES_POR_POST`): cobre as abas abertas
+   antes do deploy com o JS antigo (1 + N-1 `entrar_fila`, até 64 filas) e
+   qualquer outro acúmulo pequeno. O tamanho do POST continua limitado por
+   `max_http_buffer_size` (1 MB); com eventlet, os N handlers de um POST
+   rodam como já rodavam pelo WebSocket.
+2. **`entrar_filas`** (`app/sockets/painel.py`): a tela por Local emite UM
+   pacote com a lista (`{fila_ids: [...]}`) a cada `connect`, inclusive na
+   reconexão (o servidor esquece as salas de uma conexão encerrada).
+   - Mesmas checagens do `entrar_fila`, fila a fila, pela mesma função
+     (`_fila_permitida`, extraída do `entrar_fila` sem mudar as respostas
+     dele): autenticado, fila existe, mesma empresa, unidade permitida (super
+     admin passa). A que não passa fica de fora sem derrubar as outras.
+   - Repetidos e valores não inteiros descartados; teto de 100
+     (`MAX_FILAS_POR_ENTRADA`) - o excesso é ignorado com WARNING. Anônimo
+     recebe "Não autenticado."; lista inválida, "Lista de filas inválida.".
+   - Responde `entrou` com `{fila_ids, salas}` (a tela não usa a resposta).
+   - `entrar_fila` continua existindo, com as mesmas respostas (tela por
+     fila e abas antigas). TV sem mudança (`entrar_tv`, 1 pacote).
+3. **Middleware de diagnóstico, permanente**
+   (`app/middleware/diagnostico_socketio.py`, instalado em `create_app` por
+   fora do middleware do Flask-SocketIO): só em `POST /socket.io/`, lê o corpo
+   uma vez (exatamente `CONTENT_LENGTH` bytes, como o engineio já faz),
+   devolve-o intacto em `wsgi.input` e conta os pacotes (separador `\x1e`).
+   Acima de 16, WARNING com o sid, o caminho do Referer (a tela), o número de
+   pacotes e os nomes dos eventos com contagem - nunca os argumentos (nenhum
+   dado de paciente; nome de evento fora de `[A-Za-z0-9_]` vira um rótulo
+   fixo). Sem `CONTENT_LENGTH` válido, corpo vazio ou acima de `max_bytes`,
+   segue sem ler nem logar. **`max_bytes` = `max_http_buffer_size` do
+   servidor (1.000.000 bytes)**, passado por `create_app`; o padrão da classe
+   é o mesmo valor (`MAX_BYTES_PADRAO`). Assim o middleware lê qualquer POST
+   que o engineio aceita (64 `entrar_fila` = poucos KB) e nunca mais do que o
+   próprio engineio leria - um teto menor deixaria POSTs aceitos sem
+   inspeção. Exemplo:
+   `Socket.IO: POST com 21 pacotes (acima de 16) sid=... tela=/atendimento/recepcao/local/66 eventos=entrar_fila: 21`.
+   Depois do deploy, um WARNING desses com `entrar_fila` aponta uma aba
+   aberta antes do deploy; com outra coisa, uma fonte nova a investigar (os
+   Locais de 16 filas ou menos).
+
+**Descartado:** emitir só depois do upgrade ou forçar `transports:
+["websocket"]` - elimina o fallback de long-polling, justo o caminho frágil
+atrás do proxy (10.61), e esperar o upgrade acrescenta estado sem resolver o
+caso em que o WebSocket não sobe.
+
+**Testes:** novo `tests/test_regressao_socketio_muitas_filas.py` (15
+verificações), com o helper `tests/_servidor_socketio.py` (servidor REAL em
+eventlet, SQLite próprio, upgrade do WebSocket atrasado 1,5 s para os emits
+saírem pelo long-polling de forma determinística; no Windows o helper faz o
+`app/extensions.py` escolher eventlet só no import):
+
+- limite efetivo 64 (64 pacotes aceitos, 65 recusados);
+- `entrar_filas`: outra empresa, unidade não permitida, inexistente,
+  repetida e não inteira ficam de fora sem derrubar as outras; anônimo e
+  lista inválida recebem erro; 110 filas distintas -> entra nas 100 primeiras
+  e loga WARNING;
+- `entrar_fila` com as mesmas respostas de antes; TV com o `entrou` de 4
+  chaves e as 22 salas;
+- middleware: o teste usa a PRÓPRIA instância instalada por `create_app`
+  (`max_bytes` = `max_http_buffer_size` = 1.000.000, limite 16, caminho
+  `/socket.io/`), trocando só o app de baixo e o logger - prova a
+  configuração que roda no servidor. 17 pacotes -> WARNING com sid, tela e
+  eventos, sem argumentos nem nome de paciente, corpo intacto; 16 não loga;
+  64 `entrar_fila` (alguns KB) lidos e registrados; GET, outra rota e
+  `CONTENT_LENGTH` ausente/inválido/zero/acima de `max_bytes` seguem sem ler.
+  (Na primeira versão do teste, um `max_bytes=1000` próprio do teste fazia os
+  17 pacotes passarem sem leitura - corrigido para usar o valor de produção.);
+- Chromium + eventlet: **antes** (limite 16 + JS antigo), 22 filas = 1 de 22
+  salas, "Too many packets in payload", sem `fila_atualizada` da última fila,
+  e o middleware registrou o POST de 21 pacotes com a tela; **depois**, 22,
+  17, 18 e 64 filas entram em todas as salas com 1 pacote `entrar_filas`,
+  sem erro nem WARNING, e 22 filas recebe `fila_atualizada` da última e da
+  1ª fila sem F5; JS antigo com o limite 64: 18, 22 e 64 filas em todas as
+  salas (o middleware registra os 3 POSTs grandes); 2 quedas da conexão = 1
+  `entrar_filas` por connect, 22 salas de novo; TV com 1 `entrar_tv`.
+- **"Invalid session" no log do servidor de teste é esperado:** as quedas de
+  conexão simuladas (`engine.close()` no navegador) deixam um long-poll com o
+  sid antigo, que o engineio registra como "Invalid session ... (further
+  occurrences of this error will be logged with level INFO)". Não é erro do
+  10.89 nem de produção; o teste não o considera falha.
+
+Os testes de socket e do painel existentes passaram sem ajuste
+(`test_regressao_fase10_2`, `test_regressao_local_rodizio_acoes`,
+`test_regressao_tv_historico`, `test_regressao_bloqueio_chamada_recuperacao_estado`,
+`test_regressao_painel_tv_redesign`).
+
+Suíte completa local (Windows): 88 arquivos, 0 falhas, nenhuma falha de PDF -
+rodada antes e de novo depois de o teste do middleware passar a usar a
+instância de produção. O teste novo leva ~30 s (sobe 2 servidores eventlet).
+A Action (Linux) é conferida depois do push.
+
+**Nota de deploy:** `git pull` + restart do `gestfila` (sem migration, sem
+mudança em `requirements.txt`). Abas abertas antes do deploy continuam com o
+JS antigo até recarregar (cada ação recarrega) e passam a funcionar já pelo
+limite 64. Acompanhar no journal: "Too many packets" deve sumir, e os WARNING
+"Socket.IO: POST com" mostram qualquer tela que ainda mande pacotes demais.
+
+**Arquivos alterados:** `app/extensions.py` (limite);
+`app/sockets/painel.py` (`entrar_filas`, `_fila_permitida`);
+`app/templates/atendimento/painel_local.html` (1 emit); novo
+`app/middleware/diagnostico_socketio.py` e `app/__init__.py` (instalação);
+novos `tests/test_regressao_socketio_muitas_filas.py` e
+`tests/_servidor_socketio.py`; `BLUEPRINT.md` (este adendo e índice).
 
 ---
 
