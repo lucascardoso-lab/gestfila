@@ -63,6 +63,13 @@
     .kpi-numero.alerta { color: var(--gf-alerta); }
     .kpi-label { font-size: .85rem; color: var(--gf-texto-secundario); margin-top: .3rem; }
     .kpi-detalhe { font-size: .82rem; color: var(--gf-texto-secundario); margin-top: .15rem; }
+    /* Adendo 10.90: 5 cartões de tempo em 3+2 (esperas e permanência; depois os
+       atendimentos). minmax(0, 1fr) mantém as colunas iguais mesmo com média de
+       10 h ou mais; em tela estreita volta ao auto-fit da .grade-kpis. */
+    #kpis-tempos { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    @media (max-width: 720px) {
+      #kpis-tempos { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+    }
 
     .cabecalho-secao { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin: 0 0 .6rem; }
     .cabecalho-secao h2 { font-size: 1.05rem; margin: 0; }
@@ -208,9 +215,9 @@
       </span>
     </div>
     <div class="grade-kpis" id="kpis-tempos">
-      {% for chave, rotulo in tempos_dashboard %}
+      {% for chave, rotulo, dica in tempos_dashboard %}
         {% set t = kpis.tempos[chave] %}
-        <div class="kpi">
+        <div class="kpi" title="{{ dica }}">
           <div class="kpi-numero" id="kpi-tempo-{{ chave }}">{{ t.media_texto or '—' }}</div>
           <div class="kpi-detalhe">mediana <span id="kpi-tempo-{{ chave }}-mediana">{{ t.mediana_texto or '—' }}</span></div>
           <div class="kpi-label">{{ rotulo }}</div>

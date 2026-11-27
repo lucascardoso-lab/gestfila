@@ -435,6 +435,7 @@ continua sendo o marcador de auditoria do hand-off em si.
 | 10.87 | Tempos por senha: etapa não ocorrida em senha concluída = 00:00:00 (Atendente/Executor/Outros), só na apresentação |
 | 10.88 | Tempo de espera no rodapé do painel de TV: mediana da Espera inicial da última hora, opção por TV (desligada por padrão) |
 | 10.89 | "Too many packets in payload": tela por Local com 18+ filas perdia as salas - entrar_filas (1 pacote), limite de 64 pacotes por POST e middleware de diagnóstico |
+| 10.90 | Dashboard: cartões "Espera total (todas as etapas)" e "Atendimento atendente" (por senha, do Tempos por senha), tempos em 3+2 com dicas |
 
 ---
 
@@ -8774,6 +8775,13 @@ rota `salvar_observacoes` removida; `senha_acessivel_ou_404` mantida em
 | 1 | Aguardando acima do tempo máximo | só quando o período inclui hoje; regra do 10.52 (nível "estourado"): espera desde a emissão >= `tempo_espera_maximo_min` da fila; fila sem limite (ou <= 0) nunca entra; cor de alerta quando > 0 |
 | 2 | Espera inicial · Atendimento executor · Permanência total | média (destaque) e mediana POR SENHA: `tempos_por_senha(filtros)` + `_resumo_tempos`, sobre os segundos exatos (10.75) - nenhum cálculo novo |
 
+> **Revisto pelo 10.90:** a linha 2 passou a ter 5 cartões, em 3+2 agrupados
+> por tipo de tempo - Espera inicial · Espera total (todas as etapas) ·
+> Permanência total / Atendimento atendente · Atendimento executor -, cada um
+> com dica (`title`). Mesmo cálculo, mesmo polling (só com período = hoje).
+> O layout medido abaixo ("cada linha de cartões numa linha só") vale para a
+> linha de volume; a de tempos é a do 10.90.
+
 - **Saíram:** "Chamadas hoje" (contava chamadas, não senhas), "Tempo médio de
   espera hoje" (média por SEGMENTO, 10.66 - não pode haver dois números de
   espera diferentes na mesma tela; numa senha realocada, o antigo dava 50 s
@@ -9427,6 +9435,173 @@ novos `tests/test_regressao_socketio_muitas_filas.py` e
 
 ---
 
+## 10.90. ADENDO — Dashboard: cartões "Espera total (todas as etapas)" e "Atendimento atendente"
+
+> Pedido (chamado da gestão): incluir no Dashboard (`/dashboard`, 10.86) os
+> indicadores "Tempo de Espera Total" e "Tempo de Atendimento por Atendente",
+> junto dos cartões de tempo que já existem. Investigação (FASE 1) relatada e
+> desenho aprovado antes de implementar. `/relatorios/dashboard` fica fora do
+> escopo, sem mudança.
+
+**Escopo (interpretação aprovada):**
+
+- "Espera total" = a MESMA coluna "Espera total" do Tempos por senha (soma de
+  todas as esperas da senha: inicial + intermediárias), por SENHA.
+- "Atendimento atendente" = a MESMA coluna "Atendimento atendente" do Tempos
+  por senha (10.83: segmentos em Local do tipo Atendente, `recepcao` no
+  banco), por SENHA - o par do cartão "Atendimento executor".
+- **Fora:** tempo por PESSOA/operador (é o Ranking de operadores; o
+  `/dashboard` é visível a atendente/executor e não expõe desempenho
+  individual de colegas) e cartão de "Outros atendimentos".
+
+**Nenhum cálculo novo:** `_resumo_tempos` já devolvia `espera_total` e
+`atendimento_atendente` (conferido na FASE 1); o Dashboard só filtrava as 3
+chaves em `TEMPOS_DASHBOARD`. A mudança é incluir as 2 chaves nessa tupla
+(`app/core/dashboard_queries.py`), que alimenta o render inicial, o JSON do
+`/api/dashboard/kpis` e o JS do polling (que percorre a mesma lista). Média
+em destaque e mediana sobre os segundos exatos (10.75), como os outros
+cartões. **Semântica do 10.87 mantida:** os cartões calculam sobre as linhas
+CRUAS de `tempos_por_senha` (`None` fora - só as senhas que passaram pela
+etapa); o zero de apresentação do Tempos por senha NÃO entra no Dashboard.
+
+**Cartões e dicas (`title` no cartão inteiro - o tooltip aparece sobre o
+número, a mediana e o rótulo), em 3+2 agrupados por tipo de tempo:**
+
+| Linha | Cartão | Dica |
+|---|---|---|
+| 1 | Espera inicial | Da emissão da senha até a 1ª chamada. |
+| 1 | Espera total (todas as etapas) | Soma de todas as esperas da senha: a inicial e as intermediárias (depois de realocação ou de "Aguardar"). |
+| 1 | Permanência total | Tempo real na clínica, da emissão da senha à finalização. |
+| 2 | Atendimento atendente | Tempo com o atendente (locais do tipo Atendente). Só entram as senhas que passaram por essa etapa. |
+| 2 | Atendimento executor | Tempo na coleta/execução (locais do tipo Executor). Só entram as senhas que passaram por essa etapa. |
+
+- O rótulo "Espera total (todas as etapas)" evita a leitura como a Espera
+  inicial ao lado - o mesmo motivo de o 10.86 ter tirado o "Tempo médio de
+  espera" (dois números de espera diferentes na mesma tela).
+- As dicas usam os nomes de tipo de Local da interface (10.31:
+  "Atendente"/"Executor"), não os do banco (`recepcao`/`coleta`).
+- Filtros, RBAC por perfil, Área, polling (tempos só com período =
+  exatamente hoje; senão "calculado às HH:MM") e o link "ver detalhes": sem
+  mudança. LGPD: nada de paciente. Cores só pelos tokens do tema.
+
+**N diferente entre Espera inicial e Espera total (registrado, sem mudança
+na tela):** as duas não contam sempre as mesmas senhas. Em "Histórico
+parcial" (log anterior ao 10.62 com realocação/volta a aguardar) a Espera
+total fica vazia e a Espera inicial não - no banco local, 13/08/2026: 67 de
+67 x 60 de 67. Como o Dashboard não mostra o "N de M", num período com muitas
+senhas assim a Espera total poderia sair MENOR que a Espera inicial. Decisão:
+não mostrar "N de M" nos cartões. **Em produção o efeito é praticamente
+nulo:** o Dashboard é limitado a 31 dias e o dado de produção é posterior ao
+10.62 (snapshot de fila no log), então não há Histórico parcial nesse
+intervalo.
+
+**Medições (FASE 1, Chromium, banco local real 10 a 14/08/2026; container do
+Dashboard com `max-width: 1100px`, por isso 1366x768 e 1920x1080 dão as mesmas
+medidas):**
+
+| Opção | Cartão | Rótulo quebra? | Fim da linha de tempos (padrão / larga) |
+|---|---|---|---|
+| Grade atual sem mexer (`auto-fit`) | 251 px, **4+1** | larga: "Espera total" | 661 / 705 px |
+| 5 numa linha | 198 px | padrão 1, larga 3 rótulos | 541 / 570 px |
+| **3+2 (adotada)** | 340 px | nenhum | 661 / 688 px |
+
+Na opção "5 numa linha", o pior caso (média "10:12:25", fonte larga) precisa
+de 170 px numa área útil de 151 px: a grade passava da borda do conteúdo e as
+colunas ficavam desiguais. Médias de 5 h já aparecem em períodos reais de
+vários dias. Implementado: `#kpis-tempos { grid-template-columns: repeat(3,
+minmax(0, 1fr)) }` (colunas iguais mesmo com 10 h ou mais) e, até 720 px de
+largura, volta ao `auto-fit` da `.grade-kpis`. No cenário do teste (período
+hoje, 4 cartões de volume), a linha de tempos termina em 679 px (padrão) /
+667 px (larga) em 1366x768 - cabe na primeira tela; sem rolagem horizontal.
+
+As duas medições estão certas; a larga terminar ANTES no teste e DEPOIS na
+FASE 1 vem do cenário, não de ordem trocada:
+
+- **FASE 1** (superadmin, com o seletor "Empresa" na barra de filtros): com a
+  Verdana, a barra de filtros quebra em 2 linhas ("Aplicar" desce) e empurra
+  tudo ~32 px - a linha de volume termina em 347 px (padrão) x 379 px
+  (larga), e a de tempos em 661 x 688 px.
+- **Teste da FASE 2** (admin, sem o seletor "Empresa"): a barra não quebra; a
+  Verdana, com `line-height: normal`, deixa os rótulos um pouco mais baixos -
+  cartão de tempo 121 x 119 px, de volume 120 x 118 px -, e a linha de tempos
+  termina em 679 x 667 px.
+
+**Conferência com dados reais (FASE 1, banco local, pelo "ver detalhes"):**
+10 a 14/08 (237 senhas), 13/08 (67), 10 a 14/08 só Matriz (4) e 05/11 (2): média
+e mediana dos 5 cartões IGUAIS ao resumo do Tempos por senha. Ex.: 10 a 14/08
+- Espera inicial 5:12:25 / 24:05 (234 de 237), Espera total 5:30:05 / 25:26
+(215 de 237), Atendimento atendente 05:24 / 00:08 (213 de 237). Atendimento
+executor "—" em todos: as senhas locais não passaram por local de coleta (é
+o dado, não erro).
+
+**Gravação no banco durante a FASE 1 (esperado, só registro):** a FASE 1 rodou
+com o `commit` bloqueado; houve 1 tentativa, de
+`encerrar_pendencias_de_dias_anteriores()` (`app/middleware/encerramento.py`,
+varredura dos 10.77/10.79), disparada pelo `before_request` no 1º request do
+dia com o relógio real contra o banco local antigo. Nada no GET do
+`/dashboard` nem no `/api/dashboard/kpis` grava.
+
+**Achado fora do escopo (anterior, não corrigido):** em telas estreitas
+(conferido em 600 px) a página do Dashboard rola ~29 px na horizontal por
+causa do link "Sair (...)" da barra de navegação do topo
+(`app/templates/_nav_principal.html`), que passa
+da largura da tela. Não vem do Dashboard nem desta mudança (igual com o CSS
+do 10.90 desligado); de 768 px para cima não há rolagem. Fica para um ajuste
+da barra do topo, se o cliente quiser uso em celular - registrado também na
+seção 11.
+
+**Testes:** novo `tests/test_regressao_dashboard_10_90.py` (relógio fixo em
+08/10/2026 12:00 de Brasília, 10 verificações):
+
+- os 5 cartões na ordem 3+2, rótulos e dicas aprovados (sem
+  "Recepção"/"Coleta" nas dicas), a dica no `<div class="kpi">` do cartão
+  (no Chromium, o `title` que vale sobre o número é a dica do cartão);
+- coerência pelo próprio "ver detalhes": média e mediana dos 5 cartões =
+  resumo do Tempos por senha e, no polling, quantidade = o N do "N de M" -
+  hoje, com área, com unidade estreitada e em 07 a 08/10;
+- realocada atendente -> executor (dia só com ela): Espera total 20:00 >
+  Espera inicial 10:00; atendente 05:00, executor 10:00, permanência 35:00;
+- "N de M": senha só no executor fora do Atendimento atendente (1 de 2, média
+  06:00 - com o zero do 10.87 seria 03:00), e a só no atendente fora do
+  executor;
+- polling: os 5 cartões no JSON só com período = hoje; 07 a 08/10 e só 07/10
+  sem tempos no JSON;
+- RBAC: atendente vê os cartões só da Matriz (= admin estreitado na Matriz,
+  diferente de todas as unidades - o Anexo tem valores grandes de propósito),
+  sem "ver detalhes"; unidade/área do Anexo na URL e no polling ignoradas;
+- prova por mutação: cartão Espera total com a chave da Espera inicial,
+  Atendimento atendente com o valor do executor e o zero de apresentação do
+  10.87 no cálculo - cada uma derruba a verificação correspondente; sem
+  mutação, volta a passar. Além disso, conferido à mão: sem a regra do 3+2
+  no template, o teste de layout falha (4+1);
+- Chromium com o JS real: um ciclo de polling atualiza Espera total e
+  Atendimento atendente (= recarregar a página) com período = hoje; em 07 a
+  08/10 a contagem atualiza e os tempos ficam; layout 3+2 em 1366x768 e
+  1920x1080, claro e escuro, fonte padrão e larga, com e sem o pior caso
+  "10:12:25" (colunas iguais, número numa linha, nada passa da borda, sem
+  rolagem horizontal, cabe na primeira tela em 1366x768); número, rótulo e
+  fundo pelos tokens do tema (fundo diferente entre os temas); 600 px volta
+  ao auto-fit (2 colunas) sem estouro.
+
+Ajustado: `test_regressao_dashboard_10_86.py` (o layout esperava os tempos
+numa linha só; agora 3+2). Os testes do 10.87 (`test_regressao_tempos_zero_nao_se_aplica`,
+que percorre todas as chaves do JSON) e os demais do Dashboard passaram sem
+ajuste.
+
+Suíte completa (89 arquivos) sem falhas.
+
+**Nota de deploy:** `git pull` + restart do `gestfila` (sem migration, sem
+mudança em `requirements.txt`). O custo do carregamento não muda (mesma
+chamada de `tempos_por_senha`, só 2 chaves a mais do mesmo resumo).
+
+**Arquivos alterados:** `app/core/dashboard_queries.py` (`TEMPOS_DASHBOARD`
+com 5 cartões e dicas); `app/templates/core/dashboard.html` (dica no cartão,
+grade 3+2); novo `tests/test_regressao_dashboard_10_90.py`;
+`tests/test_regressao_dashboard_10_86.py` (layout); `BLUEPRINT.md` (este
+adendo, índice, nota no 10.86 e item na seção 11).
+
+---
+
 ## 11. Pontos abertos para confirmar com o cliente/clínica antes da Fase 4+
 
 - **Trecho entre a chamada e o "Aguardar" não é medido** (registrado no
@@ -9615,3 +9790,10 @@ novos `tests/test_regressao_socketio_muitas_filas.py` e
   sincronizar `tv_filas` em algum caminho (ex.: a edição da TV pelo
   formulário de TV regrava `tv.filas` sem olhar `Fila.tv_id`) e rodar a Q1c
   em produção.
+- **Link "Sair (...)" causa rolagem horizontal em tela estreita** (registrado
+  no 10.90, sem correção): em 600 px de largura, o link "Sair (...)" da barra
+  de navegação do topo (`app/templates/_nav_principal.html:27`) passa da
+  largura da tela e a página rola ~29 px na horizontal (medido no Dashboard).
+  Anterior ao 10.90 (igual com o CSS dele desligado); de 768 px para cima
+  não há rolagem. Ajustar a barra do topo se o cliente quiser uso em
+  celular.

@@ -38,12 +38,22 @@ from app.utils.tempo import (
 # reduzir este limite.
 LIMITE_DIAS_DASHBOARD = 31
 
-# Cartões de tempo (chave do Tempos por senha, rótulo) - mesma chave de
+# Cartões de tempo (chave do Tempos por senha, rótulo, dica) - mesma chave de
 # TEMPOS_POR_SENHA/_resumo_tempos, então o número é o mesmo do relatório.
+# Adendo 10.90: 5 cartões em 3+2, agrupados por tipo de tempo - linha 1 as
+# esperas e a permanência, linha 2 os atendimentos. O rótulo da Espera total
+# diz "todas as etapas" para não ser lido como a Espera inicial ao lado (o
+# motivo de o 10.86 ter tirado o "Tempo médio de espera").
 TEMPOS_DASHBOARD = (
-    ("espera_inicial", "Espera inicial"),
-    ("atendimento_executor", "Atendimento executor"),
-    ("permanencia_total", "Permanência total"),
+    ("espera_inicial", "Espera inicial", "Da emissão da senha até a 1ª chamada."),
+    ("espera_total", "Espera total (todas as etapas)",
+     "Soma de todas as esperas da senha: a inicial e as intermediárias "
+     "(depois de realocação ou de \"Aguardar\")."),
+    ("permanencia_total", "Permanência total", "Tempo real na clínica, da emissão da senha à finalização."),
+    ("atendimento_atendente", "Atendimento atendente",
+     "Tempo com o atendente (locais do tipo Atendente). Só entram as senhas que passaram por essa etapa."),
+    ("atendimento_executor", "Atendimento executor",
+     "Tempo na coleta/execução (locais do tipo Executor). Só entram as senhas que passaram por essa etapa."),
 )
 
 
@@ -233,7 +243,7 @@ def calcular_tempos(filtros):
         do_grupo = [l for l in linhas if bool(prioridade.get(l["senha_id"])) is valor]
         grupos[grupo] = {"geradas": len(do_grupo), **_formatar_resumo(_resumo_tempos(do_grupo)["espera_inicial"])}
     return {
-        "tempos": {chave: _formatar_resumo(resumo[chave]) for chave, _rotulo in TEMPOS_DASHBOARD},
+        "tempos": {chave: _formatar_resumo(resumo[chave]) for chave, *_ in TEMPOS_DASHBOARD},
         "prioritarios": grupos,
         "calculado_em": formatar_hora_clinica(agora_utc_naive()),
     }

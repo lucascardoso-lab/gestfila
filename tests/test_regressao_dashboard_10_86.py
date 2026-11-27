@@ -440,15 +440,16 @@ with sync_playwright() as pw:
             }""")
             contexto = (tema, bool(fonte), med)
             assert med["tema"] == tema and med["pagina"] <= 1366, contexto
-            assert med["n_volume"] == 4 and med["volume"] == 1 and med["tempos"] == 1, contexto  # cada linha numa linha só
+            # volume numa linha só; tempos em 3+2 desde o 10.90 (layout detalhado em test_regressao_dashboard_10_90)
+            assert med["n_volume"] == 4 and med["volume"] == 1 and med["tempos"] == 2, contexto
             assert med["tabela"] and med["prio"], contexto
             assert med["cor"] == med["token"] and med["cor"], contexto
             if not fonte:
                 print(f"   medida 1366x768 tema {tema}: página {med['altura']}px de altura; "
                       f"cartões de volume e tempos terminam em {med['fim_tempos']}px")
             pg.close()
-    ok("1366x768, temas claro e escuro, fonte padrão e larga: sem rolagem horizontal, 4 cartões de volume e 3 de "
-       "tempo cada um numa linha, tabelas cabendo; cor do gráfico = --gf-primaria do tema")
+    ok("1366x768, temas claro e escuro, fonte padrão e larga: sem rolagem horizontal, 4 cartões de volume numa "
+       "linha e os de tempo em 3+2 (10.90), tabelas cabendo; cor do gráfico = --gf-primaria do tema")
     navegador.close()
 
 RELOGIO.stop()
